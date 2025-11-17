@@ -13,3 +13,8 @@ def test_exports() -> None:
     """Test that main classes are exported."""
     assert hasattr(sophia, "KnowledgeGraph")
     assert hasattr(sophia, "Database")
+    assert hasattr(sophia, "Orchestrator")
+    assert hasattr(sophia, "ContinuousWorkingMemoryAssociative")
+    assert hasattr(sophia, "ContinuousWorkingMemoryGenerative")
+    assert hasattr(sophia, "Planner")
+    assert hasattr(sophia, "Executor")
