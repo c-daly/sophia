@@ -1,6 +1,5 @@
 """Tests for Database class."""
 
-
 from sophia.storage.database import Database
 
 
