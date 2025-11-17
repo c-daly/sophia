@@ -26,6 +26,10 @@ venv/
 env/
 ENV/
 .venv
+.venv/
+
+# Poetry
+poetry.toml
 
 # IDE
 .vscode/

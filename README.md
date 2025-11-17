@@ -14,12 +14,39 @@ Sophia is a foundational infrastructure for building knowledge graphs and managi
 
 ## Installation
 
-```bash
-# Install the package
-pip install -e .
+### Prerequisites
 
-# Install with development dependencies
-pip install -e ".[dev]"
+- Python >=3.11
+- Poetry (for dependency management)
+
+### Install Poetry
+
+If you don't have Poetry installed, install it using:
+
+```bash
+curl -sSL https://install.python-poetry.org | python3 -
+# or
+pip install poetry
+```
+
+### Install Sophia
+
+```bash
+# Clone the repository
+git clone https://github.com/c-daly/sophia.git
+cd sophia
+
+# Install dependencies (includes both runtime and development dependencies)
+poetry install
+
+# Activate the virtual environment
+poetry shell
+```
+
+Alternatively, run commands without activating the shell:
+
+```bash
+poetry run python your_script.py
 ```
 
 ## Quick Start
@@ -60,20 +87,33 @@ db.store_edge(relation.id, relation.source, relation.target,
 ### Running Tests
 
 ```bash
-pytest
+poetry run pytest
 ```
 
 ### Code Quality
 
 ```bash
 # Format code
-black src tests
+poetry run black src tests
 
 # Lint code
-ruff check src tests
+poetry run ruff check src tests
 
 # Type checking
-mypy src
+poetry run mypy src
+```
+
+### Adding Dependencies
+
+```bash
+# Add a runtime dependency
+poetry add package-name
+
+# Add a development dependency
+poetry add --group dev package-name
+
+# Update dependencies
+poetry update
 ```
 
 ## Project Structure
