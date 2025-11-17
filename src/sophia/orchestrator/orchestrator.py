@@ -1,7 +1,6 @@
 """Main orchestrator for coordinating Sophia's cognitive processes."""
 
 
-
 class Orchestrator:
     """Orchestrator coordinates all cognitive processes in Sophia.
 
