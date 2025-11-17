@@ -10,14 +10,21 @@ Thank you for your interest in contributing to Sophia! This document provides gu
    cd sophia
    ```
 
-2. Install dependencies:
+2. Install Poetry (if not already installed):
    ```bash
-   pip install -e ".[dev]"
+   curl -sSL https://install.python-poetry.org | python3 -
+   # or
+   pip install poetry
    ```
 
-3. Run tests to verify your setup:
+3. Install dependencies:
    ```bash
-   pytest
+   poetry install
+   ```
+
+4. Run tests to verify your setup:
+   ```bash
+   poetry run pytest
    ```
 
 ## Development Workflow
@@ -33,13 +40,13 @@ Thank you for your interest in contributing to Sophia! This document provides gu
 
 4. Run the test suite:
    ```bash
-   pytest
+   poetry run pytest
    ```
 
 5. Format and lint your code:
    ```bash
-   black src tests
-   ruff check src tests
+   poetry run black src tests
+   poetry run ruff check src tests
    ```
 
 6. Commit your changes with a clear commit message:
@@ -64,6 +71,14 @@ Thank you for your interest in contributing to Sophia! This document provides gu
 - Aim for high test coverage (>90%)
 - Use pytest for all tests
 - Place tests in the `tests/` directory mirroring the source structure
+- Run tests with: `poetry run pytest`
+
+## Managing Dependencies
+
+- Add runtime dependencies: `poetry add package-name`
+- Add development dependencies: `poetry add --group dev package-name`
+- Update dependencies: `poetry update`
+- Check for outdated dependencies: `poetry show --outdated`
 
 ## Documentation
 
