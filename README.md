@@ -90,6 +90,21 @@ db.store_edge(relation.id, relation.source, relation.target,
 poetry run pytest
 ```
 
+#### Functional Tests
+
+Sophia includes functional tests for the plan API with a pick-and-place scenario:
+
+```bash
+# Run functional tests
+poetry run pytest tests/test_plan_api_pick_and_place.py -v
+```
+
+These tests validate:
+- Plan generation for goal-directed tasks
+- MOVE→GRASP→MOVE→RELEASE action sequences
+- State management and updates
+- Validation of state changes
+
 ### Code Quality
 
 ```bash
