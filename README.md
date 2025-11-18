@@ -123,7 +123,10 @@ sophia/
 ├── src/sophia/           # Main package
 │   ├── knowledge_graph/  # Knowledge graph implementation
 │   ├── storage/          # Database abstraction
+│   ├── planner/          # Planning and goal decomposition
 │   └── config/           # Configuration management
+├── docs/                 # Documentation and research
+│   └── research/         # Research surveys and design documents
 ├── tests/                # Test suite
 └── pyproject.toml        # Project configuration
 ```
@@ -135,8 +138,16 @@ This implementation provides the foundational infrastructure for Sophia, includi
 - ✅ Core knowledge graph data structures (Node, Edge, KnowledgeGraph)
 - ✅ Persistent storage layer with database abstraction
 - ✅ Configuration management system
+- ✅ Planning component foundation
 - ✅ Comprehensive test coverage
 - ✅ Type-safe, well-documented codebase
+
+## Research & Documentation
+
+Research documents and design notes are available in the `docs/research/` directory:
+
+- [Causal Reasoning Methods Survey](docs/research/causal-reasoning-methods.md) - Comprehensive survey of backward/forward chaining, causal graphs, and counterfactual reasoning for HCG planning
+- [Planner Applicability Notes](docs/research/planner-applicability-notes.md) - Quick reference guide for implementing causal reasoning in the Planner component
 
 ## License
 
