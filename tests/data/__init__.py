@@ -22,7 +22,9 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
         properties={"name": "Table", "location_type": "surface"},
     )
     bin_node = Node(
-        id="bin", type="location", properties={"name": "Bin", "location_type": "container"}
+        id="bin",
+        type="location",
+        properties={"name": "Bin", "location_type": "container"},
     )
 
     kg.add_node(table)
@@ -91,9 +93,15 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
     kg.add_node(release1)
 
     # Action preconditions and effects (causal chain)
-    kg.add_edge(Edge(source="move_to_red_block", target="grasp_red_block", relation="enables"))
-    kg.add_edge(Edge(source="grasp_red_block", target="move_to_bin", relation="enables"))
-    kg.add_edge(Edge(source="move_to_bin", target="release_red_block", relation="enables"))
+    kg.add_edge(
+        Edge(source="move_to_red_block", target="grasp_red_block", relation="enables")
+    )
+    kg.add_edge(
+        Edge(source="grasp_red_block", target="move_to_bin", relation="enables")
+    )
+    kg.add_edge(
+        Edge(source="move_to_bin", target="release_red_block", relation="enables")
+    )
     kg.add_edge(
         Edge(
             source="release_red_block",
@@ -114,7 +122,11 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
     )
     kg.add_node(goal)
     kg.add_edge(
-        Edge(source="goal_red_block_in_bin", target="release_red_block", relation="requires")
+        Edge(
+            source="goal_red_block_in_bin",
+            target="release_red_block",
+            relation="requires",
+        )
     )
 
     return kg
