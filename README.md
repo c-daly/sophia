@@ -11,6 +11,10 @@ Sophia is a foundational infrastructure for building knowledge graphs and managi
 - **Type-Safe Models**: Pydantic-based data models for nodes and edges
 - **Configuration Management**: Flexible settings management for deployment
 - **Extensible Architecture**: Clean, modular design for easy extension
+- **FastAPI Service**: RESTful API with `/plan`, `/imagine`, and `/execute` endpoints
+- **Neo4j + SHACL**: Integration with Neo4j graph database and SHACL validation
+- **Authentication**: Token-based authentication middleware for secure API access
+- **Docker Support**: Containerized deployment with Docker Compose
 
 ## Installation
 
@@ -80,6 +84,117 @@ db.store_node(concept1.id, concept1.type, concept1.properties)
 db.store_node(concept2.id, concept2.type, concept2.properties)
 db.store_edge(relation.id, relation.source, relation.target, 
               relation.relation, relation.properties)
+```
+
+## Sophia API Service 🚀
+
+Sophia provides a FastAPI service with endpoints for planning, imagination, and execution.
+
+### Running with Docker Compose
+
+The easiest way to run Sophia is using Docker Compose:
+
+```bash
+# Set your API token (required for authentication)
+export SOPHIA_API_TOKEN=your-secure-token-here
+
+# Start all services (Sophia API, Neo4j, Milvus)
+docker-compose up -d
+
+# Check service health
+curl http://localhost:8000/health
+
+# View logs
+docker-compose logs -f sophia
+```
+
+The service will be available at `http://localhost:8000` with the following endpoints:
+- `GET /health` - Health check (no auth required)
+- `POST /plan` - Generate a plan from a goal
+- `POST /imagine` - Generate imagined future states
+- `POST /execute` - Execute a plan
+
+### API Documentation
+
+Once the service is running, access the interactive API docs at:
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+### Configuration
+
+Configure the service using environment variables (see `.env.example`):
+
+```bash
+# Required
+SOPHIA_API_TOKEN=your-secure-token-here
+
+# Optional (defaults shown)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=sophiadev
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+CORS_ORIGINS=*
+```
+
+### Example API Usage
+
+```bash
+# Set your token
+TOKEN="your-secure-token-here"
+
+# Generate a plan
+curl -X POST http://localhost:8000/plan \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": {
+      "description": "red block in bin",
+      "target_state": "red_block_in_bin"
+    }
+  }'
+
+# Generate imagined states
+curl -X POST http://localhost:8000/imagine \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cwm_g_imagery": [{"type": "visual", "content": "red block"}],
+    "cwm_e_emotion_tags": ["curious", "focused"],
+    "model_version": "v1.0",
+    "horizon": 3,
+    "assumptions": ["block is graspable"]
+  }'
+
+# Execute a plan
+curl -X POST http://localhost:8000/execute \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "plan_id": "plan-uuid",
+    "dry_run": true
+  }'
+```
+
+### Running Locally (Development)
+
+For development without Docker:
+
+```bash
+# Install dependencies
+poetry install
+
+# Set environment variables
+export SOPHIA_API_TOKEN=dev-token
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=sophiadev
+
+# Start Neo4j and Milvus (using docker-compose for dependencies only)
+docker-compose up -d neo4j milvus-standalone
+
+# Run the API server
+poetry run uvicorn sophia.api.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ## Milestone M3: Sophia can plan simple actions ✅
