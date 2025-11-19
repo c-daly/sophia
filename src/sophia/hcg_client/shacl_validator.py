@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, List, Optional
 from pyshacl import validate
-from rdflib import Graph, Namespace, Literal, URIRef
+from rdflib import Graph, Namespace, Literal
 from rdflib.namespace import RDF, RDFS, SH
 
 

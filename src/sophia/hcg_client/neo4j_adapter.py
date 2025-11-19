@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, List, Optional
 import logging
-from neo4j import GraphDatabase, Session, Driver
+from neo4j import GraphDatabase
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -99,7 +99,7 @@ class Neo4jAdapter:
             record = result.single()
             
         logger.info(f"Added node: {node_id}")
-        return record["id"] if record else node_id
+        return str(record["id"]) if record else node_id
     
     @retry(
         stop=stop_after_attempt(3),
@@ -150,7 +150,7 @@ class Neo4jAdapter:
             record = result.single()
             
         logger.info(f"Added edge: {edge_id}")
-        return record["id"] if record else edge_id
+        return str(record["id"]) if record else edge_id
     
     @retry(
         stop=stop_after_attempt(3),

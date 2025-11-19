@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, List, Optional
 import logging
-from pymilvus import (
+from pymilvus import (  # type: ignore[import-untyped]
     connections,
     Collection,
     CollectionSchema,
@@ -16,7 +16,7 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
-from pymilvus.exceptions import MilvusException
+from pymilvus.exceptions import MilvusException  # type: ignore[import-untyped]
 
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,9 @@ class MilvusAdapter:
                 f"expected dimension {self._dimension}"
             )
         
+        if not self._collection:
+            raise RuntimeError("Collection not initialized")
+        
         # Prepare data
         data = [
             [embedding_id],
@@ -191,6 +194,9 @@ class MilvusAdapter:
                 f"Query embedding dimension {len(query_embedding)} doesn't match "
                 f"expected dimension {self._dimension}"
             )
+        
+        if not self._collection:
+            raise RuntimeError("Collection not initialized")
         
         # Load collection into memory for search
         self._collection.load()
@@ -243,6 +249,9 @@ class MilvusAdapter:
         Returns:
             Embedding data or None if not found
         """
+        if not self._collection:
+            raise RuntimeError("Collection not initialized")
+        
         # Load collection
         self._collection.load()
         
@@ -279,6 +288,9 @@ class MilvusAdapter:
         Returns:
             True if deleted, False if not found
         """
+        if not self._collection:
+            raise RuntimeError("Collection not initialized")
+        
         # Delete by node_id
         expr = f'node_id == "{node_id}"'
         self._collection.delete(expr)
