@@ -9,6 +9,7 @@ from sophia.cwm_a.memory import ContinuousWorkingMemoryAssociative
 from sophia.cwm_g.memory import ContinuousWorkingMemoryGenerative
 from sophia.planner.planner import Planner
 from sophia.executor.executor import Executor
+from sophia.hcg_client.client import HCGClient
 
 __all__ = [
     "KnowledgeGraph",
@@ -18,5 +19,6 @@ __all__ = [
     "ContinuousWorkingMemoryGenerative",
     "Planner",
     "Executor",
+    "HCGClient",
     "__version__",
 ]
