@@ -18,3 +18,4 @@ def test_exports() -> None:
     assert hasattr(sophia, "ContinuousWorkingMemoryGenerative")
     assert hasattr(sophia, "Planner")
     assert hasattr(sophia, "Executor")
+    assert hasattr(sophia, "HCGClient")
