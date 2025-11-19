@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class MilvusAdapter:
     """Milvus adapter for HCG vector storage with connection pooling and retries.
-    
+
     Provides vector storage and similarity search for knowledge graph embeddings.
     """
 
@@ -37,7 +37,7 @@ class MilvusAdapter:
         dimension: int = 768,
     ) -> None:
         """Initialize Milvus adapter.
-        
+
         Args:
             host: Milvus host
             port: Milvus port
@@ -51,11 +51,11 @@ class MilvusAdapter:
         self._collection_name = collection_name
         self._dimension = dimension
         self._collection: Optional[Collection] = None
-        
+
         self._connect()
         self._initialize_collection()
         logger.info(f"Milvus adapter initialized for {host}:{port}")
-    
+
     def _connect(self) -> None:
         """Connect to Milvus server."""
         connections.connect(
@@ -64,7 +64,7 @@ class MilvusAdapter:
             port=str(self._port),
         )
         logger.info("Connected to Milvus")
-    
+
     def _initialize_collection(self) -> None:
         """Initialize or load the collection."""
         if utility.has_collection(self._collection_name, using=self._alias):
@@ -75,29 +75,33 @@ class MilvusAdapter:
             logger.info(f"Loaded existing collection: {self._collection_name}")
         else:
             self._create_collection()
-    
+
     def _create_collection(self) -> None:
         """Create a new collection with schema."""
         # Define schema
         fields = [
-            FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=255),
+            FieldSchema(
+                name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=255
+            ),
             FieldSchema(name="node_id", dtype=DataType.VARCHAR, max_length=255),
             FieldSchema(name="node_type", dtype=DataType.VARCHAR, max_length=100),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dimension),
+            FieldSchema(
+                name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dimension
+            ),
         ]
-        
+
         schema = CollectionSchema(
             fields=fields,
             description="HCG node embeddings",
         )
-        
+
         # Create collection
         self._collection = Collection(
             name=self._collection_name,
             schema=schema,
             using=self._alias,
         )
-        
+
         # Create index for vector similarity search
         index_params = {
             "metric_type": "L2",
@@ -108,16 +112,16 @@ class MilvusAdapter:
             field_name="embedding",
             index_params=index_params,
         )
-        
+
         logger.info(f"Created new collection: {self._collection_name}")
-    
+
     def close(self) -> None:
         """Close the Milvus connection."""
         if self._collection:
             self._collection.release()
         connections.disconnect(alias=self._alias)
         logger.info("Milvus connection closed")
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -131,16 +135,16 @@ class MilvusAdapter:
         embedding: List[float],
     ) -> str:
         """Insert or update an embedding for a node.
-        
+
         Args:
             embedding_id: Unique ID for this embedding
             node_id: Node ID in the knowledge graph
             node_type: Type of the node
             embedding: Embedding vector
-            
+
         Returns:
             Embedding ID
-            
+
         Raises:
             ValueError: If embedding dimension doesn't match
         """
@@ -149,10 +153,10 @@ class MilvusAdapter:
                 f"Embedding dimension {len(embedding)} doesn't match "
                 f"expected dimension {self._dimension}"
             )
-        
+
         if not self._collection:
             raise RuntimeError("Collection not initialized")
-        
+
         # Prepare data
         data = [
             [embedding_id],
@@ -160,14 +164,14 @@ class MilvusAdapter:
             [node_type],
             [embedding],
         ]
-        
+
         # Insert into collection
         self._collection.insert(data)
         self._collection.flush()
-        
+
         logger.info(f"Inserted embedding for node: {node_id}")
         return embedding_id
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -180,12 +184,12 @@ class MilvusAdapter:
         node_type_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Search for similar embeddings.
-        
+
         Args:
             query_embedding: Query embedding vector
             top_k: Number of results to return
             node_type_filter: Optional filter by node type
-            
+
         Returns:
             List of similar nodes with their distances
         """
@@ -194,24 +198,24 @@ class MilvusAdapter:
                 f"Query embedding dimension {len(query_embedding)} doesn't match "
                 f"expected dimension {self._dimension}"
             )
-        
+
         if not self._collection:
             raise RuntimeError("Collection not initialized")
-        
+
         # Load collection into memory for search
         self._collection.load()
-        
+
         # Prepare search parameters
         search_params = {
             "metric_type": "L2",
             "params": {"nprobe": 10},
         }
-        
+
         # Build expression for filtering
         expr = None
         if node_type_filter:
             expr = f'node_type == "{node_type_filter}"'
-        
+
         # Search
         results = self._collection.search(
             data=[query_embedding],
@@ -221,20 +225,22 @@ class MilvusAdapter:
             expr=expr,
             output_fields=["node_id", "node_type"],
         )
-        
+
         # Format results
         similar_nodes = []
         for hits in results:
             for hit in hits:
-                similar_nodes.append({
-                    "id": hit.id,
-                    "node_id": hit.entity.get("node_id"),
-                    "node_type": hit.entity.get("node_type"),
-                    "distance": hit.distance,
-                })
-        
+                similar_nodes.append(
+                    {
+                        "id": hit.id,
+                        "node_id": hit.entity.get("node_id"),
+                        "node_type": hit.entity.get("node_type"),
+                        "distance": hit.distance,
+                    }
+                )
+
         return similar_nodes
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -242,29 +248,29 @@ class MilvusAdapter:
     )
     def get_embedding(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Get embedding for a specific node.
-        
+
         Args:
             node_id: Node ID
-            
+
         Returns:
             Embedding data or None if not found
         """
         if not self._collection:
             raise RuntimeError("Collection not initialized")
-        
+
         # Load collection
         self._collection.load()
-        
+
         # Query by node_id
         expr = f'node_id == "{node_id}"'
         results = self._collection.query(
             expr=expr,
             output_fields=["id", "node_id", "node_type", "embedding"],
         )
-        
+
         if not results:
             return None
-        
+
         # Return first result
         result = results[0]
         return {
@@ -273,7 +279,7 @@ class MilvusAdapter:
             "node_type": result.get("node_type"),
             "embedding": result.get("embedding"),
         }
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -281,36 +287,36 @@ class MilvusAdapter:
     )
     def delete_embedding(self, node_id: str) -> bool:
         """Delete embedding for a node.
-        
+
         Args:
             node_id: Node ID
-            
+
         Returns:
             True if deleted, False if not found
         """
         if not self._collection:
             raise RuntimeError("Collection not initialized")
-        
+
         # Delete by node_id
         expr = f'node_id == "{node_id}"'
         self._collection.delete(expr)
         self._collection.flush()
-        
+
         logger.info(f"Deleted embedding for node: {node_id}")
         return True
-    
+
     def clear_all(self) -> None:
         """Clear all embeddings from the collection."""
         if self._collection:
             self._collection.release()
             utility.drop_collection(self._collection_name, using=self._alias)
             self._initialize_collection()
-        
+
         logger.info("Cleared all embeddings from collection")
-    
+
     def health_check(self) -> bool:
         """Check if Milvus is healthy and reachable.
-        
+
         Returns:
             True if healthy, False otherwise
         """

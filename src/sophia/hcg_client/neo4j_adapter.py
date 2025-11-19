@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class Neo4jAdapter:
     """Neo4j adapter for HCG with connection pooling, retries, and SHACL validation.
-    
+
     Provides read/write operations for knowledge graph data with constraints.
     """
 
@@ -33,7 +33,7 @@ class Neo4jAdapter:
         validator: Optional[SHACLValidator] = None,
     ) -> None:
         """Initialize Neo4j adapter.
-        
+
         Args:
             uri: Neo4j connection URI
             username: Neo4j username
@@ -50,13 +50,13 @@ class Neo4jAdapter:
         self._database = database
         self._validator = validator or SHACLValidator()
         logger.info(f"Neo4j adapter initialized for {uri}")
-    
+
     def close(self) -> None:
         """Close the Neo4j driver and release connections."""
         if self._driver:
             self._driver.close()
             logger.info("Neo4j driver closed")
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -64,13 +64,13 @@ class Neo4jAdapter:
     )
     def add_node(self, node_data: Dict[str, Any]) -> str:
         """Add a node to the graph with SHACL validation.
-        
+
         Args:
             node_data: Node data with 'id', 'type', and optional 'properties'
-            
+
         Returns:
             Node ID
-            
+
         Raises:
             ValueError: If validation fails
         """
@@ -78,11 +78,11 @@ class Neo4jAdapter:
         is_valid, errors = self._validator.validate_node(node_data)
         if not is_valid:
             raise ValueError(f"Node validation failed: {'; '.join(errors)}")
-        
+
         node_id = node_data["id"]
         node_type = node_data["type"]
         properties = node_data.get("properties", {})
-        
+
         with self._driver.session(database=self._database) as session:
             query = """
             MERGE (n:Node {id: $id})
@@ -97,10 +97,10 @@ class Neo4jAdapter:
                 properties=properties,
             )
             record = result.single()
-            
+
         logger.info(f"Added node: {node_id}")
         return str(record["id"]) if record else node_id
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -108,14 +108,14 @@ class Neo4jAdapter:
     )
     def add_edge(self, edge_data: Dict[str, Any]) -> str:
         """Add an edge to the graph with SHACL validation.
-        
+
         Args:
             edge_data: Edge data with 'id', 'source', 'target', 'relation',
                       and optional 'properties'
-            
+
         Returns:
             Edge ID
-            
+
         Raises:
             ValueError: If validation fails
         """
@@ -123,13 +123,13 @@ class Neo4jAdapter:
         is_valid, errors = self._validator.validate_edge(edge_data)
         if not is_valid:
             raise ValueError(f"Edge validation failed: {'; '.join(errors)}")
-        
+
         edge_id = edge_data["id"]
         source_id = edge_data["source"]
         target_id = edge_data["target"]
         relation = edge_data["relation"]
         properties = edge_data.get("properties", {})
-        
+
         with self._driver.session(database=self._database) as session:
             query = """
             MATCH (source:Node {id: $source_id})
@@ -148,10 +148,10 @@ class Neo4jAdapter:
                 properties=properties,
             )
             record = result.single()
-            
+
         logger.info(f"Added edge: {edge_id}")
         return str(record["id"]) if record else edge_id
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -159,10 +159,10 @@ class Neo4jAdapter:
     )
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Get a node from the graph.
-        
+
         Args:
             node_id: Node ID
-            
+
         Returns:
             Node data or None if not found
         """
@@ -173,21 +173,21 @@ class Neo4jAdapter:
             """
             result = session.run(query, id=node_id)
             record = result.single()
-            
+
             if not record:
                 return None
-            
+
             # Extract properties (excluding id and type)
             props = dict(record["props"])
             props.pop("id", None)
             props.pop("type", None)
-            
+
             return {
                 "id": record["id"],
                 "type": record["type"],
                 "properties": props,
             }
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -195,10 +195,10 @@ class Neo4jAdapter:
     )
     def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
         """Get an edge from the graph.
-        
+
         Args:
             edge_id: Edge ID
-            
+
         Returns:
             Edge data or None if not found
         """
@@ -210,15 +210,15 @@ class Neo4jAdapter:
             """
             result = session.run(query, id=edge_id)
             record = result.single()
-            
+
             if not record:
                 return None
-            
+
             # Extract properties (excluding id, relation_type)
             props = dict(record["props"])
             props.pop("id", None)
             props.pop("relation_type", None)
-            
+
             return {
                 "id": record["id"],
                 "source": record["source"],
@@ -226,7 +226,7 @@ class Neo4jAdapter:
                 "relation": record["relation"],
                 "properties": props,
             }
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -234,10 +234,10 @@ class Neo4jAdapter:
     )
     def query_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
         """Query neighbors of a node.
-        
+
         Args:
             node_id: Node ID
-            
+
         Returns:
             List of neighbor nodes
         """
@@ -248,21 +248,23 @@ class Neo4jAdapter:
                    properties(neighbor) as props
             """
             result = session.run(query, id=node_id)
-            
+
             neighbors = []
             for record in result:
                 props = dict(record["props"])
                 props.pop("id", None)
                 props.pop("type", None)
-                
-                neighbors.append({
-                    "id": record["id"],
-                    "type": record["type"],
-                    "properties": props,
-                })
-            
+
+                neighbors.append(
+                    {
+                        "id": record["id"],
+                        "type": record["type"],
+                        "properties": props,
+                    }
+                )
+
             return neighbors
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -270,10 +272,10 @@ class Neo4jAdapter:
     )
     def query_edges_from(self, node_id: str) -> List[Dict[str, Any]]:
         """Query edges from a node.
-        
+
         Args:
             node_id: Node ID
-            
+
         Returns:
             List of outgoing edges
         """
@@ -284,23 +286,25 @@ class Neo4jAdapter:
                    r.relation_type as relation, properties(r) as props
             """
             result = session.run(query, id=node_id)
-            
+
             edges = []
             for record in result:
                 props = dict(record["props"])
                 props.pop("id", None)
                 props.pop("relation_type", None)
-                
-                edges.append({
-                    "id": record["id"],
-                    "source": record["source"],
-                    "target": record["target"],
-                    "relation": record["relation"],
-                    "properties": props,
-                })
-            
+
+                edges.append(
+                    {
+                        "id": record["id"],
+                        "source": record["source"],
+                        "target": record["target"],
+                        "relation": record["relation"],
+                        "properties": props,
+                    }
+                )
+
             return edges
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -308,10 +312,10 @@ class Neo4jAdapter:
     )
     def delete_node(self, node_id: str) -> bool:
         """Delete a node from the graph.
-        
+
         Args:
             node_id: Node ID
-            
+
         Returns:
             True if deleted, False if not found
         """
@@ -324,12 +328,12 @@ class Neo4jAdapter:
             """
             result = session.run(query, id=node_id)
             record = result.single()
-            
+
         deleted = record["deleted"] > 0 if record else False
         if deleted:
             logger.info(f"Deleted node: {node_id}")
         return deleted
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -340,12 +344,12 @@ class Neo4jAdapter:
         with self._driver.session(database=self._database) as session:
             query = "MATCH (n) DETACH DELETE n"
             session.run(query)
-        
+
         logger.info("Cleared all nodes and edges from graph")
-    
+
     def health_check(self) -> bool:
         """Check if Neo4j is healthy and reachable.
-        
+
         Returns:
             True if healthy, False otherwise
         """

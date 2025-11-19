@@ -24,7 +24,7 @@ class TestSHACLValidator:
             "type": "concept",
             "properties": {"name": "test"},
         }
-        
+
         is_valid, errors = validator.validate_node(node_data)
         assert is_valid is True
         assert len(errors) == 0
@@ -35,7 +35,7 @@ class TestSHACLValidator:
             "id": "node1",
             "properties": {"name": "test"},
         }
-        
+
         is_valid, errors = validator.validate_node(node_data)
         assert is_valid is False
         assert len(errors) > 0
@@ -49,7 +49,7 @@ class TestSHACLValidator:
             "relation": "connects",
             "properties": {},
         }
-        
+
         is_valid, errors = validator.validate_edge(edge_data)
         assert is_valid is True
         assert len(errors) == 0
@@ -61,7 +61,7 @@ class TestSHACLValidator:
             "target": "node2",
             "relation": "connects",
         }
-        
+
         is_valid, errors = validator.validate_edge(edge_data)
         assert is_valid is False
         assert len(errors) > 0
@@ -73,7 +73,7 @@ class TestSHACLValidator:
             "source": "node1",
             "relation": "connects",
         }
-        
+
         is_valid, errors = validator.validate_edge(edge_data)
         assert is_valid is False
         assert len(errors) > 0
@@ -85,7 +85,7 @@ class TestSHACLValidator:
             "source": "node1",
             "target": "node2",
         }
-        
+
         is_valid, errors = validator.validate_edge(edge_data)
         assert is_valid is False
         assert len(errors) > 0
@@ -97,7 +97,7 @@ class TestSHACLValidator:
             "type": "concept",
             "properties": {},
         }
-        
+
         is_valid, errors = validator.validate_mutation("add_node", node_data)
         assert is_valid is True
         assert len(errors) == 0
@@ -110,7 +110,7 @@ class TestSHACLValidator:
             "target": "node2",
             "relation": "connects",
         }
-        
+
         is_valid, errors = validator.validate_mutation("add_edge", edge_data)
         assert is_valid is True
         assert len(errors) == 0
@@ -134,10 +134,10 @@ class TestSHACLValidator:
                 sh:minCount 1 ;
             ] .
         """
-        
+
         validator = SHACLValidator(shapes_graph=custom_shapes)
         assert validator is not None
-        
+
         # Valid node should pass
         node_data = {
             "id": "node1",
