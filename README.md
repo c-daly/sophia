@@ -110,9 +110,27 @@ docker-compose logs -f sophia
 
 The service will be available at `http://localhost:8000` with the following endpoints:
 - `GET /health` - Health check (no auth required)
-- `POST /plan` - Generate a plan from a goal
+- `GET /state` - Read current world state from Neo4j HCG
+- `POST /state` - Update world state in Neo4j with SHACL validation
+- `POST /plan` - Generate a plan from a goal (reads/writes to Neo4j)
 - `POST /imagine` - Generate imagined future states
 - `POST /execute` - Execute a plan
+
+### Prototype: Minimal Plan/State API over HCG
+
+See [PROTOTYPE_README.md](PROTOTYPE_README.md) for a comprehensive guide to the prototype implementation, which demonstrates:
+- ✅ Reading goal/state from Neo4j HCG
+- ✅ Generating MOVE→GRASP→MOVE→RELEASE plans via backward chaining
+- ✅ Writing plans back to Neo4j with SHACL validation
+- ✅ State management with SHACL gating
+- ✅ Pick-and-place scenario with auto-seeding
+
+Quick start:
+```bash
+# Run the prototype demo
+export SOPHIA_API_TOKEN=test-token
+./examples/prototype_demo.sh
+```
 
 ### API Documentation
 

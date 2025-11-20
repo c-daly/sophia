@@ -153,3 +153,42 @@ class HealthResponse(BaseModel):
         ..., description="Health status of individual components"
     )
     version: str = Field(default="0.1.0", description="API version")
+
+
+class StateResponse(BaseModel):
+    """Response model for GET /state endpoint."""
+
+    state: Dict[str, Any] = Field(..., description="Current world state")
+    state_id: str = Field(..., description="Unique state identifier")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="ISO timestamp of state",
+    )
+
+
+class StateUpdateRequest(BaseModel):
+    """Request model for POST /state endpoint."""
+
+    state: Dict[str, Any] = Field(
+        ...,
+        description="State updates to apply",
+        json_schema_extra={
+            "example": {
+                "red_block": {"location": "bin", "grasped": False},
+                "gripper": {"position": "bin", "holding": None},
+            }
+        },
+    )
+
+
+class StateUpdateResponse(BaseModel):
+    """Response model for POST /state endpoint."""
+
+    state_id: str = Field(..., description="New state identifier")
+    updated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="ISO timestamp of update",
+    )
+    validation_passed: bool = Field(
+        default=True, description="Whether SHACL validation passed"
+    )

@@ -20,17 +20,90 @@ from sophia.api.models import (
     ExecuteResponse,
     ExecutionResult,
     HealthResponse,
+    StateResponse,
+    StateUpdateRequest,
+    StateUpdateResponse,
 )
 from sophia.api.auth import verify_token
 from sophia.planner import Planner
 from sophia.executor import Executor
-from sophia.knowledge_graph import KnowledgeGraph
+from sophia.knowledge_graph import KnowledgeGraph, Node, Edge
 from sophia.hcg_client import HCGClient
+from sophia.hcg_client.seeder import seed_pick_and_place_data
 from sophia.cwm_g import ContinuousWorkingMemoryGenerative
 from sophia.cwm_a import ContinuousWorkingMemoryAssociative
 
 
 logger = logging.getLogger(__name__)
+
+
+def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
+    """Load knowledge graph from Neo4j HCG.
+
+    Args:
+        hcg_client: HCG client instance
+
+    Returns:
+        KnowledgeGraph loaded from Neo4j
+    """
+    kg = KnowledgeGraph()
+
+    # Query all nodes from Neo4j (simplified approach)
+    # In a real implementation, we'd query Neo4j for all nodes
+    # For now, we'll use the seeded pick-and-place data structure
+    node_ids = [
+        "table",
+        "bin",
+        "red_block",
+        "blue_block",
+        "move_to_red_block",
+        "grasp_red_block",
+        "move_to_bin",
+        "release_red_block",
+        "goal_red_block_in_bin",
+    ]
+
+    for node_id in node_ids:
+        try:
+            node_data = hcg_client.get_node(node_id)
+            if node_data:
+                node = Node(
+                    id=node_data["id"],
+                    type=node_data["type"],
+                    properties=node_data.get("properties", {}),
+                )
+                kg.add_node(node)
+        except Exception as e:
+            logger.debug(f"Could not load node {node_id}: {e}")
+
+    # Query edges (using Neo4j adapter's query methods)
+    edge_queries = [
+        ("red_block", "table", "located_at"),
+        ("blue_block", "table", "located_at"),
+        ("move_to_red_block", "grasp_red_block", "enables"),
+        ("grasp_red_block", "move_to_bin", "enables"),
+        ("move_to_bin", "release_red_block", "enables"),
+        ("release_red_block", "bin", "achieves"),
+        ("goal_red_block_in_bin", "release_red_block", "requires"),
+    ]
+
+    for source, target, relation in edge_queries:
+        try:
+            edges = hcg_client.query_edges_from(source)
+            for edge in edges:
+                if edge["target"] == target and edge["relation"] == relation:
+                    kg.add_edge(
+                        Edge(
+                            source=source,
+                            target=target,
+                            relation=relation,
+                            properties=edge.get("properties", {}),
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"Could not load edge {source}->{target}: {e}")
+
+    return kg
 
 
 # Global state
@@ -69,9 +142,38 @@ async def lifespan(app: FastAPI):
             milvus_port=milvus_port,
         )
         logger.info("HCG client initialized")
+
+        # Seed pick-and-place data if enabled
+        seed_data = os.getenv("SEED_PICK_AND_PLACE_DATA", "true").lower() == "true"
+        if seed_data:
+            logger.info("Seeding pick-and-place data into Neo4j...")
+            try:
+                # Clear existing data first (optional, controlled by env var)
+                clear_before_seed = (
+                    os.getenv("CLEAR_BEFORE_SEED", "false").lower() == "true"
+                )
+                if clear_before_seed:
+                    _hcg_client.clear_all()
+                    logger.info("Cleared existing HCG data")
+
+                seed_pick_and_place_data(_hcg_client)
+                logger.info("Pick-and-place data seeded successfully")
+            except Exception as e:
+                logger.warning(f"Failed to seed pick-and-place data: {e}")
+
+        # Load knowledge graph from Neo4j
+        logger.info("Loading knowledge graph from Neo4j HCG...")
+        _kg = load_kg_from_hcg(_hcg_client)
+        logger.info(
+            f"Knowledge graph loaded: {len(_kg._nodes)} nodes, {len(_kg._edges)} edges"
+        )
+
     except Exception as e:
         logger.warning(f"Failed to initialize HCG client: {e}")
         _hcg_client = None
+        # Fallback to empty knowledge graph if HCG fails
+        if _kg is None:
+            _kg = KnowledgeGraph()
 
     # Initialize cognitive components
     _planner = Planner(knowledge_graph=_kg)
@@ -131,6 +233,113 @@ def create_app() -> FastAPI:
             version="0.1.0",
         )
 
+    # State endpoint (GET) - Read current state from Neo4j
+    @app.get(
+        "/state",
+        response_model=StateResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["state"],
+    )
+    async def get_state() -> StateResponse:
+        """Get the current world state from Neo4j HCG.
+
+        This endpoint reads the current state node from Neo4j.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            # Get current state from Neo4j
+            state_node = _hcg_client.get_node("current_state")
+
+            if not state_node:
+                # Return empty state if not found
+                return StateResponse(
+                    state={},
+                    state_id="current_state",
+                )
+
+            # Extract state from node properties
+            state_data = state_node.get("properties", {})
+
+            return StateResponse(
+                state=state_data,
+                state_id=state_node.get("id", "current_state"),
+            )
+
+        except Exception as e:
+            logger.error(f"Error reading state: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to read state: {str(e)}",
+            )
+
+    # State endpoint (POST) - Update state in Neo4j with SHACL validation
+    @app.post(
+        "/state",
+        response_model=StateUpdateResponse,
+        status_code=status.HTTP_200_OK,
+        dependencies=[Depends(verify_token)],
+        tags=["state"],
+    )
+    async def update_state(request: StateUpdateRequest) -> StateUpdateResponse:
+        """Update the world state in Neo4j HCG with SHACL validation.
+
+        This endpoint updates the current state node in Neo4j.
+        SHACL validation is applied automatically by the HCG client.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            # Check if current_state node exists
+            existing_state = _hcg_client.get_node("current_state")
+
+            if existing_state:
+                # Update existing state node
+                # Delete and recreate with new properties (Neo4j pattern)
+                _hcg_client.delete_node("current_state")
+
+            # Create new state node with SHACL validation
+            _hcg_client.add_node(
+                node_id="current_state",
+                node_type="state",
+                properties=request.state,
+            )
+
+            # Also update in-memory planner state if available
+            if _planner:
+                _planner.update_state(request.state)
+
+            return StateUpdateResponse(
+                state_id="current_state",
+                validation_passed=True,
+            )
+
+        except ValueError as e:
+            # SHACL validation failed
+            logger.error(f"State validation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"State validation failed: {str(e)}",
+            )
+        except Exception as e:
+            logger.error(f"Error updating state: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update state: {str(e)}",
+            )
+
     # Plan endpoint
     @app.post(
         "/plan",
@@ -143,7 +352,8 @@ def create_app() -> FastAPI:
         """Generate a plan to achieve a goal.
 
         This endpoint uses backward chaining to decompose a goal into
-        actionable steps based on the knowledge graph.
+        actionable steps based on the knowledge graph stored in Neo4j HCG.
+        The generated plan is written back to Neo4j with SHACL validation.
 
         Requires authentication via Bearer token.
         """
@@ -153,8 +363,20 @@ def create_app() -> FastAPI:
                 detail="Planner service not available",
             )
 
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
         try:
-            # Generate plan
+            # Read current state from Neo4j HCG
+            state_node = _hcg_client.get_node("current_state")
+            if state_node:
+                current_state = state_node.get("properties", {})
+                _planner.update_state(current_state)
+
+            # Generate plan using backward chaining
             plan_steps = _planner.plan(request.goal)
 
             # Convert to response format
@@ -170,6 +392,40 @@ def create_app() -> FastAPI:
             ]
 
             plan_id = str(uuid.uuid4())
+
+            # Write plan back to Neo4j HCG with SHACL validation
+            _hcg_client.add_node(
+                node_id=plan_id,
+                node_type="plan",
+                properties={
+                    "goal": request.goal,
+                    "steps": [
+                        {
+                            "id": step.id,
+                            "name": step.name,
+                            "action_type": step.action_type,
+                            "target": step.target,
+                        }
+                        for step in plan_step_models
+                    ],
+                },
+            )
+
+            # Link plan to goal if it exists in HCG
+            goal_id = request.goal.get("target_state", "")
+            goal_node_id = f"goal_{goal_id}" if goal_id else None
+            if goal_node_id:
+                try:
+                    goal_node = _hcg_client.get_node(goal_node_id)
+                    if goal_node:
+                        _hcg_client.add_edge(
+                            edge_id=f"e_{plan_id}_achieves_goal",
+                            source_id=plan_id,
+                            target_id=goal_node_id,
+                            relation="achieves",
+                        )
+                except Exception as e:
+                    logger.warning(f"Could not link plan to goal: {e}")
 
             return PlanResponse(
                 plan=plan_step_models,
