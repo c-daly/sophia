@@ -23,6 +23,8 @@ from sophia.api.models import (
     StateResponse,
     StateUpdateRequest,
     StateUpdateResponse,
+    SimulateRequest,
+    SimulateResponse,
 )
 from sophia.api.auth import verify_token
 from sophia.planner import Planner
@@ -32,6 +34,13 @@ from sophia.hcg_client import HCGClient
 from sophia.hcg_client.seeder import seed_pick_and_place_data
 from sophia.cwm_g import ContinuousWorkingMemoryGenerative
 from sophia.cwm_a import ContinuousWorkingMemoryAssociative
+from sophia.jepa import JEPARunner
+from sophia.jepa.models import (
+    SimulationContext,
+    Entity as JEPAEntity,
+    SensorReference,
+    TalosMetadata,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -113,12 +122,13 @@ _hcg_client: Optional[HCGClient] = None
 _cwm_g: Optional[ContinuousWorkingMemoryGenerative] = None
 _cwm_a: Optional[ContinuousWorkingMemoryAssociative] = None
 _kg: Optional[KnowledgeGraph] = None
+_jepa_runner: Optional[JEPARunner] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg, _jepa_runner
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -180,6 +190,7 @@ async def lifespan(app: FastAPI):
     _executor = Executor()
     _cwm_g = ContinuousWorkingMemoryGenerative()
     _cwm_a = ContinuousWorkingMemoryAssociative()
+    _jepa_runner = JEPARunner(model_version="jepa-stub-v1.0")
 
     logger.info("Sophia API service started successfully")
 
@@ -519,6 +530,140 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate imagined states: {str(e)}",
+            )
+
+    # Simulate endpoint
+    @app.post(
+        "/simulate",
+        response_model=SimulateResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(verify_token)],
+        tags=["simulation"],
+    )
+    async def simulate(request: SimulateRequest) -> SimulateResponse:
+        """Perform JEPA-based k-step simulation with dynamics rollout.
+
+        This endpoint uses the JEPA runner to perform forward prediction
+        of system dynamics over k steps, creating imagined processes and
+        states with confidence scores. Results are persisted to Neo4j.
+
+        Requires authentication via Bearer token.
+        """
+        if not _jepa_runner:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="JEPA runner not available",
+            )
+
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            # Build simulation context from request
+            entities = [JEPAEntity(**entity_data) for entity_data in request.entities]
+
+            sensor_refs = [
+                SensorReference(**sensor_data) for sensor_data in request.sensor_refs
+            ]
+
+            talos_metadata = TalosMetadata(**(request.talos_metadata or {}))
+
+            context = SimulationContext(
+                entities=entities,
+                sensor_refs=sensor_refs,
+                talos_metadata=talos_metadata,
+                initial_state=request.initial_state,
+                actions=request.actions,
+            )
+
+            # Run JEPA simulation
+            result = _jepa_runner.simulate(
+                context=context,
+                k_steps=request.k_steps,
+                assumptions=request.assumptions,
+            )
+
+            # Store imagined processes in Neo4j
+            for process in result.imagined_processes:
+                _hcg_client.add_node(
+                    node_id=process.process_id,
+                    node_type="imagined_process",
+                    properties={
+                        "description": process.description,
+                        "confidence": process.confidence,
+                        "model_version": process.model_version,
+                        "horizon": process.horizon,
+                        "assumptions": process.assumptions,
+                        "imagined": True,
+                        "simulation_id": result.simulation_id,
+                        **process.properties,
+                    },
+                )
+
+            # Store imagined states in Neo4j
+            for state in result.imagined_states:
+                _hcg_client.add_node(
+                    node_id=state.state_id,
+                    node_type="imagined_state",
+                    properties={
+                        "step": state.step,
+                        "description": state.description,
+                        "confidence": state.confidence,
+                        "model_version": state.model_version,
+                        "horizon": state.horizon,
+                        "assumptions": state.assumptions,
+                        "imagined": True,
+                        "simulation_id": result.simulation_id,
+                        "state_data": state.state_data,
+                    },
+                )
+
+                # Link state to simulation
+                _hcg_client.add_edge(
+                    edge_id=f"e_{result.simulation_id}_{state.state_id}",
+                    source_id=result.simulation_id,
+                    target_id=state.state_id,
+                    relation="produces",
+                )
+
+            # Store simulation metadata node
+            _hcg_client.add_node(
+                node_id=result.simulation_id,
+                node_type="simulation",
+                properties={
+                    "k_steps": result.k_steps,
+                    "model_version": result.model_version,
+                    "overall_confidence": result.overall_confidence,
+                    "entity_count": len(context.entities),
+                    "sensor_count": len(context.sensor_refs),
+                    "talos_metadata": context.talos_metadata.model_dump(),
+                },
+            )
+
+            # Convert result to response format
+            response = SimulateResponse(
+                simulation_id=result.simulation_id,
+                imagined_processes=[
+                    process.model_dump() for process in result.imagined_processes
+                ],
+                imagined_states=[
+                    state.model_dump() for state in result.imagined_states
+                ],
+                k_steps=result.k_steps,
+                model_version=result.model_version,
+                overall_confidence=result.overall_confidence,
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error running simulation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to run simulation: {str(e)}",
             )
 
     # Execute endpoint

@@ -192,3 +192,80 @@ class StateUpdateResponse(BaseModel):
     validation_passed: bool = Field(
         default=True, description="Whether SHACL validation passed"
     )
+
+
+class SimulateRequest(BaseModel):
+    """Request model for the /simulate endpoint."""
+
+    entities: List[Dict[str, Any]] = Field(
+        ...,
+        description="List of entities in the simulation environment",
+        json_schema_extra={
+            "example": [
+                {
+                    "id": "red_block",
+                    "type": "object",
+                    "properties": {"mass": 0.5, "shape": "cube"},
+                    "position": {"x": 0.0, "y": 0.0, "z": 0.1},
+                }
+            ]
+        },
+    )
+    sensor_refs: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Sensor references for perception data",
+        json_schema_extra={
+            "example": [
+                {
+                    "sensor_id": "camera_1",
+                    "sensor_type": "camera",
+                    "frame_id": "base_link",
+                }
+            ]
+        },
+    )
+    talos_metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Talos simulator metadata",
+        json_schema_extra={
+            "example": {
+                "simulator_version": "stub-v1.0",
+                "physics_engine": "none",
+                "time_step": 0.01,
+                "use_hardware": False,
+            }
+        },
+    )
+    initial_state: Dict[str, Any] = Field(
+        default_factory=dict, description="Initial state of the system"
+    )
+    actions: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Optional action sequence to simulate"
+    )
+    k_steps: int = Field(
+        default=5, description="Number of forward prediction steps", gt=0, le=100
+    )
+    assumptions: Optional[List[str]] = Field(
+        default=None, description="Assumptions for the simulation"
+    )
+
+
+class SimulateResponse(BaseModel):
+    """Response model for the /simulate endpoint."""
+
+    simulation_id: str = Field(..., description="Unique simulation identifier")
+    imagined_processes: List[Dict[str, Any]] = Field(
+        ..., description="Imagined processes during simulation"
+    )
+    imagined_states: List[Dict[str, Any]] = Field(
+        ..., description="K-step rollout of imagined states"
+    )
+    k_steps: int = Field(..., description="Number of steps in rollout")
+    model_version: str = Field(..., description="JEPA model version used")
+    overall_confidence: float = Field(
+        ..., description="Overall confidence of the simulation", ge=0.0, le=1.0
+    )
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="ISO timestamp of simulation creation",
+    )

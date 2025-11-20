@@ -379,3 +379,122 @@ class TestAPIDocumentation:
         response = client.get("/redoc")
         assert response.status_code == 200
         assert "redoc" in response.text.lower()
+
+
+class TestSimulateEndpoint:
+    """Tests for the /simulate endpoint."""
+
+    def test_simulate_requires_authentication(self, client):
+        """Test that /simulate requires authentication."""
+        response = client.post("/simulate", json={})
+        assert response.status_code == 403
+
+    def test_simulate_rejects_invalid_token(self, client):
+        """Test that /simulate rejects invalid tokens."""
+        headers = {"Authorization": "Bearer invalid-token"}
+        response = client.post("/simulate", headers=headers, json={})
+        assert response.status_code == 403
+
+    def test_simulate_validates_request_body(self, client, auth_headers):
+        """Test that /simulate validates request body."""
+        # Missing required 'entities' field
+        response = client.post("/simulate", headers=auth_headers, json={})
+        assert response.status_code == 422
+
+    def test_simulate_accepts_valid_request(self, client, auth_headers):
+        """Test that /simulate accepts valid request."""
+        request_data = {
+            "entities": [
+                {
+                    "id": "test_obj",
+                    "type": "object",
+                    "properties": {"mass": 1.0},
+                    "position": {"x": 0.0, "y": 0.0, "z": 0.1},
+                }
+            ],
+            "k_steps": 3,
+        }
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+        assert response.status_code in [201, 503]  # 503 if HCG not available
+
+    def test_simulate_returns_simulation_response(self, client, auth_headers):
+        """Test that /simulate returns proper response structure."""
+        request_data = {
+            "entities": [
+                {
+                    "id": "test_obj",
+                    "type": "object",
+                    "properties": {},
+                }
+            ],
+            "k_steps": 2,
+        }
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+
+        if response.status_code == 201:
+            data = response.json()
+            assert "simulation_id" in data
+            assert "imagined_processes" in data
+            assert "imagined_states" in data
+            assert "k_steps" in data
+            assert data["k_steps"] == 2
+            assert "model_version" in data
+            assert "overall_confidence" in data
+            assert "created_at" in data
+
+    def test_simulate_with_actions(self, client, auth_headers):
+        """Test /simulate with action sequence."""
+        request_data = {
+            "entities": [
+                {"id": "robot", "type": "agent", "properties": {"status": "idle"}}
+            ],
+            "actions": [
+                {"type": "MOVE", "target": "robot"},
+                {"type": "GRASP", "target": "robot"},
+            ],
+            "k_steps": 2,
+        }
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+        assert response.status_code in [201, 503]
+
+    def test_simulate_with_sensors(self, client, auth_headers):
+        """Test /simulate with sensor references."""
+        request_data = {
+            "entities": [{"id": "obj", "type": "object"}],
+            "sensor_refs": [
+                {
+                    "sensor_id": "camera_1",
+                    "sensor_type": "camera",
+                    "frame_id": "base_link",
+                }
+            ],
+            "k_steps": 2,
+        }
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+        assert response.status_code in [201, 503]
+
+    def test_simulate_with_talos_metadata(self, client, auth_headers):
+        """Test /simulate with Talos metadata."""
+        request_data = {
+            "entities": [{"id": "obj", "type": "object"}],
+            "talos_metadata": {
+                "simulator_version": "talos-v2.0",
+                "physics_engine": "ODE",
+                "use_hardware": True,
+            },
+            "k_steps": 2,
+        }
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+        assert response.status_code in [201, 503]
+
+    def test_simulate_validates_k_steps_range(self, client, auth_headers):
+        """Test that /simulate validates k_steps parameter."""
+        # k_steps must be > 0
+        request_data = {"entities": [{"id": "obj", "type": "object"}], "k_steps": 0}
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+        assert response.status_code == 422
+
+        # k_steps must be <= 100
+        request_data["k_steps"] = 101
+        response = client.post("/simulate", headers=auth_headers, json=request_data)
+        assert response.status_code == 422
