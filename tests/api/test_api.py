@@ -264,6 +264,98 @@ class TestExecuteEndpoint:
             assert isinstance(data["results"], list)
 
 
+class TestStateEndpoint:
+    """Tests for the /state endpoint."""
+
+    def test_get_state_requires_authentication(self, client):
+        """Test that GET /state requires authentication."""
+        response = client.get("/state")
+        assert response.status_code == 403
+
+    def test_get_state_rejects_invalid_token(self, client):
+        """Test that GET /state rejects invalid tokens."""
+        response = client.get(
+            "/state",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert response.status_code == 403
+
+    def test_get_state_accepts_valid_token(self, client, auth_headers):
+        """Test that GET /state accepts valid token."""
+        response = client.get("/state", headers=auth_headers)
+        # May be 200 or 503 (if HCG unavailable), but not 403
+        assert response.status_code != 403
+
+    def test_get_state_returns_state_response(self, client, auth_headers):
+        """Test that GET /state returns proper response structure."""
+        response = client.get("/state", headers=auth_headers)
+        if response.status_code == 200:
+            data = response.json()
+            assert "state" in data
+            assert "state_id" in data
+            assert "timestamp" in data
+            assert isinstance(data["state"], dict)
+
+    def test_post_state_requires_authentication(self, client):
+        """Test that POST /state requires authentication."""
+        response = client.post(
+            "/state",
+            json={"state": {"test": "value"}},
+        )
+        assert response.status_code == 403
+
+    def test_post_state_rejects_invalid_token(self, client):
+        """Test that POST /state rejects invalid tokens."""
+        response = client.post(
+            "/state",
+            json={"state": {"test": "value"}},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert response.status_code == 403
+
+    def test_post_state_validates_request_body(self, client, auth_headers):
+        """Test that POST /state validates request body."""
+        # Missing required field
+        response = client.post(
+            "/state",
+            json={},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_post_state_accepts_valid_state(self, client, auth_headers):
+        """Test that POST /state accepts valid state updates."""
+        response = client.post(
+            "/state",
+            json={
+                "state": {
+                    "red_block": {"location": "table", "grasped": False},
+                    "gripper": {"position": "home", "holding": None},
+                }
+            },
+            headers=auth_headers,
+        )
+        # May be 200, 422 (validation failure), or 503 (HCG unavailable), but not 403
+        assert response.status_code != 403
+
+    def test_post_state_returns_update_response(self, client, auth_headers):
+        """Test that POST /state returns proper response structure."""
+        response = client.post(
+            "/state",
+            json={
+                "state": {
+                    "red_block": {"location": "bin", "grasped": False},
+                }
+            },
+            headers=auth_headers,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            assert "state_id" in data
+            assert "updated_at" in data
+            assert "validation_passed" in data
+
+
 class TestAPIDocumentation:
     """Tests for API documentation endpoints."""
 
