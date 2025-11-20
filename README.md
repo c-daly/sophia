@@ -114,6 +114,7 @@ The service will be available at `http://localhost:8000` with the following endp
 - `POST /state` - Update world state in Neo4j with SHACL validation
 - `POST /plan` - Generate a plan from a goal (reads/writes to Neo4j)
 - `POST /imagine` - Generate imagined future states
+- `POST /simulate` - Run JEPA-based k-step dynamics simulation (Phase 2)
 - `POST /execute` - Execute a plan
 
 ### Prototype: Minimal Plan/State API over HCG
@@ -184,6 +185,23 @@ curl -X POST http://localhost:8000/imagine \
     "assumptions": ["block is graspable"]
   }'
 
+# Run JEPA-based simulation (Phase 2)
+curl -X POST http://localhost:8000/simulate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entities": [
+      {
+        "id": "red_block",
+        "type": "object",
+        "properties": {"mass": 0.5},
+        "position": {"x": 0.0, "y": 0.0, "z": 0.1}
+      }
+    ],
+    "k_steps": 5,
+    "assumptions": ["block is graspable"]
+  }'
+
 # Execute a plan
 curl -X POST http://localhost:8000/execute \
   -H "Authorization: Bearer $TOKEN" \
@@ -239,6 +257,47 @@ This demonstrates:
 4. Integrating all cognitive components
 
 See [Milestone M3 Verification](docs/MILESTONE_M3_VERIFICATION.md) for detailed documentation.
+
+## Phase 2: JEPA-Based Simulation 🔮
+
+**Status**: Implemented (CPU-friendly stub)
+
+Sophia now includes JEPA (Joint-Embedding Predictive Architecture) simulation capabilities:
+- 🎯 **k-step rollouts**: Forward prediction of system dynamics
+- 🧠 **Imagined states**: States with `imagined:true`, model version, and confidence scores
+- 📊 **Confidence tracking**: Decreasing confidence over prediction horizon
+- 🔄 **Action simulation**: Apply action sequences and predict outcomes
+- 💾 **Persistence**: All imagined nodes stored in Neo4j with metadata
+- 🔧 **Swappable**: Can be replaced with Talos/Gazebo hardware simulators
+
+### Try the Simulation
+
+```bash
+# Run a simple 5-step simulation
+curl -X POST http://localhost:8000/simulate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entities": [
+      {
+        "id": "block",
+        "type": "object",
+        "properties": {"mass": 0.5},
+        "position": {"x": 0.0, "y": 0.0, "z": 0.1}
+      }
+    ],
+    "k_steps": 5,
+    "assumptions": ["block is graspable"]
+  }'
+```
+
+See [JEPA Simulation Documentation](docs/JEPA_SIMULATION.md) for detailed information on:
+- Context schema (entities, sensors, Talos metadata)
+- Imagined node metadata
+- Swapping in hardware simulators
+- API usage examples
+
+
 
 ## Development
 

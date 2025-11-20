@@ -1,0 +1,435 @@
+# JEPA Runner & Simulation Documentation
+
+## Overview
+
+The JEPA (Joint-Embedding Predictive Architecture) runner provides dynamics simulation capabilities for the Sophia cognitive system. It performs k-step forward prediction of system states, generating imagined processes and states with confidence scores.
+
+## Architecture
+
+### Components
+
+1. **JEPA Runner** (`src/sophia/jepa/runner.py`)
+   - CPU-friendly stub implementation for dynamics simulation
+   - Performs k-step rollouts with confidence decay
+   - Can be swapped with hardware simulators (Talos/Gazebo)
+
+2. **Simulation Models** (`src/sophia/jepa/models.py`)
+   - Context schema for simulation requests
+   - Entity, sensor, and metadata models
+   - Imagined process and state models
+
+3. **API Endpoint** (`/simulate`)
+   - RESTful endpoint for running simulations
+   - Stores results in Neo4j HCG with metadata
+   - Returns imagined states with confidence scores
+
+## Context Schema
+
+### SimulationContext
+
+The simulation context defines the environment and parameters for a simulation:
+
+```python
+{
+  "entities": [
+    {
+      "id": "red_block",
+      "type": "object",
+      "properties": {"mass": 0.5, "shape": "cube"},
+      "position": {"x": 0.0, "y": 0.0, "z": 0.1}
+    }
+  ],
+  "sensor_refs": [
+    {
+      "sensor_id": "camera_1",
+      "sensor_type": "camera",
+      "frame_id": "base_link",
+      "last_reading": {...}
+    }
+  ],
+  "talos_metadata": {
+    "simulator_version": "stub-v1.0",
+    "physics_engine": "none",
+    "time_step": 0.01,
+    "use_hardware": false,
+    "robot_model": null
+  },
+  "initial_state": {...},
+  "actions": [
+    {"type": "MOVE", "target": "red_block"},
+    {"type": "GRASP", "target": "red_block"}
+  ]
+}
+```
+
+### Entity Schema
+
+Entities represent objects, agents, or locations in the simulation:
+
+- **id**: Unique identifier
+- **type**: Entity type (`object`, `agent`, `location`)
+- **properties**: Dictionary of entity attributes
+- **position**: Optional spatial coordinates (x, y, z)
+
+### Sensor Reference Schema
+
+Sensor references provide perception data context:
+
+- **sensor_id**: Unique sensor identifier
+- **sensor_type**: Type of sensor (`camera`, `lidar`, `force`, `proprioception`)
+- **frame_id**: Reference frame for sensor data
+- **last_reading**: Most recent sensor reading
+
+### Talos Metadata Schema
+
+Metadata for integration with Talos/Gazebo simulators:
+
+- **simulator_version**: Version of simulator being used
+- **physics_engine**: Physics engine (`ODE`, `Bullet`, `none`)
+- **time_step**: Simulation time step in seconds
+- **use_hardware**: Whether using hardware simulator or CPU stub
+- **robot_model**: Robot model identifier (e.g., `talos`, `ur5`)
+
+## JEPA Runner
+
+### Initialization
+
+```python
+from sophia.jepa import JEPARunner
+
+runner = JEPARunner(
+    model_version="jepa-stub-v1.0",
+    confidence_decay=0.05  # Decay rate per step
+)
+```
+
+### Running Simulations
+
+```python
+from sophia.jepa.models import SimulationContext, Entity
+
+# Create simulation context
+entities = [
+    Entity(
+        id="block_1",
+        type="object",
+        properties={"mass": 0.5},
+        position={"x": 0.0, "y": 0.0, "z": 0.1}
+    )
+]
+
+context = SimulationContext(entities=entities)
+
+# Run k-step simulation
+result = runner.simulate(
+    context=context,
+    k_steps=5,
+    assumptions=["objects are graspable"]
+)
+
+# Access results
+print(f"Simulation ID: {result.simulation_id}")
+print(f"Overall confidence: {result.overall_confidence:.2f}")
+print(f"Imagined states: {len(result.imagined_states)}")
+print(f"Imagined processes: {len(result.imagined_processes)}")
+```
+
+### Output Structure
+
+The simulation result contains:
+
+- **simulation_id**: Unique identifier
+- **imagined_processes**: List of imagined processes with metadata
+- **imagined_states**: K-step rollout of states
+- **k_steps**: Number of prediction steps
+- **model_version**: JEPA model version
+- **overall_confidence**: Average confidence across states
+
+## Imagined Nodes
+
+### ImaginedProcess
+
+Processes created during simulation have the following metadata:
+
+- **imagined**: `true` (always)
+- **model_version**: Version of JEPA model used
+- **horizon**: Planning horizon (k_steps)
+- **assumptions**: List of assumptions
+- **confidence**: Confidence score (0.0-1.0)
+- **properties**: Additional process-specific data
+
+### ImaginedState
+
+States created during simulation have the following metadata:
+
+- **imagined**: `true` (always)
+- **model_version**: Version of JEPA model used
+- **horizon**: Planning horizon (k_steps)
+- **assumptions**: List of assumptions
+- **step**: Step number in rollout (0 to k-1)
+- **confidence**: Confidence score (0.0-1.0)
+- **state_data**: Complete state data
+
+## API Endpoint: /simulate
+
+### Request
+
+```bash
+POST /simulate
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "entities": [
+    {
+      "id": "red_block",
+      "type": "object",
+      "properties": {"mass": 0.5},
+      "position": {"x": 0.0, "y": 0.0, "z": 0.1}
+    }
+  ],
+  "sensor_refs": [
+    {
+      "sensor_id": "camera_1",
+      "sensor_type": "camera",
+      "frame_id": "base_link"
+    }
+  ],
+  "talos_metadata": {
+    "simulator_version": "stub-v1.0",
+    "physics_engine": "none",
+    "use_hardware": false
+  },
+  "initial_state": {},
+  "actions": [
+    {"type": "MOVE", "target": "red_block"}
+  ],
+  "k_steps": 5,
+  "assumptions": ["block is graspable"]
+}
+```
+
+### Response
+
+```json
+{
+  "simulation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "imagined_processes": [
+    {
+      "process_id": "550e8400-e29b-41d4-a716-446655440000_process_dynamics",
+      "description": "Forward dynamics prediction process",
+      "confidence": 0.85,
+      "model_version": "jepa-stub-v1.0",
+      "horizon": 5,
+      "assumptions": ["block is graspable"],
+      "imagined": true,
+      "properties": {
+        "type": "dynamics",
+        "context_entities": 1,
+        "context_sensors": 1
+      }
+    }
+  ],
+  "imagined_states": [
+    {
+      "state_id": "550e8400-e29b-41d4-a716-446655440000_state_0",
+      "step": 0,
+      "description": "Imagined state at step 0",
+      "confidence": 0.95,
+      "model_version": "jepa-stub-v1.0",
+      "horizon": 5,
+      "assumptions": ["block is graspable"],
+      "imagined": true,
+      "state_data": {...},
+      "entities": [...]
+    },
+    ...
+  ],
+  "k_steps": 5,
+  "model_version": "jepa-stub-v1.0",
+  "overall_confidence": 0.88,
+  "created_at": "2025-11-20T16:30:00.000Z"
+}
+```
+
+### Persistence
+
+All simulation results are automatically persisted to Neo4j HCG:
+
+1. **Simulation node**: Metadata about the simulation
+2. **ImaginedProcess nodes**: Each process with `imagined:true`
+3. **ImaginedState nodes**: Each state with `imagined:true`
+4. **Edges**: Links between simulation and states (`produces` relation)
+
+## Swapping in Hardware Simulators
+
+The JEPA runner is designed to be easily swappable with hardware simulators like Talos or Gazebo.
+
+### Current Implementation (CPU Stub)
+
+The current implementation is a CPU-friendly stub that:
+- Requires no GPU or external dependencies
+- Performs basic state evolution
+- Applies simple action effects
+- Uses confidence decay for uncertainty modeling
+
+### Integrating Talos/Gazebo
+
+To integrate a hardware simulator:
+
+1. **Implement the JEPARunner Interface**
+
+```python
+class TalosJEPARunner(JEPARunner):
+    def __init__(self, talos_config, **kwargs):
+        super().__init__(**kwargs)
+        self.talos_client = TalosClient(talos_config)
+    
+    def simulate(self, context, k_steps, assumptions=None):
+        # Send context to Talos simulator
+        sim_id = self.talos_client.create_simulation(context)
+        
+        # Run k-step rollout using Talos physics
+        talos_result = self.talos_client.run_steps(sim_id, k_steps)
+        
+        # Convert Talos result to SimulationResult format
+        return self._convert_talos_result(talos_result)
+```
+
+2. **Update Configuration**
+
+```python
+# In src/sophia/api/app.py
+if os.getenv("USE_TALOS_SIMULATOR", "false").lower() == "true":
+    from sophia.jepa.talos_runner import TalosJEPARunner
+    _jepa_runner = TalosJEPARunner(
+        talos_config=get_talos_config(),
+        model_version="talos-v1.0"
+    )
+else:
+    _jepa_runner = JEPARunner(model_version="jepa-stub-v1.0")
+```
+
+3. **Update Talos Metadata**
+
+When using Talos, update the metadata in requests:
+
+```json
+{
+  "talos_metadata": {
+    "simulator_version": "talos-v2.0",
+    "physics_engine": "ODE",
+    "time_step": 0.001,
+    "use_hardware": true,
+    "robot_model": "talos"
+  }
+}
+```
+
+### Configuration Variables
+
+Add to `.env`:
+
+```bash
+# JEPA Simulator Configuration
+USE_TALOS_SIMULATOR=false
+TALOS_URI=http://localhost:11345
+TALOS_TIMEOUT=30
+GAZEBO_URI=http://localhost:11346
+```
+
+## Testing
+
+### Unit Tests
+
+```bash
+# Run JEPA runner tests
+poetry run pytest tests/jepa/ -v
+
+# Run simulation API tests
+poetry run pytest tests/api/test_api.py::TestSimulateEndpoint -v
+```
+
+### Integration Tests
+
+Integration tests with live Neo4j can be run with:
+
+```bash
+poetry run pytest -m integration tests/api/test_prototype_integration.py
+```
+
+### Example Test
+
+```python
+def test_simulation_with_actions():
+    runner = JEPARunner()
+    
+    entities = [Entity(id="robot", type="agent")]
+    actions = [{"type": "MOVE", "target": "robot"}]
+    context = SimulationContext(entities=entities, actions=actions)
+    
+    result = runner.simulate(context, k_steps=3)
+    
+    assert len(result.imagined_states) == 3
+    assert all(s.imagined for s in result.imagined_states)
+    assert all(s.model_version == runner.model_version 
+               for s in result.imagined_states)
+```
+
+## Performance Considerations
+
+### CPU Stub Performance
+
+The CPU stub is optimized for:
+- Fast startup (no model loading)
+- Low memory usage
+- Quick iteration during development
+- Testing without external dependencies
+
+Typical performance:
+- 1-5 steps: <100ms
+- 10 steps: <500ms
+- 50 steps: <2s
+
+### Hardware Simulator Performance
+
+When using Talos/Gazebo:
+- Physics simulation adds latency
+- GPU acceleration available
+- Higher fidelity predictions
+- Resource requirements depend on scene complexity
+
+## Future Enhancements
+
+1. **Learned Dynamics Models**
+   - Train neural network models on real data
+   - Replace stub with learned predictor
+   - Improve confidence calibration
+
+2. **Uncertainty Quantification**
+   - Ensemble predictions
+   - Bayesian inference
+   - Probabilistic rollouts
+
+3. **Multi-Modal Simulation**
+   - Visual rendering
+   - Haptic feedback
+   - Audio simulation
+
+4. **Parallel Rollouts**
+   - Explore multiple trajectories
+   - Compare outcomes
+   - Select best paths
+
+## References
+
+- PHASE2_SPEC.md: Imagination/simulation pipeline section
+- API Documentation: `/docs` and `/redoc` endpoints
+- Test Suite: `tests/jepa/` and `tests/api/test_api.py`
+
+## Support
+
+For questions or issues:
+1. Check existing tests for examples
+2. Review API documentation at `/docs`
+3. Open an issue on GitHub
