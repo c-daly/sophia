@@ -199,9 +199,8 @@ class TestPrototypeIntegration:
         )
         assert response.status_code == 201
         plan_data = response.json()
-        plan_id = plan_data["plan_id"]
         assert len(plan_data["plan"]) == 4
-
+        # Plan ID is stored but not used in this test
         # Verify plan is written to Neo4j (would need direct Neo4j query in real test)
         # For now, we trust that the plan endpoint wrote it
 
