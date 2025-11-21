@@ -6,55 +6,20 @@ on:
   pull_request:
     branches: [ main, develop ]
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
+permissions:
+  contents: read
 
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Install Poetry
-      run: |
-        curl -sSL https://install.python-poetry.org | python3 -
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-    
-    - name: Configure Poetry
-      run: |
-        poetry config virtualenvs.create true
-        poetry config virtualenvs.in-project true
-    
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      with:
-        path: .venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
-        restore-keys: |
-          venv-${{ runner.os }}-${{ matrix.python-version }}-
-    
-    - name: Install dependencies
-      run: |
-        poetry install
-    
-    - name: Run linters
-      run: |
-        poetry run black --check src tests
-        poetry run ruff check src tests
-    
-    - name: Run tests
-      run: |
-        poetry run pytest tests/ -v -m "not integration" --cov=sophia --cov-report=xml
-    
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-      if: matrix.python-version == '3.12'
-      with:
-        file: ./coverage.xml
-        fail_ci_if_error: false
+jobs:
+  standard:
+    uses: c-daly/logos/.github/workflows/reusable-standard-ci.yml@main
+    with:
+      python_versions: '["3.11","3.12"]'
+      python_package_manager: 'poetry'
+      python_command_prefix: 'poetry run '
+      poetry_install_args: '--with dev'
+      python_lint_paths: 'src tests'
+      mypy_targets: 'src'
+      pytest_command: 'pytest tests/ -v -m "not integration" --cov=sophia --cov-report=term --cov-report=xml'
+      coverage_python_version: '3.12'
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
