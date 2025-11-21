@@ -23,6 +23,7 @@ Safety & patterns
 
 GitHub, tickets & PRs
 - Follow the workspace-wide rules in `logos/.github/copilot-instructions.md` for issue titles, labels, branch naming, and PR requirements. PRs that change ontology, SHACL, or infra must include references to `logos/` artifacts and update validation tests.
+- When you start work on an issue that lives on the LOGOS workspace project, move its card to *In Progress* (and adjust any `status/*` label). Once the change lands, move it to *Done* so the shared board remains accurate.
 
 Examples
 - Add a planner endpoint: add handler in `src/`, add `tests/` covering planner logic, document API in `docs/`, and add the PR checklist linking to the issue that requested the feature.
