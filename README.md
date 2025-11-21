@@ -212,6 +212,20 @@ curl -X POST http://localhost:8000/execute \
   }'
 ```
 
+## Local Testing (CI Parity)
+
+Sophia uses the shared LOGOS workflow template. Run the same commands locally before opening a PR:
+
+```bash
+poetry install --with dev
+poetry run ruff check src tests
+poetry run black --check src tests
+poetry run mypy src
+poetry run pytest tests/ -v -m "not integration" --cov=sophia --cov-report=term --cov-report=xml
+```
+
+If these commands pass locally, they will pass the GitHub Actions gate defined in `.github/workflows/ci.yml`.
+
 ### Running Locally (Development)
 
 For development without Docker:

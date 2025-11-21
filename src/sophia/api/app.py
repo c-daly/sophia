@@ -3,7 +3,7 @@
 import os
 import uuid
 import logging
-from typing import List, Optional
+from typing import List, Optional, AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -126,7 +126,7 @@ _jepa_runner: Optional[JEPARunner] = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
     global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg, _jepa_runner
 

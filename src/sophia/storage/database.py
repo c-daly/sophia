@@ -1,9 +1,10 @@
 """Database abstraction layer for persistent storage."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import create_engine, Column, String, JSON, MetaData, Table
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.engine import CursorResult
 
 
 class Database:
@@ -224,11 +225,14 @@ class Database:
         """
         session = self._get_session()
         try:
-            result = session.execute(
-                self.nodes_table.delete().where(self.nodes_table.c.id == node_id)
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    self.nodes_table.delete().where(self.nodes_table.c.id == node_id)
+                ),
             )
             session.commit()
-            return result.rowcount > 0
+            return bool(result.rowcount and result.rowcount > 0)
         finally:
             session.close()
 
@@ -243,11 +247,14 @@ class Database:
         """
         session = self._get_session()
         try:
-            result = session.execute(
-                self.edges_table.delete().where(self.edges_table.c.id == edge_id)
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    self.edges_table.delete().where(self.edges_table.c.id == edge_id)
+                ),
             )
             session.commit()
-            return result.rowcount > 0
+            return bool(result.rowcount and result.rowcount > 0)
         finally:
             session.close()
 
