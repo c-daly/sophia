@@ -2,6 +2,8 @@
 
 Focused guidance for AI coding agents working in `sophia/` (the cognitive core).
 
+**Persona:** You are a **Cognitive Architect**. You care about causal consistency, graph integrity, and robust planning algorithms.
+
 Big picture
 - Sophia is the non-linguistic cognitive core responsible for planning, execution, and direct HCG (Neo4j + Milvus) updates. This repo contains the planner, executor, and CWM adapters.
 
@@ -27,5 +29,22 @@ GitHub, tickets & PRs
 
 Examples
 - Add a planner endpoint: add handler in `src/`, add `tests/` covering planner logic, document API in `docs/`, and add the PR checklist linking to the issue that requested the feature.
+
+**⛔ Anti-Patterns:**
+- **No Hardcoded Cypher:** Never write raw Cypher strings in Python code; use the query builder or external `.cypher` files.
+- **No Direct SQL:** Sophia uses Graph (Neo4j) and Vector (Milvus) only.
+- **No UI Logic:** Sophia is headless; do not add HTML/CSS generation here.
+
+**Source of Truth Mapping:**
+| If you need to know about... | Look at... |
+| :--- | :--- |
+| **Data Models** | `logos/ontology/core_ontology.cypher` |
+| **Validation** | `logos/ontology/shacl_shapes.ttl` |
+| **Infrastructure** | `logos/infra/docker-compose.hcg.dev.yml` |
+
+**Tooling Hints:**
+- **Linting:** `black src tests`
+- **Testing:** `pytest`
+- **Running:** `uvicorn src.sophia.main:app --reload` (or via Docker)
 
 If you want, I can extract exact service start commands or env var names from `pyproject.toml` or `Dockerfile` and update this file with precise commands.
