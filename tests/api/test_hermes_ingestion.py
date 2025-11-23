@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, ANY
 from datetime import datetime, timezone
 
 from sophia.api.app import create_app
@@ -120,20 +120,18 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_node.assert_any_call(
                 node_id=sample_proposal["proposal_id"],
                 node_type="hermes_proposal",
-                properties=pytest.approx(
-                    {
-                        "source_service": "hermes",
-                        "llm_provider": "openai",
-                        "model": "gpt-4",
-                        "generated_at": sample_proposal["generated_at"],
-                        "confidence": 0.85,
-                        "raw_text": "Move the red block to the bin",
-                        "diagnostics": sample_proposal["diagnostics"],
-                        "session_id": "test_session_123",
-                        "user_id": "test_user",
-                    },
-                    rel=1e-5
-                ),
+                properties={
+                    "source_service": "hermes",
+                    "llm_provider": "openai",
+                    "model": "gpt-4",
+                    "generated_at": sample_proposal["generated_at"],
+                    "confidence": 0.85,
+                    "raw_text": "Move the red block to the bin",
+                    "diagnostics": sample_proposal["diagnostics"],
+                    "session_id": "test_session_123",
+                    "user_id": "test_user",
+                    "ingested_at": ANY,
+                },
             )
 
     def test_ingestion_creates_plan_step_nodes(self, client, sample_proposal):

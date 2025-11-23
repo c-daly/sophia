@@ -3,6 +3,7 @@
 import os
 import uuid
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional, AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -736,6 +737,7 @@ def create_app() -> FastAPI:
 
                     # Create edge from proposal to plan step
                     _hcg_client.add_edge(
+                        edge_id=f"e_{request.proposal_id}_{step_id}",
                         source_id=request.proposal_id,
                         target_id=step_id,
                         relation="contains_plan_step",
@@ -758,6 +760,7 @@ def create_app() -> FastAPI:
 
                     # Create edge from proposal to imagined state
                     _hcg_client.add_edge(
+                        edge_id=f"e_{request.proposal_id}_{state_id}",
                         source_id=request.proposal_id,
                         target_id=state_id,
                         relation="contains_imagined_state",
@@ -780,6 +783,7 @@ def create_app() -> FastAPI:
 
                     # Create edge from proposal to tool call
                     _hcg_client.add_edge(
+                        edge_id=f"e_{request.proposal_id}_{tool_id}",
                         source_id=request.proposal_id,
                         target_id=tool_id,
                         relation="contains_tool_call",
