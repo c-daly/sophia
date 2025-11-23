@@ -129,7 +129,7 @@ class SHACLValidator:
         g.add((plan_step_shape, RDF.type, SH.NodeShape))
         g.add((plan_step_shape, SH.targetClass, ex.ProposedPlanStep))
         g.add((plan_step_shape, SH.property, ex.PlanStepSourceProperty))
-        
+
         step_source_prop = ex.PlanStepSourceProperty
         g.add((step_source_prop, RDF.type, SH.PropertyShape))
         g.add((step_source_prop, SH.path, ex.source_proposal))
@@ -140,7 +140,7 @@ class SHACLValidator:
         g.add((imagined_state_shape, RDF.type, SH.NodeShape))
         g.add((imagined_state_shape, SH.targetClass, ex.ProposedImaginedState))
         g.add((imagined_state_shape, SH.property, ex.ImaginedStateSourceProperty))
-        
+
         state_source_prop = ex.ImaginedStateSourceProperty
         g.add((state_source_prop, RDF.type, SH.PropertyShape))
         g.add((state_source_prop, SH.path, ex.source_proposal))
@@ -151,7 +151,7 @@ class SHACLValidator:
         g.add((tool_call_shape, RDF.type, SH.NodeShape))
         g.add((tool_call_shape, SH.targetClass, ex.ProposedToolCall))
         g.add((tool_call_shape, SH.property, ex.ToolCallSourceProperty))
-        
+
         tool_source_prop = ex.ToolCallSourceProperty
         g.add((tool_source_prop, RDF.type, SH.PropertyShape))
         g.add((tool_source_prop, SH.path, ex.source_proposal))
@@ -226,7 +226,7 @@ class SHACLValidator:
         if "type" in node_data:
             node_type = node_data["type"]
             g.add((node_uri, ex.nodeType, Literal(node_type)))
-            
+
             # Add specific type class for SHACL validation
             if node_type == "hermes_proposal":
                 g.add((node_uri, RDF.type, ex.HermesProposal))

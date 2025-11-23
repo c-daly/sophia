@@ -85,7 +85,7 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             # Should not return 403 Forbidden
             assert response.status_code != 403
 
@@ -96,10 +96,10 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
             data = response.json()
-            
+
             assert data["proposal_id"] == sample_proposal["proposal_id"]
             assert data["status"] == "accepted"
             assert "stored_node_ids" in data
@@ -113,9 +113,9 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
-            
+
             # Verify proposal node was created
             mock_hcg.add_node.assert_any_call(
                 node_id=sample_proposal["proposal_id"],
@@ -141,19 +141,21 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
-            
+
             # Verify plan step nodes were created (3 steps)
             plan_step_calls = [
-                call for call in mock_hcg.add_node.call_args_list
+                call
+                for call in mock_hcg.add_node.call_args_list
                 if call[1]["node_type"] == "proposed_plan_step"
             ]
             assert len(plan_step_calls) == 3
-            
+
             # Verify edges were created
             edge_calls = [
-                call for call in mock_hcg.add_edge.call_args_list
+                call
+                for call in mock_hcg.add_edge.call_args_list
                 if call[1]["relation"] == "contains_plan_step"
             ]
             assert len(edge_calls) == 3
@@ -165,19 +167,21 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
-            
+
             # Verify imagined state nodes were created (2 states)
             state_calls = [
-                call for call in mock_hcg.add_node.call_args_list
+                call
+                for call in mock_hcg.add_node.call_args_list
                 if call[1]["node_type"] == "proposed_imagined_state"
             ]
             assert len(state_calls) == 2
-            
+
             # Verify edges were created
             edge_calls = [
-                call for call in mock_hcg.add_edge.call_args_list
+                call
+                for call in mock_hcg.add_edge.call_args_list
                 if call[1]["relation"] == "contains_imagined_state"
             ]
             assert len(edge_calls) == 2
@@ -189,19 +193,21 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
-            
+
             # Verify tool call nodes were created (1 tool call)
             tool_calls = [
-                call for call in mock_hcg.add_node.call_args_list
+                call
+                for call in mock_hcg.add_node.call_args_list
                 if call[1]["node_type"] == "proposed_tool_call"
             ]
             assert len(tool_calls) == 1
-            
+
             # Verify edges were created
             edge_calls = [
-                call for call in mock_hcg.add_edge.call_args_list
+                call
+                for call in mock_hcg.add_edge.call_args_list
                 if call[1]["relation"] == "contains_tool_call"
             ]
             assert len(edge_calls) == 1
@@ -215,13 +221,13 @@ class TestHermesIngestionEndpoint:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "confidence": 0.75,
         }
-        
+
         with patch("sophia.api.app._hcg_client") as mock_hcg:
             mock_hcg.add_node = Mock()
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=minimal_proposal)
-            
+
             assert response.status_code == 201
             data = response.json()
             assert data["proposal_id"] == "hermes_minimal_001"
@@ -233,9 +239,9 @@ class TestHermesIngestionEndpoint:
             "proposal_id": "hermes_invalid_001",
             # Missing llm_provider, model, generated_at, confidence
         }
-        
+
         response = client.post("/ingest/hermes_proposal", json=invalid_proposal)
-        
+
         assert response.status_code == 422
 
     def test_ingestion_invalid_confidence_range(self, client):
@@ -247,9 +253,9 @@ class TestHermesIngestionEndpoint:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "confidence": 1.5,  # Invalid: > 1.0
         }
-        
+
         response = client.post("/ingest/hermes_proposal", json=invalid_proposal)
-        
+
         assert response.status_code == 422
 
     def test_ingestion_shacl_validation_failure(self, client, sample_proposal):
@@ -259,7 +265,7 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_node = Mock(side_effect=ValueError("SHACL validation failed"))
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 422
             data = response.json()
             assert "validation failed" in data["detail"].lower()
@@ -268,7 +274,7 @@ class TestHermesIngestionEndpoint:
         """Test that HCG unavailability returns 503."""
         with patch("sophia.api.app._hcg_client", None):
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 503
             data = response.json()
             assert "not available" in data["detail"].lower()
@@ -280,7 +286,7 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_node = Mock(side_effect=Exception("Database connection lost"))
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 500
             data = response.json()
             assert "failed to ingest" in data["detail"].lower()
@@ -292,13 +298,13 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
             data = response.json()
-            
+
             # Should have: 1 proposal + 3 plan steps + 2 states + 1 tool call = 7 nodes
             assert len(data["stored_node_ids"]) == 7
-            
+
             # First node should be the proposal itself
             assert data["stored_node_ids"][0] == sample_proposal["proposal_id"]
 
@@ -312,16 +318,16 @@ class TestHermesIngestionEndpoint:
             "confidence": 0.90,
             "raw_text": "Simple proposal without structured data",
         }
-        
+
         with patch("sophia.api.app._hcg_client") as mock_hcg:
             mock_hcg.add_node = Mock()
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=proposal)
-            
+
             assert response.status_code == 201
             data = response.json()
-            
+
             # Should only have the proposal node itself
             assert len(data["stored_node_ids"]) == 1
             assert data["stored_node_ids"][0] == proposal["proposal_id"]
@@ -333,13 +339,13 @@ class TestHermesIngestionEndpoint:
             mock_hcg.add_edge = Mock()
 
             response = client.post("/ingest/hermes_proposal", json=sample_proposal)
-            
+
             assert response.status_code == 201
-            
+
             # Check that proposal node has all provenance fields
             proposal_call = mock_hcg.add_node.call_args_list[0]
             properties = proposal_call[1]["properties"]
-            
+
             assert "source_service" in properties
             assert "llm_provider" in properties
             assert "model" in properties
