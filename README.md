@@ -11,7 +11,7 @@ Sophia is a foundational infrastructure for building knowledge graphs and managi
 - **Type-Safe Models**: Pydantic-based data models for nodes and edges
 - **Configuration Management**: Flexible settings management for deployment
 - **Extensible Architecture**: Clean, modular design for easy extension
-- **FastAPI Service**: RESTful API with `/plan`, `/imagine`, and `/execute` endpoints
+- **FastAPI Service**: RESTful API with `/plan`, `/imagine`, `/execute`, and `/ingest/hermes_proposal` endpoints
 - **Neo4j + SHACL**: Integration with Neo4j graph database and SHACL validation
 - **Authentication**: Token-based authentication middleware for secure API access
 - **Docker Support**: Containerized deployment with Docker Compose
@@ -116,6 +116,7 @@ The service will be available at `http://localhost:8000` with the following endp
 - `POST /imagine` - Generate imagined future states
 - `POST /simulate` - Run JEPA-based k-step dynamics simulation (Phase 2)
 - `POST /execute` - Execute a plan
+- `POST /ingest/hermes_proposal` - Ingest LLM proposals from Hermes with provenance tracking (no auth for local dev)
 
 ### Prototype: Minimal Plan/State API over HCG
 

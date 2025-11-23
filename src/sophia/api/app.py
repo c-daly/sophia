@@ -25,6 +25,8 @@ from sophia.api.models import (
     StateUpdateResponse,
     SimulateRequest,
     SimulateResponse,
+    HermesProposalRequest,
+    HermesProposalResponse,
 )
 from sophia.api.auth import verify_token
 from sophia.planner import Planner
@@ -664,6 +666,143 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to run simulation: {str(e)}",
+            )
+
+    # Hermes proposal ingestion endpoint
+    @app.post(
+        "/ingest/hermes_proposal",
+        response_model=HermesProposalResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["ingestion"],
+    )
+    async def ingest_hermes_proposal(
+        request: HermesProposalRequest,
+    ) -> HermesProposalResponse:
+        """Ingest an LLM proposal from Hermes with provenance tracking.
+
+        This endpoint accepts structured proposals from Hermes (including plans,
+        imagined states, diagnostics, and tool calls) and persists them to Neo4j
+        with full provenance metadata. SHACL validation is applied automatically.
+
+        Note: Authentication is disabled for local development.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            stored_node_ids = []
+
+            # Store the main proposal node with provenance
+            proposal_properties = {
+                "source_service": request.source_service,
+                "llm_provider": request.llm_provider,
+                "model": request.model,
+                "generated_at": request.generated_at,
+                "confidence": request.confidence,
+                "ingested_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            if request.raw_text:
+                proposal_properties["raw_text"] = request.raw_text
+            if request.diagnostics:
+                proposal_properties["diagnostics"] = request.diagnostics
+            if request.metadata:
+                proposal_properties.update(request.metadata)
+
+            _hcg_client.add_node(
+                node_id=request.proposal_id,
+                node_type="hermes_proposal",
+                properties=proposal_properties,
+            )
+            stored_node_ids.append(request.proposal_id)
+
+            # Store plan steps if provided
+            if request.plan_steps:
+                for idx, step in enumerate(request.plan_steps):
+                    step_id = f"{request.proposal_id}_plan_step_{idx}"
+                    _hcg_client.add_node(
+                        node_id=step_id,
+                        node_type="proposed_plan_step",
+                        properties={
+                            "source_proposal": request.proposal_id,
+                            "step_index": idx,
+                            **step,
+                        },
+                    )
+                    stored_node_ids.append(step_id)
+
+                    # Create edge from proposal to plan step
+                    _hcg_client.add_edge(
+                        source_id=request.proposal_id,
+                        target_id=step_id,
+                        relation="contains_plan_step",
+                    )
+
+            # Store imagined states if provided
+            if request.imagined_states:
+                for idx, state in enumerate(request.imagined_states):
+                    state_id = f"{request.proposal_id}_imagined_state_{idx}"
+                    _hcg_client.add_node(
+                        node_id=state_id,
+                        node_type="proposed_imagined_state",
+                        properties={
+                            "source_proposal": request.proposal_id,
+                            "state_index": idx,
+                            **state,
+                        },
+                    )
+                    stored_node_ids.append(state_id)
+
+                    # Create edge from proposal to imagined state
+                    _hcg_client.add_edge(
+                        source_id=request.proposal_id,
+                        target_id=state_id,
+                        relation="contains_imagined_state",
+                    )
+
+            # Store tool calls if provided
+            if request.tool_calls:
+                for idx, tool_call in enumerate(request.tool_calls):
+                    tool_id = f"{request.proposal_id}_tool_call_{idx}"
+                    _hcg_client.add_node(
+                        node_id=tool_id,
+                        node_type="proposed_tool_call",
+                        properties={
+                            "source_proposal": request.proposal_id,
+                            "call_index": idx,
+                            **tool_call,
+                        },
+                    )
+                    stored_node_ids.append(tool_id)
+
+                    # Create edge from proposal to tool call
+                    _hcg_client.add_edge(
+                        source_id=request.proposal_id,
+                        target_id=tool_id,
+                        relation="contains_tool_call",
+                    )
+
+            return HermesProposalResponse(
+                proposal_id=request.proposal_id,
+                stored_node_ids=stored_node_ids,
+                status="accepted",
+            )
+
+        except ValueError as e:
+            # SHACL validation failed
+            logger.error(f"Proposal validation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Proposal validation failed: {str(e)}",
+            )
+        except Exception as e:
+            logger.error(f"Error ingesting proposal: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to ingest proposal: {str(e)}",
             )
 
     # Execute endpoint

@@ -1,7 +1,13 @@
 # Sophia FastAPI Service - Implementation Summary
 
 ## Overview
-Successfully implemented Phase 2 Sophia FastAPI service exposing `/plan`, `/imagine`, and `/execute` endpoints on top of Neo4j + SHACL.
+Successfully implemented Phase 2 Sophia FastAPI service exposing `/plan`, `/imagine`, `/execute`, and `/ingest/hermes_proposal` endpoints on top of Neo4j + SHACL.
+
+The service provides:
+- **Planning**: Backward chaining to generate actionable plans from goals
+- **Imagination**: Generate future state predictions from CWM-G imagery
+- **Execution**: Execute plans with dry-run support
+- **Ingestion**: Accept and persist LLM proposals from Hermes with full provenance tracking
 
 ## Architecture
 
@@ -42,6 +48,38 @@ Successfully implemented Phase 2 Sophia FastAPI service exposing `/plan`, `/imag
   - step_index: Optional step to execute
   - dry_run: Simulate execution without state changes
 - **Returns**: Execution results with status
+
+#### POST /ingest/hermes_proposal
+- **Auth Required**: No (disabled for local development)
+- **Description**: Ingest LLM proposals from Hermes with full provenance tracking
+- **Input**:
+  - proposal_id: Unique identifier for the proposal
+  - source_service: Source service (default: "hermes")
+  - llm_provider: LLM provider name (e.g., "openai", "anthropic", "azure")
+  - model: Model identifier (e.g., "gpt-4", "claude-3-opus")
+  - generated_at: ISO timestamp when proposal was generated
+  - confidence: Confidence score [0.0, 1.0]
+  - raw_text: Optional raw LLM response text
+  - plan_steps: Optional array of structured plan steps
+  - imagined_states: Optional array of imagined future states
+  - diagnostics: Optional diagnostic information
+  - tool_calls: Optional array of tool calls requested by the LLM
+  - metadata: Optional additional metadata for provenance
+- **Returns**: 
+  - proposal_id: The ingested proposal identifier
+  - stored_node_ids: Array of Neo4j node IDs created
+  - status: Ingestion status ("accepted", "rejected", "partial")
+  - created_at: ISO timestamp of ingestion
+  - validation_results: Optional SHACL validation results
+- **Storage**: Creates the following node types in Neo4j:
+  - `hermes_proposal`: Main proposal node with provenance metadata
+  - `proposed_plan_step`: Plan step nodes linked to the proposal
+  - `proposed_imagined_state`: Imagined state nodes linked to the proposal
+  - `proposed_tool_call`: Tool call nodes linked to the proposal
+- **Validation**: SHACL validation ensures:
+  - All required provenance fields are present (source_service, llm_provider, model, generated_at, confidence)
+  - Confidence score is in range [0.0, 1.0]
+  - Child nodes have source_proposal links back to the parent proposal
 
 ## Configuration
 
@@ -160,6 +198,94 @@ curl -X POST http://localhost:8000/execute \
     "plan_id": "plan-uuid",
     "dry_run": true
   }'
+
+# Ingest a Hermes proposal (no auth required for local dev)
+curl -X POST http://localhost:8000/ingest/hermes_proposal \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proposal_id": "hermes_20251123_abc123",
+    "source_service": "hermes",
+    "llm_provider": "openai",
+    "model": "gpt-4",
+    "generated_at": "2025-11-23T12:00:00Z",
+    "confidence": 0.85,
+    "raw_text": "Move the red block to the bin",
+    "plan_steps": [
+      {
+        "action": "move_to_red_block",
+        "target": "red_block",
+        "parameters": {}
+      },
+      {
+        "action": "grasp_red_block",
+        "target": "red_block",
+        "parameters": {"force": 0.5}
+      },
+      {
+        "action": "move_to_bin",
+        "target": "bin",
+        "parameters": {}
+      }
+    ],
+    "imagined_states": [
+      {
+        "state_id": "state_1",
+        "entities": {"red_block": {"location": "table"}}
+      },
+      {
+        "state_id": "state_2",
+        "entities": {"red_block": {"location": "bin"}}
+      }
+    ],
+    "diagnostics": {
+      "reasoning": "Block needs to be moved from table to bin"
+    },
+    "tool_calls": [
+      {
+        "tool": "get_object_location",
+        "parameters": {"object_id": "red_block"}
+      }
+    ],
+    "metadata": {
+      "session_id": "test_session_123",
+      "user_id": "test_user"
+    }
+  }'
+```
+
+### Hermes Proposal Ingestion
+
+The ingestion endpoint accepts LLM proposals from Hermes and persists them with full provenance:
+
+**Error Responses:**
+- **201 Created**: Proposal successfully ingested and persisted
+- **422 Unprocessable Entity**: Validation failed (missing required fields, invalid confidence, SHACL failure)
+- **500 Internal Server Error**: Unexpected error during ingestion
+- **503 Service Unavailable**: HCG client not available
+
+**Python SDK Example** (after SDK regeneration):
+```python
+from sophia_client import SophiaClient
+from datetime import datetime, timezone
+
+client = SophiaClient(base_url="http://localhost:8000")
+
+proposal = {
+    "proposal_id": "hermes_20251123_abc123",
+    "llm_provider": "openai",
+    "model": "gpt-4",
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+    "confidence": 0.85,
+    "plan_steps": [
+        {"action": "move_to_red_block", "target": "red_block", "parameters": {}},
+        {"action": "grasp_red_block", "target": "red_block", "parameters": {"force": 0.5}},
+    ],
+}
+
+response = client.ingest_hermes_proposal(proposal)
+print(f"Ingested proposal: {response.proposal_id}")
+print(f"Created nodes: {response.stored_node_ids}")
+print(f"Status: {response.status}")
 ```
 
 ## Documentation

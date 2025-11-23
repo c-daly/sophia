@@ -269,3 +269,106 @@ class SimulateResponse(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO timestamp of simulation creation",
     )
+
+
+class HermesProposalRequest(BaseModel):
+    """Request model for Hermes LLM proposal ingestion."""
+
+    proposal_id: str = Field(..., description="Unique identifier for this proposal")
+    source_service: str = Field(
+        default="hermes", description="Source service (typically 'hermes')"
+    )
+    llm_provider: str = Field(
+        ...,
+        description="LLM provider name (e.g., 'openai', 'anthropic', 'azure')",
+        json_schema_extra={"example": "openai"},
+    )
+    model: str = Field(
+        ...,
+        description="Model identifier (e.g., 'gpt-4', 'claude-3-opus')",
+        json_schema_extra={"example": "gpt-4"},
+    )
+    generated_at: str = Field(
+        ...,
+        description="ISO timestamp when proposal was generated",
+        json_schema_extra={"example": "2025-11-23T12:00:00Z"},
+    )
+    confidence: float = Field(
+        ...,
+        description="Confidence score for this proposal",
+        ge=0.0,
+        le=1.0,
+        json_schema_extra={"example": 0.85},
+    )
+    raw_text: Optional[str] = Field(
+        default=None,
+        description="Raw LLM response text",
+    )
+    plan_steps: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Structured plan steps from the LLM",
+        json_schema_extra={
+            "example": [
+                {
+                    "action": "move_to_red_block",
+                    "target": "red_block",
+                    "parameters": {},
+                }
+            ]
+        },
+    )
+    imagined_states: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Imagined future states from the LLM",
+        json_schema_extra={
+            "example": [
+                {
+                    "state_id": "state_1",
+                    "entities": {"red_block": {"location": "bin"}},
+                }
+            ]
+        },
+    )
+    diagnostics: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Diagnostic information from the LLM",
+        json_schema_extra={"example": {"reasoning": "Block needs to be moved"}},
+    )
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Tool calls requested by the LLM",
+        json_schema_extra={
+            "example": [
+                {
+                    "tool": "get_object_location",
+                    "parameters": {"object_id": "red_block"},
+                }
+            ]
+        },
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Additional metadata for provenance tracking",
+    )
+
+
+class HermesProposalResponse(BaseModel):
+    """Response model for Hermes proposal ingestion."""
+
+    proposal_id: str = Field(..., description="The ingested proposal identifier")
+    stored_node_ids: List[str] = Field(
+        ..., description="Node IDs created in Neo4j for this proposal"
+    )
+    status: str = Field(
+        ...,
+        description="Ingestion status",
+        json_schema_extra={"example": "accepted"},
+    )
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="ISO timestamp of ingestion",
+    )
+    validation_results: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="SHACL validation results if applicable",
+    )
