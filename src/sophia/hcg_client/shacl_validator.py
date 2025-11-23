@@ -77,6 +77,86 @@ class SHACLValidator:
         g.add((relation_prop, SH.minCount, Literal(1)))
         g.add((relation_prop, SH.maxCount, Literal(1)))
 
+        # Hermes Proposal shape: Must have required provenance fields
+        proposal_shape = ex.HermesProposalShape
+        g.add((proposal_shape, RDF.type, SH.NodeShape))
+        g.add((proposal_shape, SH.targetClass, ex.HermesProposal))
+
+        # Source service property
+        g.add((proposal_shape, SH.property, ex.ProposalSourceProperty))
+        source_service_prop = ex.ProposalSourceProperty
+        g.add((source_service_prop, RDF.type, SH.PropertyShape))
+        g.add((source_service_prop, SH.path, ex.source_service))
+        g.add((source_service_prop, SH.minCount, Literal(1)))
+        g.add((source_service_prop, SH.datatype, RDFS.Literal))
+
+        # LLM provider property
+        g.add((proposal_shape, SH.property, ex.ProposalLLMProviderProperty))
+        llm_provider_prop = ex.ProposalLLMProviderProperty
+        g.add((llm_provider_prop, RDF.type, SH.PropertyShape))
+        g.add((llm_provider_prop, SH.path, ex.llm_provider))
+        g.add((llm_provider_prop, SH.minCount, Literal(1)))
+        g.add((llm_provider_prop, SH.datatype, RDFS.Literal))
+
+        # Model property
+        g.add((proposal_shape, SH.property, ex.ProposalModelProperty))
+        model_prop = ex.ProposalModelProperty
+        g.add((model_prop, RDF.type, SH.PropertyShape))
+        g.add((model_prop, SH.path, ex.model))
+        g.add((model_prop, SH.minCount, Literal(1)))
+        g.add((model_prop, SH.datatype, RDFS.Literal))
+
+        # Generated timestamp property
+        g.add((proposal_shape, SH.property, ex.ProposalGeneratedAtProperty))
+        generated_at_prop = ex.ProposalGeneratedAtProperty
+        g.add((generated_at_prop, RDF.type, SH.PropertyShape))
+        g.add((generated_at_prop, SH.path, ex.generated_at))
+        g.add((generated_at_prop, SH.minCount, Literal(1)))
+        g.add((generated_at_prop, SH.datatype, RDFS.Literal))
+
+        # Confidence property (0.0 to 1.0)
+        g.add((proposal_shape, SH.property, ex.ProposalConfidenceProperty))
+        confidence_prop = ex.ProposalConfidenceProperty
+        g.add((confidence_prop, RDF.type, SH.PropertyShape))
+        g.add((confidence_prop, SH.path, ex.confidence))
+        g.add((confidence_prop, SH.minCount, Literal(1)))
+        g.add((confidence_prop, SH.datatype, RDFS.Literal))
+        g.add((confidence_prop, SH.minInclusive, Literal(0.0)))
+        g.add((confidence_prop, SH.maxInclusive, Literal(1.0)))
+
+        # Proposed Plan Step shape
+        plan_step_shape = ex.ProposedPlanStepShape
+        g.add((plan_step_shape, RDF.type, SH.NodeShape))
+        g.add((plan_step_shape, SH.targetClass, ex.ProposedPlanStep))
+        g.add((plan_step_shape, SH.property, ex.PlanStepSourceProperty))
+
+        step_source_prop = ex.PlanStepSourceProperty
+        g.add((step_source_prop, RDF.type, SH.PropertyShape))
+        g.add((step_source_prop, SH.path, ex.source_proposal))
+        g.add((step_source_prop, SH.minCount, Literal(1)))
+
+        # Proposed Imagined State shape
+        imagined_state_shape = ex.ProposedImaginedStateShape
+        g.add((imagined_state_shape, RDF.type, SH.NodeShape))
+        g.add((imagined_state_shape, SH.targetClass, ex.ProposedImaginedState))
+        g.add((imagined_state_shape, SH.property, ex.ImaginedStateSourceProperty))
+
+        state_source_prop = ex.ImaginedStateSourceProperty
+        g.add((state_source_prop, RDF.type, SH.PropertyShape))
+        g.add((state_source_prop, SH.path, ex.source_proposal))
+        g.add((state_source_prop, SH.minCount, Literal(1)))
+
+        # Proposed Tool Call shape
+        tool_call_shape = ex.ProposedToolCallShape
+        g.add((tool_call_shape, RDF.type, SH.NodeShape))
+        g.add((tool_call_shape, SH.targetClass, ex.ProposedToolCall))
+        g.add((tool_call_shape, SH.property, ex.ToolCallSourceProperty))
+
+        tool_source_prop = ex.ToolCallSourceProperty
+        g.add((tool_source_prop, RDF.type, SH.PropertyShape))
+        g.add((tool_source_prop, SH.path, ex.source_proposal))
+        g.add((tool_source_prop, SH.minCount, Literal(1)))
+
         return g
 
     def validate_node(self, node_data: Dict[str, Any]) -> tuple[bool, List[str]]:
@@ -144,7 +224,18 @@ class SHACLValidator:
         g.add((node_uri, RDF.type, ex.Node))
 
         if "type" in node_data:
-            g.add((node_uri, ex.nodeType, Literal(node_data["type"])))
+            node_type = node_data["type"]
+            g.add((node_uri, ex.nodeType, Literal(node_type)))
+
+            # Add specific type class for SHACL validation
+            if node_type == "hermes_proposal":
+                g.add((node_uri, RDF.type, ex.HermesProposal))
+            elif node_type == "proposed_plan_step":
+                g.add((node_uri, RDF.type, ex.ProposedPlanStep))
+            elif node_type == "proposed_imagined_state":
+                g.add((node_uri, RDF.type, ex.ProposedImaginedState))
+            elif node_type == "proposed_tool_call":
+                g.add((node_uri, RDF.type, ex.ProposedToolCall))
 
         if "properties" in node_data:
             for key, value in node_data["properties"].items():
