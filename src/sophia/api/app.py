@@ -7,7 +7,16 @@ from datetime import datetime, timezone
 from typing import List, Optional, AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    status,
+    UploadFile,
+    File,
+    Form,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from sophia.api.models import (
@@ -214,7 +223,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         storage_service=_media_storage,
         jepa_runner=_jepa_runner,
     )
-    logger.info(f"Media ingestion service initialized with storage root: {storage_root}")
+    logger.info(
+        f"Media ingestion service initialized with storage root: {storage_root}"
+    )
 
     logger.info("Sophia API service started successfully")
 

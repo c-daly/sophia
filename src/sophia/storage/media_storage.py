@@ -46,8 +46,7 @@ class MediaStorageService:
         """
         if not file.filename:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Filename is required"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required"
             )
 
         # Get file extension
@@ -64,14 +63,11 @@ class MediaStorageService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid file extension '{file_ext}' for media type '{media_type.value}'. "
-                       f"Allowed: {', '.join(sorted(allowed_extensions[media_type]))}"
+                f"Allowed: {', '.join(sorted(allowed_extensions[media_type]))}",
             )
 
     async def store_file(
-        self,
-        file: UploadFile,
-        media_type: MediaType,
-        sample_id: Optional[str] = None
+        self, file: UploadFile, media_type: MediaType, sample_id: Optional[str] = None
     ) -> Tuple[str, str, int]:
         """Store uploaded file to disk.
 
@@ -101,15 +97,15 @@ class MediaStorageService:
             # Write file to disk
             content = await file.read()
             file_size = len(content)
-            
+
             # Check file size after reading (max 100MB)
             max_size = 100 * 1024 * 1024  # 100MB
             if file_size > max_size:
                 raise HTTPException(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"File size {file_size} bytes exceeds maximum allowed size of {max_size} bytes"
+                    detail=f"File size {file_size} bytes exceeds maximum allowed size of {max_size} bytes",
                 )
-            
+
             with open(file_path, "wb") as f:
                 f.write(content)
 
@@ -124,7 +120,7 @@ class MediaStorageService:
             logger.error(f"Failed to store file: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to store file: {str(e)}"
+                detail=f"Failed to store file: {str(e)}",
             ) from e
 
     def extract_metadata(self, file_path: str, media_type: MediaType) -> MediaMetadata:
@@ -142,7 +138,7 @@ class MediaStorageService:
 
         try:
             # Extract format from file extension
-            metadata.format = path.suffix.lstrip('.').upper()
+            metadata.format = path.suffix.lstrip(".").upper()
 
             if media_type == MediaType.IMAGE:
                 self._extract_image_metadata(file_path, metadata)
@@ -211,8 +207,8 @@ class MediaStorageService:
             Hex digest of SHA256 hash
         """
         sha256 = hashlib.sha256()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b''):
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
                 sha256.update(chunk)
         return sha256.hexdigest()
 

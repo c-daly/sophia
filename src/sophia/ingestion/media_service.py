@@ -209,9 +209,7 @@ class MediaIngestionService:
             logger.error(f"Failed to retrieve media sample {sample_id}: {e}")
             return None
 
-    def list_media_samples(
-        self, query: MediaSampleQuery
-    ) -> MediaSamplesListResponse:
+    def list_media_samples(self, query: MediaSampleQuery) -> MediaSamplesListResponse:
         """List media samples with optional filtering.
 
         Args:
@@ -329,9 +327,7 @@ class MediaIngestionService:
             logger.debug(f"Failed to count simulations for {sample_id}: {e}")
             return 0
 
-    def link_sample_to_simulation(
-        self, sample_id: str, simulation_id: str
-    ) -> bool:
+    def link_sample_to_simulation(self, sample_id: str, simulation_id: str) -> bool:
         """Link a media sample to a simulation that used it.
 
         Args:
