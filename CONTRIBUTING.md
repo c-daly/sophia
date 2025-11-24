@@ -4,6 +4,13 @@ Thank you for your interest in contributing to Sophia! This document provides gu
 
 ## Development Setup
 
+### Prerequisites
+
+- Python >=3.11
+- Poetry (recommended)
+
+### Setup with Poetry
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/c-daly/sophia.git
@@ -19,13 +26,27 @@ Thank you for your interest in contributing to Sophia! This document provides gu
 
 3. Install dependencies:
    ```bash
-   poetry install
+   poetry install --with dev
    ```
 
 4. Run tests to verify your setup:
    ```bash
    poetry run pytest
    ```
+
+## CI Parity: Running All Checks Locally
+
+Before opening a pull request, run these commands to mirror the GitHub Actions CI pipeline:
+
+```bash
+poetry install --with dev
+poetry run ruff check src tests
+poetry run black --check src tests
+poetry run mypy src
+poetry run pytest tests/ -v -m "not integration" --cov=sophia --cov-report=term --cov-report=xml
+```
+
+All checks must pass for your PR to be merged. Note: Integration tests requiring Neo4j/Milvus are excluded from CI using the `-m "not integration"` marker.
 
 ## Development Workflow
 
@@ -43,10 +64,11 @@ Thank you for your interest in contributing to Sophia! This document provides gu
    poetry run pytest
    ```
 
-5. Format and lint your code:
+5. Format and lint your code (see CI Parity section above for all checks):
    ```bash
    poetry run black src tests
    poetry run ruff check src tests
+   poetry run mypy src
    ```
 
 6. Commit your changes with a clear commit message:
