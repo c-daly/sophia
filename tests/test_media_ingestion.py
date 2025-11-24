@@ -44,6 +44,7 @@ def media_storage_service(temp_storage_dir):
 def mock_hcg_client():
     """Create mock HCG client."""
     from unittest.mock import MagicMock
+
     client = MagicMock()
     client.add_node = Mock(return_value="node123")
     client.get_node = Mock(
@@ -550,10 +551,10 @@ class TestMediaSamplesListEndpoint:
         self, mock_hcg, mock_ingestion, client, auth_headers
     ):
         """Test that /media/samples supports filtering by media_type."""
+
         async def mock_list(query):
-            return MediaSamplesListResponse(
-                samples=[], total=0, limit=50, offset=0
-            )
+            return MediaSamplesListResponse(samples=[], total=0, limit=50, offset=0)
+
         mock_ingestion.list_media_samples = mock_list
 
         response = client.get(
@@ -592,8 +593,10 @@ class TestMediaSampleDetailEndpoint:
             simulation_count=3,
             metadata=MediaMetadata(width=1920, height=1080, format="PNG"),
         )
+
         async def mock_get(sample_id):
             return mock_sample
+
         mock_ingestion.get_media_sample = mock_get
 
         response = client.get("/media/samples/sample123", headers=auth_headers)
@@ -609,8 +612,10 @@ class TestMediaSampleDetailEndpoint:
         self, mock_hcg, mock_ingestion, client, auth_headers
     ):
         """Test that /media/samples/{id} returns 404 for non-existent sample."""
+
         async def mock_get(sample_id):
             return None
+
         mock_ingestion.get_media_sample = mock_get
 
         response = client.get("/media/samples/nonexistent", headers=auth_headers)
