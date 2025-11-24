@@ -415,8 +415,13 @@ sophia/
 
 ## Research & Documentation
 
-Research documents and design notes are available in the `docs/research/` directory:
+Research documents and design notes are available in the `docs/` directory:
 
+### Architecture & Integration
+- [Shared SDK Analysis](docs/SHARED_SDK_ANALYSIS.md) - Comprehensive analysis of Sophia/Hermes integration pattern and SDK feasibility (Recommendation: API-first, no shared SDK)
+- [SDK Recommendation Summary](docs/SDK_RECOMMENDATION_SUMMARY.md) - Quick reference for service integration decisions
+
+### Research
 - [Causal Reasoning Methods Survey](docs/research/causal-reasoning-methods.md) - Comprehensive survey of backward/forward chaining, causal graphs, and counterfactual reasoning for HCG planning
 - [Planner Applicability Notes](docs/research/planner-applicability-notes.md) - Quick reference guide for implementing causal reasoning in the Planner component
 - [GNN Integration Assessment](docs/research/gnn-integration-assessment.md) - Analysis of Graph Neural Network approaches for knowledge graph enhancement, integration risks/benefits, and recommendations
