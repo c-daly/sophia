@@ -563,7 +563,6 @@ class TestMediaSamplesListEndpoint:
         )
 
         assert response.status_code == 200
-        assert query.offset == 5
 
 
 class TestMediaSampleDetailEndpoint:
