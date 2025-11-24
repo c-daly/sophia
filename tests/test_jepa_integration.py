@@ -21,11 +21,11 @@ def mock_hcg_client():
     client.add_node = Mock()
     client.add_edge = Mock()
     client.get_node = Mock(return_value={"sample_id": "test_sample"})
-    
+
     # Mock _milvus private attribute (correct API)
     client._milvus = Mock()
     client._milvus.insert_embedding = Mock()
-    
+
     # Mock _neo4j._driver for session context (correct API)
     mock_session = Mock()
     mock_result = Mock()
@@ -33,15 +33,15 @@ def mock_hcg_client():
     mock_session.run = Mock(return_value=mock_result)
     mock_session.__enter__ = Mock(return_value=mock_session)
     mock_session.__exit__ = Mock(return_value=False)
-    
+
     mock_driver = Mock()
     mock_driver.session = Mock(return_value=mock_session)
-    
+
     mock_neo4j = Mock()
     mock_neo4j._driver = mock_driver
     mock_neo4j._database = "neo4j"
     client._neo4j = mock_neo4j
-    
+
     return client
 
 
@@ -53,7 +53,7 @@ def sample_image_file():
         b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
         b"\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c"
         b"\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c"
-        b"\x1c $.\' \",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01"
+        b"\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01"
         b"\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00"
         b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x08\x01\x01\x00\x00?"
         b"\x00\x7f\xff\xd9"
@@ -152,7 +152,9 @@ class TestMediaToSimulationIntegration:
 
         # Verify embeddings would be stored in Milvus
         # (In real test with full Milvus, verify actual storage)
-        assert mock_hcg_client._milvus.insert_embedding.call_count >= 2  # visual + physics
+        assert (
+            mock_hcg_client._milvus.insert_embedding.call_count >= 2
+        )  # visual + physics
 
     @pytest.mark.asyncio
     async def test_simulate_with_media_sample_id(self, mock_hcg_client):
@@ -196,7 +198,7 @@ class TestMediaToSimulationIntegration:
             "visual": [0.1] * 768,
             "physics": [0.2] * 768,
         }
-        
+
         await media_service._store_jepa_embeddings(
             sample_id="sample_123",
             embeddings=embeddings,
@@ -261,7 +263,7 @@ class TestEndToEndWorkflow:
         self, mock_hcg_client, jepa_runner, sample_image_file
     ):
         """Test complete workflow: upload → JEPA → embeddings → simulation.
-        
+
         This test verifies the full integration:
         1. Apollo uploads image with question
         2. Sophia ingests media

@@ -445,7 +445,7 @@ class MediaIngestionService:
             # Store each embedding type (visual, physics, etc.)
             for embedding_type, embedding_vector in embeddings.items():
                 embedding_id = f"{sample_id}_{embedding_type}"
-                
+
                 # Insert embedding into Milvus using private adapter
                 self.hcg_client._milvus.insert_embedding(
                     embedding_id=embedding_id,
@@ -477,4 +477,3 @@ class MediaIngestionService:
                 f"[JEPA Hook] Failed to store embeddings for {sample_id} in Milvus: {e}"
             )
             # Don't raise - media ingestion should succeed even if embedding storage fails
-

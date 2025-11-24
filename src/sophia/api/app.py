@@ -615,7 +615,7 @@ def create_app() -> FastAPI:
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Media sample {request.media_sample_id} not found",
                         )
-                    
+
                     # Retrieve embedding IDs for this sample from Neo4j
                     # (embeddings themselves are in Milvus, we just track the IDs)
                     try:
@@ -631,7 +631,7 @@ def create_app() -> FastAPI:
                             media_embeddings = [
                                 record["embedding_id"] for record in result
                             ]
-                        
+
                         logger.info(
                             f"Found {len(media_embeddings)} embeddings for media sample {request.media_sample_id}"
                         )
@@ -716,11 +716,11 @@ def create_app() -> FastAPI:
                 "sensor_count": len(context.sensor_refs),
                 "talos_metadata": context.talos_metadata.model_dump(),
             }
-            
+
             # Add media reference if provided
             if request.media_sample_id:
                 simulation_properties["media_sample_id"] = request.media_sample_id
-            
+
             _hcg_client.add_node(
                 node_id=result.simulation_id,
                 node_type="simulation",
@@ -741,9 +741,7 @@ def create_app() -> FastAPI:
                         f"Linked simulation {result.simulation_id} to media sample {request.media_sample_id}"
                     )
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to create simulation->media edge: {e}"
-                    )
+                    logger.warning(f"Failed to create simulation->media edge: {e}")
 
             # Convert result to response format
             response = SimulateResponse(

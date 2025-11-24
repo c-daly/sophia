@@ -358,7 +358,7 @@ class JEPARunner:
 
         # Stub implementation: generate placeholder embeddings
         embedding_dim = 768
-        
+
         # Generate main visual embedding (simulates JEPA latent representation)
         visual_embedding = [
             float(hash(f"{sample_id}_visual_{i}") % 1000) / 1000.0
@@ -393,4 +393,3 @@ class JEPARunner:
         )
 
         return result
-
