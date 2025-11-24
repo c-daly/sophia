@@ -76,6 +76,7 @@ class MediaSampleResponse(BaseModel):
     media_type: MediaType
     file_path: str
     file_size: int
+    file_hash: str
     timestamp: datetime
     metadata: MediaMetadata
     neo4j_node_id: str

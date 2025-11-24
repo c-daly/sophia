@@ -181,27 +181,29 @@ class MediaIngestionService:
             if not node_data:
                 return None
 
-            properties = node_data.get("properties", {})
+            # Node data might be flat or nested - handle both
+            properties = node_data.get("properties", node_data)
 
             # Reconstruct metadata from flat properties
-            metadata = MediaMetadata.model_construct()
+            metadata_dict = {}
             for key, value in properties.items():
                 if key.startswith("metadata_"):
                     field_name = key.replace("metadata_", "")
-                    if hasattr(metadata, field_name):
-                        setattr(metadata, field_name, value)
+                    metadata_dict[field_name] = value
+            metadata = MediaMetadata(**metadata_dict)
 
             # Count simulations using this sample
             simulation_count = self._count_simulations_for_sample(sample_id)
 
             return MediaSampleResponse(
-                sample_id=sample_id,
+                sample_id=properties.get("sample_id", sample_id),
                 media_type=MediaType(properties["media_type"]),
                 file_path=properties["file_path"],
                 file_size=properties["file_size"],
+                file_hash=properties["file_hash"],
                 timestamp=datetime.fromisoformat(properties["timestamp"]),
                 metadata=metadata,
-                neo4j_node_id=node_data["id"],
+                neo4j_node_id=properties.get("id", sample_id),
                 simulation_count=simulation_count,
             )
 
@@ -263,16 +265,20 @@ class MediaIngestionService:
                 samples = []
 
                 for record in result:
-                    node = record["n"]
-                    properties = dict(node)
+                    node_dict = record["n"]
+                    # Handle both Neo4j node objects and dicts
+                    if hasattr(node_dict, "__getitem__"):
+                        properties = dict(node_dict)
+                    else:
+                        properties = node_dict
 
                     # Reconstruct metadata
-                    metadata = MediaMetadata.model_construct()
+                    metadata_dict = {}
                     for key, value in properties.items():
                         if key.startswith("metadata_"):
                             field_name = key.replace("metadata_", "")
-                            if hasattr(metadata, field_name):
-                                setattr(metadata, field_name, value)
+                            metadata_dict[field_name] = value
+                    metadata = MediaMetadata(**metadata_dict)
 
                     samples.append(
                         MediaSampleResponse(
@@ -280,6 +286,7 @@ class MediaIngestionService:
                             media_type=MediaType(properties["media_type"]),
                             file_path=properties["file_path"],
                             file_size=properties["file_size"],
+                            file_hash=properties["file_hash"],
                             timestamp=datetime.fromisoformat(properties["timestamp"]),
                             metadata=metadata,
                             neo4j_node_id=properties["sample_id"],
