@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
-from sophia.api.models import SimulateRequest, SimulateResponse
+from sophia.api.models import SimulateResponse
 from sophia.api.app import create_app
 
 

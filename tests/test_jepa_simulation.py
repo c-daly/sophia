@@ -1,12 +1,11 @@
 """Tests for JEPA simulation workflows and k-step rollout."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock
-from datetime import datetime, timezone
+from unittest.mock import Mock
+from datetime import datetime
 
 from sophia.jepa.runner import JEPARunner
 from sophia.jepa.models import Entity
-from sophia.api.models import SimulateRequest, SimulateResponse
 
 
 @pytest.fixture

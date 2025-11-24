@@ -1,11 +1,9 @@
 """Tests for error handling and edge cases in Sophia services."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from io import BytesIO
-from PIL import Image
 
 from sophia.storage.media_storage import MediaStorageService
 from sophia.ingestion.media_service import MediaIngestionService
@@ -239,7 +237,7 @@ class TestSimulationErrors:
             )
             # If it succeeds, entities were filled with defaults
             assert result is not None
-        except (ValueError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError):
             # Or raise validation error
             assert True
 
@@ -406,8 +404,6 @@ class TestResourceCleanup:
         mock_file.filename = "test.jpg"
         mock_file.read = AsyncMock(return_value=b"fake image data")
 
-        initial_files = len(list(temp_storage_dir.rglob("*")))
-
         # Attempt ingestion (should fail)
         try:
             await media_ingestion_service.ingest_media(
@@ -419,7 +415,6 @@ class TestResourceCleanup:
 
         # Check if files were cleaned up (implementation-dependent)
         # This test documents expected behavior
-        final_files = len(list(temp_storage_dir.rglob("*")))
 
         # Ideally, failed uploads don't leave orphaned files
         # (In current implementation, files might remain until manual cleanup)
