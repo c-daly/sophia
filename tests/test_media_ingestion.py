@@ -275,7 +275,7 @@ async def test_get_media_sample(media_ingestion_service, mock_hcg_client):
 @pytest.mark.asyncio
 async def test_get_media_sample_not_found(media_ingestion_service, mock_hcg_client):
     """Test retrieving non-existent media sample."""
-    mock_hcg_client.get_node.return_value = None
+    mock_hcg_client.get_node.side_effect = lambda sample_id: None
 
     result = media_ingestion_service.get_media_sample("nonexistent")
     assert result is None
