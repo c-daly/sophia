@@ -1,5 +1,7 @@
 # Sophia
 
+[![CI](https://github.com/c-daly/sophia/actions/workflows/ci.yml/badge.svg)](https://github.com/c-daly/sophia/actions/workflows/ci.yml)
+
 **Non-linguistic cognitive core for Project LOGOS**
 
 Sophia is a foundational infrastructure for building knowledge graphs and managing cognitive data structures. It provides a flexible, extensible framework for representing and storing knowledge in a graph-based format.
