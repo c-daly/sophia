@@ -369,11 +369,9 @@ class MediaIngestionService:
     ) -> None:
         """Notify JEPA runner about new media sample for perception processing.
 
-        This is a hook for future integration. For now, it's a no-op that logs
-        the notification. In the future, this could:
-        - Publish to a message queue for async processing
-        - Call jepa_runner.process_media_sample() directly
-        - Trigger CWM-G embedding generation for the sample
+        This hook processes the media sample through the JEPA runner to generate
+        embeddings representing physical understanding. The embeddings are then
+        stored in Milvus for later use in simulations.
 
         Args:
             sample_id: Sample identifier
@@ -383,17 +381,99 @@ class MediaIngestionService:
             question: Optional perception question
         """
         logger.info(
-            f"[JEPA Hook] New {media_type.value} sample available: {sample_id} "
-            f"at {file_path} with metadata {metadata.model_dump(exclude_none=True)}"
+            f"[JEPA Hook] Processing sample {sample_id} ({media_type.value}) "
+            f"at {file_path}"
         )
         if question:
             logger.info(f"[JEPA Hook] Perception question: {question}")
 
-        # TODO: Implement actual JEPA notification
-        # Example: await self.jepa_runner.process_media_sample(
-        #     sample_id=sample_id,
-        #     file_path=file_path,
-        #     media_type=media_type,
-        #     metadata=metadata,
-        #     question=question,
-        # )
+        if not self.jepa_runner:
+            logger.warning("[JEPA Hook] JEPA runner not available, skipping processing")
+            return
+
+        try:
+            # Process media through JEPA runner
+            result = await self.jepa_runner.process_media_sample(
+                sample_id=sample_id,
+                file_path=file_path,
+                media_type=media_type.value,
+                metadata=metadata.model_dump(exclude_none=True),
+                question=question,
+            )
+
+            # Store embeddings in Milvus
+            await self._store_jepa_embeddings(
+                sample_id=sample_id,
+                embeddings=result["embeddings"],
+                metadata={
+                    "media_type": media_type.value,
+                    "model_version": result["model_version"],
+                    "confidence": result["confidence"],
+                    "question": question,
+                },
+            )
+
+            logger.info(
+                f"[JEPA Hook] Successfully processed sample {sample_id}, "
+                f"stored {len(result['embeddings'])} embedding sets in Milvus"
+            )
+
+        except Exception as e:
+            logger.error(f"[JEPA Hook] Failed to process sample {sample_id}: {e}")
+            # Don't raise - media ingestion should succeed even if JEPA processing fails
+
+    async def _store_jepa_embeddings(
+        self,
+        sample_id: str,
+        embeddings: Dict[str, list],
+        metadata: Dict[str, Any],
+    ) -> None:
+        """Store JEPA-generated embeddings in Milvus.
+
+        Args:
+            sample_id: Media sample identifier
+            embeddings: Dictionary of embedding vectors (visual, physics, etc.)
+            metadata: Additional metadata to store with embeddings
+        """
+        if not hasattr(self.hcg_client, "_milvus"):
+            logger.warning(
+                f"[JEPA Hook] Milvus not available, skipping embedding storage for {sample_id}"
+            )
+            return
+
+        try:
+            # Store each embedding type (visual, physics, etc.)
+            for embedding_type, embedding_vector in embeddings.items():
+                embedding_id = f"{sample_id}_{embedding_type}"
+
+                # Insert embedding into Milvus using private adapter
+                self.hcg_client._milvus.insert_embedding(
+                    embedding_id=embedding_id,
+                    node_id=sample_id,
+                    node_type=f"media_embedding_{embedding_type}",
+                    embedding=embedding_vector,
+                )
+
+                logger.info(
+                    f"[JEPA Hook] Stored {embedding_type} embedding {embedding_id} in Milvus"
+                )
+
+            # Create edge in Neo4j linking media sample to its embeddings
+            for embedding_type in embeddings.keys():
+                embedding_id = f"{sample_id}_{embedding_type}"
+                try:
+                    self.hcg_client.add_edge(
+                        edge_id=f"e_{sample_id}_{embedding_id}",
+                        source_id=sample_id,
+                        target_id=embedding_id,
+                        relation="has_embedding",
+                        properties={"embedding_type": embedding_type, **metadata},
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create Neo4j edge for embedding: {e}")
+
+        except Exception as e:
+            logger.error(
+                f"[JEPA Hook] Failed to store embeddings for {sample_id} in Milvus: {e}"
+            )
+            # Don't raise - media ingestion should succeed even if embedding storage fails

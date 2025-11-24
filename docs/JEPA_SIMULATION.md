@@ -2,26 +2,32 @@
 
 ## Overview
 
-The JEPA (Joint-Embedding Predictive Architecture) runner provides dynamics simulation capabilities for the Sophia cognitive system. It performs k-step forward prediction of system states, generating imagined processes and states with confidence scores.
+The JEPA (Joint-Embedding Predictive Architecture) runner provides dynamics simulation and media perception capabilities for the Sophia cognitive system. It performs:
+- K-step forward prediction of system states
+- Media sample processing (images, video) for physical world understanding
+- Cross-modal embedding generation for semantic reasoning
+
+This is a CPU-friendly stub implementation designed to be swapped with Meta's real JEPA model or hardware simulators (Talos/Gazebo) in Phase 3.
 
 ## Architecture
 
 ### Components
 
 1. **JEPA Runner** (`src/sophia/jepa/runner.py`)
-   - CPU-friendly stub implementation for dynamics simulation
+   - CPU-friendly stub implementation for dynamics simulation and media processing
    - Performs k-step rollouts with confidence decay
-   - Can be swapped with hardware simulators (Talos/Gazebo)
+   - Processes media samples to generate visual and physics embeddings
+   - Can be swapped with hardware simulators (Talos/Gazebo) or real JEPA model
 
 2. **Simulation Models** (`src/sophia/jepa/models.py`)
    - Context schema for simulation requests
    - Entity, sensor, and metadata models
    - Imagined process and state models
 
-3. **API Endpoint** (`/simulate`)
-   - RESTful endpoint for running simulations
-   - Stores results in Neo4j HCG with metadata
-   - Returns imagined states with confidence scores
+3. **API Endpoints**
+   - `/simulate` - RESTful endpoint for running simulations
+   - `/ingest/media` - Media upload with automatic JEPA processing
+   - Results stored in Neo4j HCG with embeddings in Milvus
 
 ## Context Schema
 
@@ -145,6 +151,163 @@ The simulation result contains:
 - **model_version**: JEPA model version
 - **overall_confidence**: Average confidence across states
 
+## Media Processing with JEPA
+
+### Overview
+
+The JEPA runner can process uploaded media (images, video) to generate embeddings for physical world understanding. This enables:
+- Grounding language in visual observations
+- Cross-modal semantic reasoning (match thoughts to images)
+- Context-aware simulations using uploaded media
+
+### Process Flow
+
+1. User uploads media via `/ingest/media` endpoint
+2. Media stored to disk + indexed in Neo4j as `MediaSample` node
+3. JEPA runner automatically processes the media
+4. Generates **visual_embedding** (768-dim) and **physics_embedding** (768-dim)
+5. Embeddings stored in Milvus vector database
+6. Neo4j relationships created: `MediaSample -[:has_embedding]-> Embedding`
+7. User can reference media in simulations via `media_sample_id`
+
+### Media Processing API
+
+#### Method: `process_media_sample()`
+
+```python
+from sophia.jepa import JEPARunner
+
+runner = JEPARunner()
+
+result = await runner.process_media_sample(
+    sample_id="ms_abc123",
+    file_path="/app/media_storage/image/ms_abc123.jpg",
+    media_type="image",
+    question="Will this stack collapse?",
+    metadata={"width": 1920, "height": 1080}
+)
+
+# Result structure
+{
+    "sample_id": "ms_abc123",
+    "media_type": "image",
+    "embeddings": {
+        "visual": [0.123, 0.456, ...],      # 768-dim vector
+        "physics": [0.789, 0.321, ...]      # 768-dim vector
+    },
+    "embedding_dim": 768,
+    "model_version": "jepa-stub-v1.0",
+    "confidence": 0.85,
+    "metadata": {
+        "file_path": "/app/media_storage/image/ms_abc123.jpg",
+        "question": "Will this stack collapse?",
+        "media_metadata": {"width": 1920, "height": 1080}
+    }
+}
+```
+
+### Embedding Types
+
+**visual_embedding (768-dim)**
+- Captures visual features: objects, spatial layout, appearance
+- Generated from image/video frames
+- Enables visual similarity search
+
+**physics_embedding (768-dim)**
+- Captures physical properties: stability, dynamics, affordances
+- Predicts physical outcomes
+- Grounds language in physics understanding
+
+### Using Media in Simulations
+
+Reference uploaded media in simulation requests:
+
+```python
+# Upload media first
+media_response = await upload_media("physics_scene.jpg", media_type="image")
+sample_id = media_response["sample_id"]
+
+# Use in simulation
+simulate_response = await simulate(
+    entities=[...],
+    k_steps=5,
+    media_sample_id=sample_id  # Links simulation to uploaded media
+)
+
+# Response includes media context
+{
+    "simulation_id": "sim_xyz789",
+    "media_sample_id": "ms_abc123",
+    "media_embeddings": ["emb_visual_abc123", "emb_physics_abc123"],
+    "imagined_states": [...],
+    ...
+}
+```
+
+### Neo4j Schema for Media
+
+```cypher
+# MediaSample node
+(m:MediaSample {
+  sample_id: "ms_abc123",
+  media_type: "image",
+  file_path: "/app/media_storage/image/ms_abc123.jpg",
+  file_size: 245678,
+  file_hash: "a1b2c3...",
+  timestamp: "2025-01-15T10:30:00Z",
+  question: "Will this stack collapse?",
+  metadata_width: 1920,
+  metadata_height: 1080
+})
+
+# Embedding relationship
+(m)-[:has_embedding]->(e:Embedding {
+  id: "emb_visual_abc123",
+  vector_type: "visual",
+  dimension: 768
+})
+
+# Simulation usage
+(s:Simulation {simulation_id: "sim_xyz789"})-[:uses_media]->(m)
+```
+
+### Cross-Modal Reasoning
+
+JEPA embeddings enable semantic search across modalities:
+
+```python
+# Find images similar to text description
+query = "unstable block tower about to fall"
+text_embedding = embed_text(query)  # via Hermes
+
+# Search Milvus for similar visual embeddings
+similar_images = milvus.search(
+    collection="media_embeddings",
+    query_embedding=text_embedding,
+    filter={"vector_type": "visual"},
+    top_k=10
+)
+
+# Returns media samples visually similar to the text description
+```
+
+### Stub Implementation
+
+The current CPU-friendly stub:
+- Uses hash-based deterministic embedding generation
+- No GPU required, fast processing (<100ms)
+- Maintains correct data structures and API contracts
+- **Phase 3 Ready**: Real JEPA model can be swapped in with zero API changes
+
+```python
+# Current stub logic (simplified)
+def generate_visual_embedding(sample_id, embedding_dim=768):
+    return [
+        float(hash(f"{sample_id}_visual_{i}") % 1000) / 1000.0
+        for i in range(embedding_dim)
+    ]
+```
+
 ## Imagined Nodes
 
 ### ImaginedProcess
@@ -195,6 +358,7 @@ Content-Type: application/json
       "frame_id": "base_link"
     }
   ],
+  "media_sample_id": "ms_abc123",  // Optional: link to uploaded media
   "talos_metadata": {
     "simulator_version": "stub-v1.0",
     "physics_engine": "none",

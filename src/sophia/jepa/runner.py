@@ -316,3 +316,79 @@ class JEPARunner:
             }
 
         return state_data
+
+    async def process_media_sample(
+        self,
+        sample_id: str,
+        file_path: str,
+        media_type: str,
+        metadata: Dict[str, Any],
+        question: str | None = None,
+    ) -> Dict[str, Any]:
+        """Process uploaded media sample for physical understanding.
+
+        This method extracts visual features and generates embeddings that
+        represent the physical properties and dynamics visible in the media.
+        In the stub implementation, it generates random embeddings. A real
+        JEPA model would perform visual encoding and physical reasoning.
+
+        Args:
+            sample_id: Unique identifier for the media sample
+            file_path: Path to the stored media file
+            media_type: Type of media (image, video, audio)
+            metadata: Media metadata (dimensions, duration, etc.)
+            question: Optional perception question to guide processing
+
+        Returns:
+            Dictionary with processing results including embeddings
+        """
+        logger.info(
+            f"Processing media sample {sample_id} ({media_type}) for physical understanding"
+        )
+        if question:
+            logger.info(f"Perception question: {question}")
+
+        # TODO: Replace with actual JEPA model inference (Phase 3)
+        # Real implementation would:
+        # 1. Load media file (image/video frames)
+        # 2. Run through JEPA encoder
+        # 3. Extract latent representations of physical properties
+        # 4. Generate predictions about dynamics/physics
+        # 5. Return embeddings + confidence scores
+
+        # Stub implementation: generate placeholder embeddings
+        embedding_dim = 768
+
+        # Generate main visual embedding (simulates JEPA latent representation)
+        visual_embedding = [
+            float(hash(f"{sample_id}_visual_{i}") % 1000) / 1000.0
+            for i in range(embedding_dim)
+        ]
+
+        # Generate physics/dynamics embedding (simulates predicted physical properties)
+        physics_embedding = [
+            float(hash(f"{sample_id}_physics_{i}") % 1000) / 1000.0
+            for i in range(embedding_dim)
+        ]
+
+        result = {
+            "sample_id": sample_id,
+            "media_type": media_type,
+            "embeddings": {
+                "visual": visual_embedding,
+                "physics": physics_embedding,
+            },
+            "embedding_dim": embedding_dim,
+            "model_version": self.model_version,
+            "confidence": 0.85,  # Stub confidence
+            "metadata": {
+                "file_path": file_path,
+                "question": question,
+                "media_metadata": metadata,
+            },
+        }
+
+        embeddings: Dict[str, List[float]] = result.get("embeddings", {})  # type: ignore
+        logger.info(f"Generated {len(embeddings)} embeddings for sample {sample_id}")
+
+        return result

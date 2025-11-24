@@ -38,6 +38,7 @@ from sophia.api.models import (
     HermesProposalRequest,
     HermesProposalResponse,
 )
+from sophia.jepa.models import SimulationResult
 from sophia.models.media_models import (
     MediaType,
     MediaIngestResponse,
@@ -598,6 +599,48 @@ def create_app() -> FastAPI:
             )
 
         try:
+            # Check if media_sample_id is provided and retrieve embeddings
+            media_embeddings: List[str] = []
+            if request.media_sample_id:
+                if not _media_ingestion:
+                    logger.warning(
+                        f"Media sample {request.media_sample_id} referenced but media ingestion service not available"
+                    )
+                else:
+                    # Verify media sample exists
+                    media_sample = _media_ingestion.get_media_sample(
+                        request.media_sample_id
+                    )
+                    if not media_sample:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Media sample {request.media_sample_id} not found",
+                        )
+
+                    # Retrieve embedding IDs for this sample from Neo4j
+                    # (embeddings themselves are in Milvus, we just track the IDs)
+                    try:
+                        # Query Neo4j for embedding nodes linked to this sample
+                        with _hcg_client._neo4j._driver.session(database=_hcg_client._neo4j._database) as session:  # type: ignore
+                            neo4j_result = session.run(
+                                """
+                                MATCH (m {sample_id: $sample_id})-[:has_embedding]->(e)
+                                RETURN e.id as embedding_id
+                                """,
+                                {"sample_id": request.media_sample_id},
+                            )
+                            media_embeddings = [
+                                record["embedding_id"] for record in neo4j_result
+                            ]
+
+                        logger.info(
+                            f"Found {len(media_embeddings)} embeddings for media sample {request.media_sample_id}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to retrieve embeddings for media sample: {e}"
+                        )
+
             # Build simulation context from request
             entities = [JEPAEntity(**entity_data) for entity_data in request.entities]
 
@@ -616,7 +659,7 @@ def create_app() -> FastAPI:
             )
 
             # Run JEPA simulation
-            result = _jepa_runner.simulate(
+            result: SimulationResult = _jepa_runner.simulate(
                 context=context,
                 k_steps=request.k_steps,
                 assumptions=request.assumptions,
@@ -666,18 +709,40 @@ def create_app() -> FastAPI:
                 )
 
             # Store simulation metadata node
+            simulation_properties = {
+                "k_steps": result.k_steps,
+                "model_version": result.model_version,
+                "overall_confidence": result.overall_confidence,
+                "entity_count": len(context.entities),
+                "sensor_count": len(context.sensor_refs),
+                "talos_metadata": context.talos_metadata.model_dump(),
+            }
+
+            # Add media reference if provided
+            if request.media_sample_id:
+                simulation_properties["media_sample_id"] = request.media_sample_id
+
             _hcg_client.add_node(
                 node_id=result.simulation_id,
                 node_type="simulation",
-                properties={
-                    "k_steps": result.k_steps,
-                    "model_version": result.model_version,
-                    "overall_confidence": result.overall_confidence,
-                    "entity_count": len(context.entities),
-                    "sensor_count": len(context.sensor_refs),
-                    "talos_metadata": context.talos_metadata.model_dump(),
-                },
+                properties=simulation_properties,
             )
+
+            # Link simulation to media sample if provided
+            if request.media_sample_id:
+                try:
+                    _hcg_client.add_edge(
+                        edge_id=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
+                        source_id=result.simulation_id,
+                        target_id=request.media_sample_id,
+                        relation="uses_media",
+                        properties={"embedding_count": len(media_embeddings)},
+                    )
+                    logger.info(
+                        f"Linked simulation {result.simulation_id} to media sample {request.media_sample_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create simulation->media edge: {e}")
 
             # Convert result to response format
             response = SimulateResponse(
@@ -691,6 +756,8 @@ def create_app() -> FastAPI:
                 k_steps=result.k_steps,
                 model_version=result.model_version,
                 overall_confidence=result.overall_confidence,
+                media_sample_id=request.media_sample_id,
+                media_embeddings=media_embeddings if media_embeddings else None,
             )
 
             return response
