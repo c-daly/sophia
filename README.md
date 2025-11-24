@@ -13,8 +13,11 @@ Sophia is a foundational infrastructure for building knowledge graphs and managi
 - **Type-Safe Models**: Pydantic-based data models for nodes and edges
 - **Configuration Management**: Flexible settings management for deployment
 - **Extensible Architecture**: Clean, modular design for easy extension
-- **FastAPI Service**: RESTful API with `/plan`, `/imagine`, `/execute`, and `/ingest/hermes_proposal` endpoints
+- **FastAPI Service**: RESTful API with `/plan`, `/imagine`, `/execute`, `/simulate`, and `/ingest` endpoints
+- **JEPA Integration**: Joint-Embedding Predictive Architecture for dynamics simulation and media perception
+- **Media Ingestion**: Upload and process images/video with automatic JEPA embedding generation
 - **Neo4j + SHACL**: Integration with Neo4j graph database and SHACL validation
+- **Milvus Vector Store**: 768-dimensional embeddings for semantic search and cross-modal reasoning
 - **Authentication**: Token-based authentication middleware for secure API access
 - **Docker Support**: Containerized deployment with Docker Compose
 

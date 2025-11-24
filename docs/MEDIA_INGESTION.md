@@ -9,7 +9,30 @@ Media files are:
 2. Stored to disk in organized directories
 3. Metadata extracted (dimensions, duration, etc.)
 4. Indexed in Neo4j for querying and linking to simulations
-5. Optionally processed by JEPA runner for perception tasks
+5. **Automatically processed by JEPA runner** for physical world understanding
+6. Embeddings stored in Milvus for semantic search
+7. Available for reference in simulations via `media_sample_id`
+
+## Processing Pipeline
+
+```
+Upload → Storage → Neo4j Index → JEPA Processing → Milvus Embeddings → Simulation Context
+```
+
+### JEPA Integration
+
+When a media file is uploaded, the JEPA runner automatically:
+- Generates a **visual embedding** (768-dim) capturing visual features
+- Generates a **physics embedding** (768-dim) for physical property understanding
+- Stores both embeddings in Milvus vector database
+- Creates Neo4j relationships: `MediaSample -[:has_embedding]-> Embedding`
+
+These embeddings enable:
+- Cross-modal semantic search (match text descriptions to images)
+- Visual context for simulations
+- Grounding language in physical observations
+
+See [JEPA_SIMULATION.md](./JEPA_SIMULATION.md) for details on media processing.
 
 ## API Endpoints
 
