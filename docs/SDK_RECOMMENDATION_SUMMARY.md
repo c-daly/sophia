@@ -1,79 +1,126 @@
 # Shared SDK Recommendation Summary
 
 **Date:** 2025-11-24  
-**Decision:** ❌ **DO NOT CREATE A SHARED SDK**  
-**Status:** ✅ **Current architecture is correct**
+**Decision:** ⚠️ **SHARED SDK IS OPTIONAL**  
+**Status:** ✅ **Bidirectional HTTP API is sufficient**
 
 ## TL;DR
 
-The `/ingest/hermes_proposal` endpoint represents the **correct architectural pattern**: a one-way HTTP API from Hermes (linguistic layer) to Sophia (cognitive core). No shared SDK is needed or advisable.
+Sophia calls Hermes for certain LLM services (e.g., text-to-Cypher), and Hermes calls Sophia for proposal ingestion. This **bidirectional communication does NOT require a shared SDK** - standard HTTP clients work fine. A shared SDK is optional convenience, not an architectural requirement.
 
 ## Quick Facts
 
 ### Current Architecture (Correct) ✅
 ```
-Hermes (LLM/NLP) → HTTP POST → Sophia (Planning/Graphs) → Neo4j/Milvus
+Hermes (LLM/NLP) ←→ HTTP APIs ←→ Sophia (Planning/Graphs)
+                                        ↓
+                                  Neo4j/Milvus
 ```
 
-### What NOT to Do ❌
+### What You Need ✅
 ```
-Hermes ← shared-sdk code → Sophia
+Standard HTTP clients (httpx, requests) + API contracts
 ```
 
-## Why No SDK?
+### What's Optional ⚠️
+```
+Shared SDK for convenience (only if it actually helps)
+```
 
-1. **No bidirectional communication** - Hermes sends TO Sophia only
-2. **No shared business logic** - Different algorithmic concerns
-3. **Clear layer separation** - Linguistic vs. Cognitive
-4. **API contract exists** - Pydantic models + OpenAPI spec
-5. **Different dependencies** - Would force unnecessary bloat
+## Why SDK is Optional
+
+1. **Bidirectional ≠ SDK required** - Services can call each other via HTTP
+2. **Standard tools work** - httpx/requests are sufficient
+3. **Type sharing is easy** - Use separate types package if needed
+4. **SDK adds overhead** - More code to maintain
+5. **Wait for pain** - Create SDK only when HTTP boilerplate hurts
 
 ## What Already Exists (Good)
 
-✅ HTTP API endpoint: `/ingest/hermes_proposal`  
+✅ HTTP API endpoints (bidirectional)  
 ✅ Pydantic request/response models  
 ✅ Auto-generated OpenAPI docs at `/docs`  
 ✅ SHACL validation for graph integrity  
 ✅ Full provenance tracking  
 
+## Implementation Options
+
+### Option 1: Standard HTTP (Start here) ✅
+```python
+# In Sophia calling Hermes
+response = await httpx.post(
+    f"{HERMES_URL}/generate_cypher",
+    json={"natural_language": "Find red blocks"}
+)
+```
+**Best for:** Initial implementation, simple use cases
+
+### Option 2: Shared Types (Add if helpful) ⚠️
+```python
+# logos-types package
+from logos_types import CypherGenerationRequest
+
+response = await httpx.post(
+    url, 
+    json=CypherGenerationRequest(...).model_dump()
+)
+```
+**Best for:** When type duplication is annoying
+
+### Option 3: Full SDK (Only if needed) ⚠️
+```python
+# logos-sdk package
+from logos_sdk import HermesClient
+
+hermes = HermesClient(url, token)
+result = await hermes.generate_cypher("Find red blocks")
+```
+**Best for:** Many endpoints, complex retry logic
+
 ## If You Need...
 
-### Client Code for Hermes
-Use **OpenAPI code generation**, not a manual SDK:
-```bash
-openapi-generator generate \
-  -i http://sophia:8000/openapi.json \
-  -g python \
-  -o ./generated-client/
+### Bidirectional Communication ✅
+**Solution:** Standard HTTP clients
+```python
+# Sophia → Hermes
+await httpx.post(f"{HERMES_URL}/generate_cypher", json={...})
+
+# Hermes → Sophia  
+await httpx.post(f"{SOPHIA_URL}/ingest/hermes_proposal", json={...})
 ```
 
-### Shared Type Definitions
-Share **JSON Schema or OpenAPI spec**, not Python code:
-```
-logos/api-contracts/sophia-openapi.yaml
+### Type Safety ⚠️
+**Solution:** Shared types package (optional)
+```python
+# logos-types (just Pydantic models)
+from logos_types import CypherGenerationRequest
 ```
 
-### Better Developer Experience
-✅ Use typed HTTP clients (httpx, requests)  
-❌ Don't create shared library packages  
+### Convenience Wrappers ⚠️
+**Solution:** SDK (only if HTTP boilerplate is significant)
+```python
+# logos-sdk (full client library)
+from logos_sdk import HermesClient, SophiaClient
+```
 
 ## Common Misunderstandings
 
-### ❌ "Sophia should call LLMs through Hermes SDK"
-**No.** Sophia is non-linguistic. LLM access belongs in Hermes.
+### ✅ "Sophia calls Hermes for certain things"
+**Correct.** Sophia needs Hermes for LLM services like text-to-Cypher generation. Use standard HTTP calls.
+
+### ❌ "Bidirectional communication requires SDK"
+**Wrong.** HTTP APIs work fine. SDK is optional convenience.
 
 ### ❌ "We need shared utilities for both services"
-**No.** Each service has different concerns. Duplication is better than coupling.
-
-### ❌ "A shared SDK reduces code duplication"
-**No.** The only "shared" code is the API contract (OpenAPI), which should be generated.
+**Mostly wrong.** Each service has different concerns. Only share types if duplication is painful.
 
 ## Action Items
 
-1. ✅ **Keep current architecture** - Do not change it
-2. ✅ **Share OpenAPI spec** - Not Python packages
-3. ✅ **Use code generation** - If clients need types
-4. ❌ **Stop any SDK effort** - If one has been started
+1. ✅ **Implement bidirectional HTTP** - Use standard clients
+2. ✅ **Document API contracts** - OpenAPI specs for both
+3. ⚠️ **Consider shared types** - Only if duplication hurts
+4. ⚠️ **Consider SDK later** - Only if HTTP boilerplate is significant
+5. ❌ **Don't create SDK prematurely** - Wait for real pain points
 
 ## References
 
@@ -84,4 +131,4 @@ logos/api-contracts/sophia-openapi.yaml
 
 ---
 
-**Bottom Line:** The concern about a shared SDK was **valid to raise**, but the current design is **already correct**. Maintain the HTTP API boundary.
+**Bottom Line:** Sophia calling Hermes is correct and expected. This does NOT mean you need a shared SDK. Standard HTTP clients are sufficient. Add SDK only if it provides clear value.
