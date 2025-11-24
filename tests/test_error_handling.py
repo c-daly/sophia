@@ -88,7 +88,10 @@ class TestNeo4jUnavailable:
                 media_type=MediaType.IMAGE,
             )
 
-        assert "Neo4j" in str(exc_info.value) or "connection" in str(exc_info.value).lower()
+        assert (
+            "Neo4j" in str(exc_info.value)
+            or "connection" in str(exc_info.value).lower()
+        )
 
     def test_get_media_sample_returns_none_when_neo4j_unavailable(
         self, media_ingestion_service, mock_hcg_client
@@ -134,7 +137,10 @@ class TestMilvusUnavailable:
                 metadata={"confidence": 0.85},
             )
 
-        assert "Milvus" in str(exc_info.value) or "connection" in str(exc_info.value).lower()
+        assert (
+            "Milvus" in str(exc_info.value)
+            or "connection" in str(exc_info.value).lower()
+        )
 
 
 class TestInvalidInputs:
@@ -248,6 +254,7 @@ class TestAPIValidationErrors:
     def test_missing_required_fields(self):
         """Test that missing required fields return 422."""
         import os
+
         os.environ["SOPHIA_API_TOKEN"] = "test-token"
         os.environ["NEO4J_URI"] = "bolt://mock:7687"
 
@@ -268,6 +275,7 @@ class TestAPIValidationErrors:
     def test_malformed_json_request(self):
         """Test that malformed JSON returns 422."""
         import os
+
         os.environ["SOPHIA_API_TOKEN"] = "test-token"
         os.environ["NEO4J_URI"] = "bolt://mock:7687"
 
@@ -289,6 +297,7 @@ class TestAPIValidationErrors:
     def test_invalid_media_type_enum(self):
         """Test that invalid media_type enum values return 422."""
         import os
+
         os.environ["SOPHIA_API_TOKEN"] = "test-token"
         os.environ["NEO4J_URI"] = "bolt://mock:7687"
 
@@ -462,15 +471,7 @@ class TestLargeInputs:
         nested_entity = {
             "id": "complex_entity",
             "type": "object",
-            "properties": {
-                "level1": {
-                    "level2": {
-                        "level3": {
-                            "value": 42
-                        }
-                    }
-                }
-            },
+            "properties": {"level1": {"level2": {"level3": {"value": 42}}}},
             "position": {"x": 0.0, "y": 0.0, "z": 0.0},
         }
 

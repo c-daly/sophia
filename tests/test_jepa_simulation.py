@@ -155,9 +155,9 @@ class TestConfidenceDecay:
         )
 
         initial_confidence = result["imagined_states"][0]["confidence"]
-        assert 0.7 <= initial_confidence <= 1.0, (
-            f"Initial confidence {initial_confidence} should be high (0.7-1.0)"
-        )
+        assert (
+            0.7 <= initial_confidence <= 1.0
+        ), f"Initial confidence {initial_confidence} should be high (0.7-1.0)"
 
     @pytest.mark.asyncio
     async def test_final_confidence_within_bounds(self, jepa_runner, sample_entities):
@@ -169,9 +169,9 @@ class TestConfidenceDecay:
         )
 
         for idx, state in enumerate(result["imagined_states"]):
-            assert 0.0 <= state["confidence"] <= 1.0, (
-                f"Step {idx} confidence {state['confidence']} out of bounds"
-            )
+            assert (
+                0.0 <= state["confidence"] <= 1.0
+            ), f"Step {idx} confidence {state['confidence']} out of bounds"
 
     @pytest.mark.asyncio
     async def test_overall_confidence_matches_last_step(
@@ -234,9 +234,7 @@ class TestImaginedStatesAndProcesses:
             assert process["imagined"] is True
 
     @pytest.mark.asyncio
-    async def test_states_and_processes_are_linked(
-        self, jepa_runner, sample_entities
-    ):
+    async def test_states_and_processes_are_linked(self, jepa_runner, sample_entities):
         """Test that processes correctly reference states."""
         result = await jepa_runner.simulate(
             entities=sample_entities,
@@ -314,9 +312,7 @@ class TestSimulationWithMediaContext:
     """Tests for simulations using media context."""
 
     @pytest.mark.asyncio
-    async def test_simulation_with_media_sample_id(
-        self, jepa_runner, sample_entities
-    ):
+    async def test_simulation_with_media_sample_id(self, jepa_runner, sample_entities):
         """Test simulation includes media_sample_id when provided."""
         result = await jepa_runner.simulate(
             entities=sample_entities,
@@ -463,6 +459,6 @@ class TestSimulationMetadata:
         ]
 
         for i in range(len(timestamps) - 1):
-            assert timestamps[i] <= timestamps[i + 1], (
-                f"Timestamps out of order: step {i} to {i+1}"
-            )
+            assert (
+                timestamps[i] <= timestamps[i + 1]
+            ), f"Timestamps out of order: step {i} to {i+1}"

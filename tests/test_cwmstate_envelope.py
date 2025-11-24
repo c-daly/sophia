@@ -15,17 +15,19 @@ def mock_hcg_client():
     client = Mock()
     client.add_node = Mock(return_value="node_123")
     client.add_edge = Mock()
-    client.get_node = Mock(return_value={
-        "state_id": "state_123",
-        "model_type": "jepa-stub-v1.0",
-        "source": "jepa_runner",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "confidence": 0.85,
-        "status": "completed",
-        "links": [],
-        "tags": ["imagined:true"],
-        "data": {},
-    })
+    client.get_node = Mock(
+        return_value={
+            "state_id": "state_123",
+            "model_type": "jepa-stub-v1.0",
+            "source": "jepa_runner",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "confidence": 0.85,
+            "status": "completed",
+            "links": [],
+            "tags": ["imagined:true"],
+            "data": {},
+        }
+    )
 
     # Mock _milvus
     client._milvus = Mock()
@@ -55,30 +57,35 @@ def mock_hcg_client():
 def test_app(mock_hcg_client):
     """Create test FastAPI application with mocked dependencies."""
     import os
+
     os.environ["SOPHIA_API_TOKEN"] = "test-token"
     os.environ["NEO4J_URI"] = "bolt://mock:7687"
-    
+
     app = create_app()
-    
+
     # Inject mock HCG client
     with patch("sophia.api.app._hcg_client", mock_hcg_client):
         with patch("sophia.api.app._simulation_service") as mock_sim:
             mock_sim_instance = Mock()
-            mock_sim_instance.simulate = AsyncMock(return_value=SimulateResponse(
-                simulation_id="sim_123",
-                imagined_processes=[],
-                imagined_states=[{
-                    "state_id": "state_123",
-                    "step": 1,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "entities": [],
-                    "confidence": 0.85,
-                    "imagined": True,
-                }],
-                k_steps=1,
-                model_version="jepa-stub-v1.0",
-                overall_confidence=0.85,
-            ))
+            mock_sim_instance.simulate = AsyncMock(
+                return_value=SimulateResponse(
+                    simulation_id="sim_123",
+                    imagined_processes=[],
+                    imagined_states=[
+                        {
+                            "state_id": "state_123",
+                            "step": 1,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "entities": [],
+                            "confidence": 0.85,
+                            "imagined": True,
+                        }
+                    ],
+                    k_steps=1,
+                    model_version="jepa-stub-v1.0",
+                    overall_confidence=0.85,
+                )
+            )
             mock_sim.return_value = mock_sim_instance
             yield app
 
@@ -127,9 +134,7 @@ class TestSimulateEnvelope:
         assert "k_steps" in result
         assert "overall_confidence" in result
 
-    def test_simulate_imagined_states_have_required_fields(
-        self, client, auth_headers
-    ):
+    def test_simulate_imagined_states_have_required_fields(self, client, auth_headers):
         """Test that imagined states contain CWMState required fields."""
         request_data = {
             "entities": [],
@@ -152,7 +157,7 @@ class TestSimulateEnvelope:
             assert "timestamp" in state
             assert "confidence" in state
             assert "imagined" in state
-            
+
             # Verify types
             assert isinstance(state["state_id"], str)
             assert isinstance(state["step"], int)
@@ -175,7 +180,7 @@ class TestSimulateEnvelope:
 
         assert response.status_code == 200
         result = response.json()
-        
+
         assert "model_version" in result
         assert result["model_version"] == "jepa-stub-v1.0"
 
@@ -224,7 +229,7 @@ class TestCWMStateLinks:
 
         # Processes serve as links between states
         assert "imagined_processes" in result
-        
+
         for process in result["imagined_processes"]:
             assert "process_id" in process
             assert "from_state_id" in process
@@ -315,7 +320,7 @@ class TestCWMStateTimestamps:
 
         for state in result["imagined_states"]:
             timestamp_str = state["timestamp"]
-            
+
             # Parse as ISO datetime
             dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             assert dt is not None
@@ -337,11 +342,11 @@ class TestCWMStateTimestamps:
         result = response.json()
 
         now = datetime.now(timezone.utc)
-        
+
         for state in result["imagined_states"]:
             timestamp_str = state["timestamp"]
             dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-            
+
             time_diff = abs((now - dt).total_seconds())
             assert time_diff < 60, f"Timestamp {timestamp_str} not recent"
 
@@ -405,13 +410,13 @@ class TestNeo4jPersistence:
         """Test that simulation creates Neo4j nodes for states."""
         # This test would verify Neo4j integration
         # For now, it's a placeholder showing intent
-        
+
         # In real implementation:
         # - Mock HCG client calls
         # - Verify add_node called with CWMState structure
         # - Verify (:CWMState) label used
         # - Verify [:DESCRIBES] relationships created
-        
+
         pass
 
 
@@ -419,28 +424,24 @@ class TestMilvusMirroring:
     """Tests for CWMState mirroring in Milvus (mocked)."""
 
     @patch("sophia.api.app._hcg_client")
-    def test_simulate_stores_embeddings_in_milvus(
-        self, mock_hcg, client, auth_headers
-    ):
+    def test_simulate_stores_embeddings_in_milvus(self, mock_hcg, client, auth_headers):
         """Test that simulation stores embeddings in Milvus."""
         # This test would verify Milvus integration
         # For now, it's a placeholder showing intent
-        
+
         # In real implementation:
         # - Mock Milvus adapter calls
         # - Verify insert_embedding called
         # - Verify metadata includes CWMState fields
         # - Verify bidirectional linkage (Milvus ID ↔ Neo4j node)
-        
+
         pass
 
 
 class TestCWMStateConsistency:
     """Tests for CWMState consistency across endpoints."""
 
-    def test_multiple_simulations_use_consistent_envelope(
-        self, client, auth_headers
-    ):
+    def test_multiple_simulations_use_consistent_envelope(self, client, auth_headers):
         """Test that multiple /simulate calls use consistent envelope."""
         request_data = {
             "entities": [],
@@ -468,7 +469,7 @@ class TestCWMStateConsistency:
 
         # Both should have same structure (different IDs)
         assert set(result1.keys()) == set(result2.keys())
-        
+
         # Both should have same state structure
         if result1["imagined_states"] and result2["imagined_states"]:
             state1_keys = set(result1["imagined_states"][0].keys())
