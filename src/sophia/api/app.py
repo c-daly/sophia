@@ -38,7 +38,7 @@ from sophia.api.models import (
     HermesProposalRequest,
     HermesProposalResponse,
 )
-from sophia.api.media_models import (
+from sophia.models.media_models import (
     MediaType,
     MediaIngestResponse,
     MediaSampleResponse,

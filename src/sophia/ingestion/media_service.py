@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from fastapi import UploadFile
 
 from sophia.storage.media_storage import MediaStorageService
-from sophia.api.media_models import (
+from sophia.models.media_models import (
     MediaType,
     MediaIngestResponse,
     MediaMetadata,

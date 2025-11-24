@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from sophia.storage.media_storage import MediaStorageService
 from sophia.ingestion.media_service import MediaIngestionService
-from sophia.api.media_models import (
+from sophia.models.media_models import (
     MediaType,
     MediaIngestResponse,
     MediaMetadata,

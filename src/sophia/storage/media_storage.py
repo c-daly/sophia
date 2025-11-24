@@ -9,7 +9,7 @@ from uuid import uuid4
 from PIL import Image  # type: ignore[import-not-found]
 from fastapi import UploadFile, HTTPException, status
 
-from sophia.api.media_models import MediaType, MediaMetadata
+from sophia.models.media_models import MediaType, MediaMetadata
 
 
 logger = logging.getLogger(__name__)
