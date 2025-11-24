@@ -184,7 +184,7 @@ class MediaIngestionService:
             properties = node_data.get("properties", {})
 
             # Reconstruct metadata from flat properties
-            metadata = MediaMetadata()
+            metadata = MediaMetadata.model_construct()
             for key, value in properties.items():
                 if key.startswith("metadata_"):
                     field_name = key.replace("metadata_", "")
@@ -267,7 +267,7 @@ class MediaIngestionService:
                     properties = dict(node)
 
                     # Reconstruct metadata
-                    metadata = MediaMetadata()
+                    metadata = MediaMetadata.model_construct()
                     for key, value in properties.items():
                         if key.startswith("metadata_"):
                             field_name = key.replace("metadata_", "")

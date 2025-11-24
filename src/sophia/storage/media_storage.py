@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from uuid import uuid4
 
-from PIL import Image  # type: ignore[import-untyped]
+from PIL import Image  # type: ignore[import-not-found]
 from fastapi import UploadFile, HTTPException, status
 
 from sophia.api.media_models import MediaType, MediaMetadata
@@ -133,7 +133,8 @@ class MediaStorageService:
         Returns:
             Extracted metadata
         """
-        metadata = MediaMetadata()
+        # Create metadata with all fields as None initially
+        metadata = MediaMetadata.model_construct()
         path = Path(file_path)
 
         try:
