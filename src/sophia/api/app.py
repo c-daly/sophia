@@ -988,8 +988,9 @@ def create_app() -> FastAPI:
             parsed_timestamp = None
             if after_timestamp:
                 from datetime import datetime
+
                 parsed_timestamp = datetime.fromisoformat(after_timestamp)
-            
+
             query = MediaSampleQuery(
                 media_type=media_type,
                 after_timestamp=parsed_timestamp,
