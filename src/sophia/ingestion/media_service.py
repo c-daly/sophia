@@ -435,7 +435,7 @@ class MediaIngestionService:
             embeddings: Dictionary of embedding vectors (visual, physics, etc.)
             metadata: Additional metadata to store with embeddings
         """
-        if not hasattr(self.hcg_client, "milvus"):
+        if not hasattr(self.hcg_client, "_milvus"):
             logger.warning(
                 f"[JEPA Hook] Milvus not available, skipping embedding storage for {sample_id}"
             )
@@ -446,8 +446,8 @@ class MediaIngestionService:
             for embedding_type, embedding_vector in embeddings.items():
                 embedding_id = f"{sample_id}_{embedding_type}"
                 
-                # Insert embedding into Milvus
-                self.hcg_client.milvus.insert_embedding(
+                # Insert embedding into Milvus using private adapter
+                self.hcg_client._milvus.insert_embedding(
                     embedding_id=embedding_id,
                     node_id=sample_id,
                     node_type=f"media_embedding_{embedding_type}",

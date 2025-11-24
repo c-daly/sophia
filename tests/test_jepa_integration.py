@@ -1,7 +1,7 @@
 """Integration tests for JEPA runner with media ingestion pipeline."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock
 from io import BytesIO
 
 from sophia.models.media_models import MediaType
@@ -22,11 +22,11 @@ def mock_hcg_client():
     client.add_edge = Mock()
     client.get_node = Mock(return_value={"sample_id": "test_sample"})
     
-    # Mock milvus attribute
-    client.milvus = Mock()
-    client.milvus.insert_embedding = Mock()
+    # Mock _milvus private attribute (correct API)
+    client._milvus = Mock()
+    client._milvus.insert_embedding = Mock()
     
-    # Mock driver for session context
+    # Mock _neo4j._driver for session context (correct API)
     mock_session = Mock()
     mock_result = Mock()
     mock_result.__iter__ = Mock(return_value=iter([]))
@@ -36,7 +36,11 @@ def mock_hcg_client():
     
     mock_driver = Mock()
     mock_driver.session = Mock(return_value=mock_session)
-    client.driver = mock_driver
+    
+    mock_neo4j = Mock()
+    mock_neo4j._driver = mock_driver
+    mock_neo4j._database = "neo4j"
+    client._neo4j = mock_neo4j
     
     return client
 
@@ -148,7 +152,7 @@ class TestMediaToSimulationIntegration:
 
         # Verify embeddings would be stored in Milvus
         # (In real test with full Milvus, verify actual storage)
-        assert mock_hcg_client.milvus.insert_embedding.call_count >= 2  # visual + physics
+        assert mock_hcg_client._milvus.insert_embedding.call_count >= 2  # visual + physics
 
     @pytest.mark.asyncio
     async def test_simulate_with_media_sample_id(self, mock_hcg_client):
@@ -200,7 +204,7 @@ class TestMediaToSimulationIntegration:
         )
 
         # Verify Milvus insert was called for each embedding type
-        assert mock_hcg_client.milvus.insert_embedding.call_count == 2
+        assert mock_hcg_client._milvus.insert_embedding.call_count == 2
 
         # Verify Neo4j edges were created
         assert mock_hcg_client.add_edge.call_count == 2
@@ -303,7 +307,7 @@ class TestEndToEndWorkflow:
         assert mock_hcg_client.add_node.called
 
         # Step 4: Verify embeddings stored
-        assert mock_hcg_client.milvus.insert_embedding.call_count >= 2
+        assert mock_hcg_client._milvus.insert_embedding.call_count >= 2
 
         # Step 5: Create simulation request with media context
         from sophia.api.models import SimulateRequest
