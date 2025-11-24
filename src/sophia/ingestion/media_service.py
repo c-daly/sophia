@@ -221,7 +221,7 @@ class MediaIngestionService:
             List of media samples
         """
         # Build Neo4j query
-        cypher_conditions = ["n.node_type = 'media_sample'"]
+        cypher_conditions = ["n.type = 'media_sample'"]
         parameters: Dict[str, Any] = {}
 
         if query.media_type:
@@ -316,7 +316,7 @@ class MediaIngestionService:
         """
         query = """
         MATCH (m {sample_id: $sample_id})-[:USED_IN]->(s)
-        WHERE s.node_type = 'simulation'
+        WHERE s.type = 'simulation'
         RETURN count(s) as count
         """
 

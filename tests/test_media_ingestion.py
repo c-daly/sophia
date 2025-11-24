@@ -45,7 +45,7 @@ def mock_hcg_client():
     client.add_node = Mock(return_value="node123")
     client.get_node = Mock(return_value={
         "sample_id": "sample123",
-        "node_type": "media_sample",
+        "type": "media_sample",
         "media_type": "image",
         "file_path": "/path/to/file.jpg",
         "file_size": 1024,
@@ -128,36 +128,45 @@ def auth_headers(api_token):
 
 def test_validate_file_valid_image(media_storage_service):
     """Test validation of valid image file."""
+    mock_file = Mock()
+    mock_file.filename = "test.jpg"
     # Should not raise
-    media_storage_service.validate_file("test.jpg", MediaType.IMAGE, 1024)
-    media_storage_service.validate_file("test.png", MediaType.IMAGE, 1024)
+    media_storage_service.validate_file(mock_file, MediaType.IMAGE)
+    
+    mock_file.filename = "test.png"
+    media_storage_service.validate_file(mock_file, MediaType.IMAGE)
 
 
 def test_validate_file_valid_video(media_storage_service):
     """Test validation of valid video file."""
+    mock_file = Mock()
+    mock_file.filename = "test.mp4"
     # Should not raise
-    media_storage_service.validate_file("test.mp4", MediaType.VIDEO, 1024)
-    media_storage_service.validate_file("test.avi", MediaType.VIDEO, 1024)
+    media_storage_service.validate_file(mock_file, MediaType.VIDEO)
+    
+    mock_file.filename = "test.avi"
+    media_storage_service.validate_file(mock_file, MediaType.VIDEO)
 
 
 def test_validate_file_valid_audio(media_storage_service):
     """Test validation of valid audio file."""
+    mock_file = Mock()
+    mock_file.filename = "test.mp3"
     # Should not raise
-    media_storage_service.validate_file("test.mp3", MediaType.AUDIO, 1024)
-    media_storage_service.validate_file("test.wav", MediaType.AUDIO, 1024)
+    media_storage_service.validate_file(mock_file, MediaType.AUDIO)
+    
+    mock_file.filename = "test.wav"
+    media_storage_service.validate_file(mock_file, MediaType.AUDIO)
 
 
 def test_validate_file_invalid_extension(media_storage_service):
     """Test validation rejects invalid file extension."""
-    with pytest.raises(ValueError, match="Invalid file extension"):
-        media_storage_service.validate_file("test.txt", MediaType.IMAGE, 1024)
-
-
-def test_validate_file_too_large(media_storage_service):
-    """Test validation rejects files exceeding size limit."""
-    max_size = 100 * 1024 * 1024  # 100MB
-    with pytest.raises(ValueError, match="exceeds maximum size"):
-        media_storage_service.validate_file("test.jpg", MediaType.IMAGE, max_size + 1)
+    mock_file = Mock()
+    mock_file.filename = "test.txt"
+    with pytest.raises(HTTPException) as exc_info:
+        media_storage_service.validate_file(mock_file, MediaType.IMAGE)
+    assert exc_info.value.status_code == 400
+    assert "Invalid file extension" in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio
@@ -240,7 +249,7 @@ async def test_ingest_media(media_ingestion_service, mock_upload_file, mock_hcg_
 @pytest.mark.asyncio
 async def test_get_media_sample(media_ingestion_service, mock_hcg_client):
     """Test retrieving media sample by ID."""
-    result = await media_ingestion_service.get_media_sample("sample123")
+    result = media_ingestion_service.get_media_sample("sample123")
     
     assert isinstance(result, MediaSampleResponse)
     assert result.sample_id == "sample123"
@@ -255,7 +264,7 @@ async def test_get_media_sample_not_found(media_ingestion_service, mock_hcg_clie
     """Test retrieving non-existent media sample."""
     mock_hcg_client.get_node.return_value = None
     
-    result = await media_ingestion_service.get_media_sample("nonexistent")
+    result = media_ingestion_service.get_media_sample("nonexistent")
     assert result is None
 
 
@@ -267,7 +276,7 @@ async def test_list_media_samples(media_ingestion_service, mock_hcg_client):
         {
             "n": {
                 "sample_id": f"sample{i}",
-                "node_type": "media_sample",
+                "type": "media_sample",
                 "media_type": "image",
                 "file_path": f"/path/to/sample{i}.jpg",
                 "file_size": 1024 * i,
@@ -290,7 +299,7 @@ async def test_list_media_samples(media_ingestion_service, mock_hcg_client):
         offset=0,
     )
     
-    result = await media_ingestion_service.list_media_samples(query)
+    result = media_ingestion_service.list_media_samples(query)
     
     assert isinstance(result, MediaSamplesListResponse)
     assert len(result.samples) == 3
@@ -345,7 +354,7 @@ async def test_end_to_end_image_ingestion(media_ingestion_service, sample_image_
     assert Path(result.file_path).exists()
     
     # Verify can retrieve
-    retrieved = await media_ingestion_service.get_media_sample(result.sample_id)
+    retrieved = media_ingestion_service.get_media_sample(result.sample_id)
     assert retrieved.sample_id == result.sample_id
     assert retrieved.metadata.width == 800
 

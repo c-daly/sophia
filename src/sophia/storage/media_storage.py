@@ -69,14 +69,6 @@ class MediaStorageService:
                        f"Allowed: {', '.join(sorted(allowed_extensions[media_type]))}"
             )
 
-        # Check file size (max 100MB for now)
-        max_size = 100 * 1024 * 1024  # 100MB
-        if file.size and file.size > max_size:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"File size {file.size} exceeds maximum allowed size of {max_size} bytes"
-            )
-
     async def store_file(
         self,
         file: UploadFile,
@@ -111,6 +103,14 @@ class MediaStorageService:
             # Write file to disk
             content = await file.read()
             file_size = len(content)
+            
+            # Check file size after reading (max 100MB)
+            max_size = 100 * 1024 * 1024  # 100MB
+            if file_size > max_size:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File size {file_size} bytes exceeds maximum allowed size of {max_size} bytes"
+                )
             
             with open(file_path, "wb") as f:
                 f.write(content)

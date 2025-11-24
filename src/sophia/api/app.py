@@ -978,7 +978,7 @@ def create_app() -> FastAPI:
                 limit=limit,
                 offset=offset,
             )
-            result = await _media_ingestion.list_media_samples(query)
+            result = _media_ingestion.list_media_samples(query)
             return result
 
         except Exception as e:
@@ -1011,7 +1011,7 @@ def create_app() -> FastAPI:
             )
 
         try:
-            result = await _media_ingestion.get_media_sample(sample_id)
+            result = _media_ingestion.get_media_sample(sample_id)
             if not result:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
