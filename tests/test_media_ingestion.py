@@ -47,7 +47,7 @@ def mock_hcg_client():
 
     client = MagicMock()
     client.add_node = Mock(return_value="node123")
-    
+
     # Make get_node return data based on the sample_id argument
     def mock_get_node(sample_id):
         return {
@@ -62,7 +62,7 @@ def mock_hcg_client():
             "metadata_height": 600,
             "metadata_format": "JPEG",
         }
-    
+
     client.get_node = Mock(side_effect=mock_get_node)
     client.add_edge = Mock()
     client.driver = MagicMock()
@@ -301,15 +301,15 @@ async def test_list_media_samples(media_ingestion_service, mock_hcg_client):
     ]
 
     mock_session = Mock()
-    
+
     # Mock for total count query
     mock_count_result = Mock()
     mock_count_result.single.return_value = {"total": 3}
-    
+
     # Mock for list query - needs to be iterable
     mock_list_result = Mock()
     mock_list_result.__iter__ = Mock(return_value=iter(mock_records))
-    
+
     # session.run returns different results for different queries
     mock_session.run.side_effect = [mock_count_result, mock_list_result]
     mock_hcg_client.driver.session.return_value.__enter__.return_value = mock_session
