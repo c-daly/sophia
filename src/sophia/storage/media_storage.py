@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from uuid import uuid4
 
-from PIL import Image
+from PIL import Image  # type: ignore[import-untyped]
 from fastapi import UploadFile, HTTPException, status
 
 from sophia.api.media_models import MediaType, MediaMetadata

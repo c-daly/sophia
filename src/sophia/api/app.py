@@ -218,14 +218,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize media ingestion services
     storage_root = os.getenv("MEDIA_STORAGE_ROOT", "./media_storage")
     _media_storage = MediaStorageService(storage_root=storage_root)
-    _media_ingestion = MediaIngestionService(
-        hcg_client=_hcg_client,
-        storage_service=_media_storage,
-        jepa_runner=_jepa_runner,
-    )
-    logger.info(
-        f"Media ingestion service initialized with storage root: {storage_root}"
-    )
+    if _hcg_client:  # Type guard for mypy
+        _media_ingestion = MediaIngestionService(
+            hcg_client=_hcg_client,
+            storage_service=_media_storage,
+            jepa_runner=_jepa_runner,
+        )
+        logger.info(
+            f"Media ingestion service initialized with storage root: {storage_root}"
+        )
 
     logger.info("Sophia API service started successfully")
 
@@ -983,9 +984,15 @@ def create_app() -> FastAPI:
             )
 
         try:
+            # Parse timestamp string to datetime if provided
+            parsed_timestamp = None
+            if after_timestamp:
+                from datetime import datetime
+                parsed_timestamp = datetime.fromisoformat(after_timestamp)
+            
             query = MediaSampleQuery(
                 media_type=media_type,
-                after_timestamp=after_timestamp,
+                after_timestamp=parsed_timestamp,
                 limit=limit,
                 offset=offset,
             )

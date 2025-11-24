@@ -254,7 +254,7 @@ class MediaIngestionService:
 
         try:
             # Get total count
-            with self.hcg_client.driver.session() as session:
+            with self.hcg_client.driver.session() as session:  # type: ignore[attr-defined]
                 result = session.run(count_query, parameters)
                 total = result.single()["total"]
 
@@ -319,7 +319,7 @@ class MediaIngestionService:
         """
 
         try:
-            with self.hcg_client.driver.session() as session:
+            with self.hcg_client.driver.session() as session:  # type: ignore[attr-defined]
                 result = session.run(query, {"sample_id": sample_id})
                 record = result.single()
                 return record["count"] if record else 0
