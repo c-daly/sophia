@@ -1,9 +1,7 @@
 """Media storage service for handling file uploads and persistence."""
 
-import os
 import logging
 import hashlib
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 from uuid import uuid4

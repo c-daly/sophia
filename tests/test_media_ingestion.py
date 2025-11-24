@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 from PIL import Image
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from sophia.storage.media_storage import MediaStorageService
 from sophia.ingestion.media_service import MediaIngestionService

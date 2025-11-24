@@ -904,7 +904,7 @@ def create_app() -> FastAPI:
         "/ingest/media",
         response_model=MediaIngestResponse,
         status_code=status.HTTP_201_CREATED,
-        dependencies=[Depends(get_current_user)],
+        dependencies=[Depends(verify_token)],
     )
     async def ingest_media(
         file: UploadFile = File(...),
@@ -949,7 +949,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/media/samples",
         response_model=MediaSamplesListResponse,
-        dependencies=[Depends(get_current_user)],
+        dependencies=[Depends(verify_token)],
     )
     async def list_media_samples(
         media_type: Optional[MediaType] = Query(None),
@@ -991,7 +991,7 @@ def create_app() -> FastAPI:
     @app.get(
         "/media/samples/{sample_id}",
         response_model=MediaSampleResponse,
-        dependencies=[Depends(get_current_user)],
+        dependencies=[Depends(verify_token)],
     )
     async def get_media_sample(
         sample_id: str,

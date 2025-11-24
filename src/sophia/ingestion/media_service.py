@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from fastapi import UploadFile
 
 from sophia.storage.media_storage import MediaStorageService
