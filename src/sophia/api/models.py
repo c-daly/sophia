@@ -217,11 +217,6 @@ class SimulateRequest(BaseModel):
         json_schema_extra={"example": "sample_abc123"},
     )
     sensor_refs: List[Dict[str, Any]] = Field(
-        default=None,
-        description="Optional media sample ID to use as visual context for JEPA simulation",
-        json_schema_extra={"example": "sample_abc123"},
-    )
-    sensor_refs: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Sensor references for perception data",
         json_schema_extra={

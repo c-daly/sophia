@@ -388,8 +388,7 @@ class JEPARunner:
             },
         }
 
-        logger.info(
-            f"Generated {len(result['embeddings'])} embeddings for sample {sample_id}"
-        )
+        embeddings: Dict[str, List[float]] = result.get("embeddings", {})  # type: ignore
+        logger.info(f"Generated {len(embeddings)} embeddings for sample {sample_id}")
 
         return result

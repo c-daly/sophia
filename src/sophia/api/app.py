@@ -38,6 +38,7 @@ from sophia.api.models import (
     HermesProposalRequest,
     HermesProposalResponse,
 )
+from sophia.jepa.models import SimulationResult
 from sophia.models.media_models import (
     MediaType,
     MediaIngestResponse,
@@ -621,7 +622,7 @@ def create_app() -> FastAPI:
                     try:
                         # Query Neo4j for embedding nodes linked to this sample
                         with _hcg_client._neo4j._driver.session(database=_hcg_client._neo4j._database) as session:  # type: ignore
-                            result = session.run(
+                            neo4j_result = session.run(
                                 """
                                 MATCH (m {sample_id: $sample_id})-[:has_embedding]->(e)
                                 RETURN e.id as embedding_id
@@ -629,7 +630,7 @@ def create_app() -> FastAPI:
                                 {"sample_id": request.media_sample_id},
                             )
                             media_embeddings = [
-                                record["embedding_id"] for record in result
+                                record["embedding_id"] for record in neo4j_result
                             ]
 
                         logger.info(
@@ -658,7 +659,7 @@ def create_app() -> FastAPI:
             )
 
             # Run JEPA simulation
-            result = _jepa_runner.simulate(
+            result: SimulationResult = _jepa_runner.simulate(
                 context=context,
                 k_steps=request.k_steps,
                 assumptions=request.assumptions,
