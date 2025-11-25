@@ -32,7 +32,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> HCGClient:
     )
 
 
-def test_add_node_runs_shacl_validation(monkeypatch: pytest.MonkeyPatch, client: HCGClient) -> None:
+def test_add_node_runs_shacl_validation(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
     """add_node should validate inputs and write via shared helper."""
     validator = MagicMock()
     validator.validate_node.return_value = (True, [])
@@ -48,7 +50,9 @@ def test_add_node_runs_shacl_validation(monkeypatch: pytest.MonkeyPatch, client:
     execute.assert_called_once()
 
 
-def test_add_node_raises_on_validation_error(monkeypatch: pytest.MonkeyPatch, client: HCGClient) -> None:
+def test_add_node_raises_on_validation_error(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
     """Invalid nodes should raise ValueError before Cypher executes."""
     validator = MagicMock()
     validator.validate_node.return_value = (False, ["missing type"])
@@ -58,7 +62,9 @@ def test_add_node_raises_on_validation_error(monkeypatch: pytest.MonkeyPatch, cl
         client.add_node("bad", "", {})
 
 
-def test_add_edge_uses_validator(monkeypatch: pytest.MonkeyPatch, client: HCGClient) -> None:
+def test_add_edge_uses_validator(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
     """Edges also run through SHACL validation."""
     validator = MagicMock()
     validator.validate_edge.return_value = (True, [])
@@ -74,21 +80,29 @@ def test_add_edge_uses_validator(monkeypatch: pytest.MonkeyPatch, client: HCGCli
     execute.assert_called_once()
 
 
-def test_get_node_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch, client: HCGClient) -> None:
+def test_get_node_returns_none_when_missing(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
     """get_node should return None when Neo4j has no matching record."""
     monkeypatch.setattr(client, "_execute_read", lambda *args, **kwargs: [])
 
     assert client.get_node("unknown") is None
 
 
-def test_delete_node_reports_deleted(monkeypatch: pytest.MonkeyPatch, client: HCGClient) -> None:
+def test_delete_node_reports_deleted(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
     """delete_node exposes count returned by Cypher."""
-    monkeypatch.setattr(client, "_execute_query", lambda *args, **kwargs: [{"deleted": 1}])
+    monkeypatch.setattr(
+        client, "_execute_query", lambda *args, **kwargs: [{"deleted": 1}]
+    )
 
     assert client.delete_node("node-1") is True
 
 
-def test_health_check_uses_session(monkeypatch: pytest.MonkeyPatch, client: HCGClient) -> None:
+def test_health_check_uses_session(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
     """health_check should report Neo4j health and keep placeholder for Milvus."""
 
     @contextmanager

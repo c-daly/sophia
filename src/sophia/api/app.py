@@ -7,7 +7,16 @@ from datetime import datetime, timezone
 from typing import List, Optional, AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    status,
+    UploadFile,
+    File,
+    Form,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from sophia.api.models import (
@@ -29,6 +38,14 @@ from sophia.api.models import (
     HermesProposalRequest,
     HermesProposalResponse,
 )
+from sophia.jepa.models import SimulationResult
+from sophia.models.media_models import (
+    MediaType,
+    MediaIngestResponse,
+    MediaSampleResponse,
+    MediaSamplesListResponse,
+    MediaSampleQuery,
+)
 from sophia.api.auth import verify_token
 from sophia.planner import Planner
 from sophia.executor import Executor
@@ -44,6 +61,8 @@ from sophia.jepa.models import (
     SensorReference,
     TalosMetadata,
 )
+from sophia.storage import MediaStorageService
+from sophia.ingestion import MediaIngestionService
 
 
 logger = logging.getLogger(__name__)
@@ -126,12 +145,14 @@ _cwm_g: Optional[ContinuousWorkingMemoryGenerative] = None
 _cwm_a: Optional[ContinuousWorkingMemoryAssociative] = None
 _kg: Optional[KnowledgeGraph] = None
 _jepa_runner: Optional[JEPARunner] = None
+_media_storage: Optional[MediaStorageService] = None
+_media_ingestion: Optional[MediaIngestionService] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg, _jepa_runner
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg, _jepa_runner, _media_storage, _media_ingestion
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -190,6 +211,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _cwm_g = ContinuousWorkingMemoryGenerative()
     _cwm_a = ContinuousWorkingMemoryAssociative()
     _jepa_runner = JEPARunner(model_version="jepa-stub-v1.0")
+
+    # Initialize media ingestion services
+    storage_root = os.getenv("MEDIA_STORAGE_ROOT", "./media_storage")
+    _media_storage = MediaStorageService(storage_root=storage_root)
+    if _hcg_client:  # Type guard for mypy
+        _media_ingestion = MediaIngestionService(
+            hcg_client=_hcg_client,
+            storage_service=_media_storage,
+            jepa_runner=_jepa_runner,
+        )
+        logger.info(
+            f"Media ingestion service initialized with storage root: {storage_root}"
+        )
 
     logger.info("Sophia API service started successfully")
 
@@ -563,6 +597,48 @@ def create_app() -> FastAPI:
             )
 
         try:
+            # Check if media_sample_id is provided and retrieve embeddings
+            media_embeddings: List[str] = []
+            if request.media_sample_id:
+                if not _media_ingestion:
+                    logger.warning(
+                        f"Media sample {request.media_sample_id} referenced but media ingestion service not available"
+                    )
+                else:
+                    # Verify media sample exists
+                    media_sample = _media_ingestion.get_media_sample(
+                        request.media_sample_id
+                    )
+                    if not media_sample:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Media sample {request.media_sample_id} not found",
+                        )
+
+                    # Retrieve embedding IDs for this sample from Neo4j
+                    # (embeddings themselves are in Milvus, we just track the IDs)
+                    try:
+                        # Query Neo4j for embedding nodes linked to this sample
+                        with _hcg_client._neo4j._driver.session(database=_hcg_client._neo4j._database) as session:  # type: ignore
+                            neo4j_result = session.run(
+                                """
+                                MATCH (m {sample_id: $sample_id})-[:has_embedding]->(e)
+                                RETURN e.id as embedding_id
+                                """,
+                                {"sample_id": request.media_sample_id},
+                            )
+                            media_embeddings = [
+                                record["embedding_id"] for record in neo4j_result
+                            ]
+
+                        logger.info(
+                            f"Found {len(media_embeddings)} embeddings for media sample {request.media_sample_id}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to retrieve embeddings for media sample: {e}"
+                        )
+
             # Build simulation context from request
             entities = [JEPAEntity(**entity_data) for entity_data in request.entities]
 
@@ -581,7 +657,7 @@ def create_app() -> FastAPI:
             )
 
             # Run JEPA simulation
-            result = _jepa_runner.simulate(
+            result: SimulationResult = _jepa_runner.simulate(
                 context=context,
                 k_steps=request.k_steps,
                 assumptions=request.assumptions,
@@ -631,18 +707,40 @@ def create_app() -> FastAPI:
                 )
 
             # Store simulation metadata node
+            simulation_properties = {
+                "k_steps": result.k_steps,
+                "model_version": result.model_version,
+                "overall_confidence": result.overall_confidence,
+                "entity_count": len(context.entities),
+                "sensor_count": len(context.sensor_refs),
+                "talos_metadata": context.talos_metadata.model_dump(),
+            }
+
+            # Add media reference if provided
+            if request.media_sample_id:
+                simulation_properties["media_sample_id"] = request.media_sample_id
+
             _hcg_client.add_node(
                 node_id=result.simulation_id,
                 node_type="simulation",
-                properties={
-                    "k_steps": result.k_steps,
-                    "model_version": result.model_version,
-                    "overall_confidence": result.overall_confidence,
-                    "entity_count": len(context.entities),
-                    "sensor_count": len(context.sensor_refs),
-                    "talos_metadata": context.talos_metadata.model_dump(),
-                },
+                properties=simulation_properties,
             )
+
+            # Link simulation to media sample if provided
+            if request.media_sample_id:
+                try:
+                    _hcg_client.add_edge(
+                        edge_id=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
+                        source_id=result.simulation_id,
+                        target_id=request.media_sample_id,
+                        relation="uses_media",
+                        properties={"embedding_count": len(media_embeddings)},
+                    )
+                    logger.info(
+                        f"Linked simulation {result.simulation_id} to media sample {request.media_sample_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create simulation->media edge: {e}")
 
             # Convert result to response format
             response = SimulateResponse(
@@ -656,6 +754,8 @@ def create_app() -> FastAPI:
                 k_steps=result.k_steps,
                 model_version=result.model_version,
                 overall_confidence=result.overall_confidence,
+                media_sample_id=request.media_sample_id,
+                media_embeddings=media_embeddings if media_embeddings else None,
             )
 
             return response
@@ -875,6 +975,141 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to execute plan: {str(e)}",
+            )
+
+    @app.post(
+        "/ingest/media",
+        response_model=MediaIngestResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(verify_token)],
+    )
+    async def ingest_media(
+        file: UploadFile = File(...),
+        media_type: MediaType = Form(...),
+        question: Optional[str] = Form(None),
+    ) -> MediaIngestResponse:
+        """
+        Ingest a media file (image, video, or audio) for perception workflows.
+
+        The file is validated, stored to disk, and metadata is extracted and
+        persisted to Neo4j. Returns details about the ingested media sample.
+
+        Requires authentication via Bearer token.
+        """
+        if not _media_ingestion:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Media ingestion service not available",
+            )
+
+        try:
+            result = await _media_ingestion.ingest_media(
+                file=file,
+                media_type=media_type,
+                question=question,
+            )
+            return result
+
+        except ValueError as e:
+            logger.error(f"Media validation error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+        except Exception as e:
+            logger.error(f"Error ingesting media: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to ingest media: {str(e)}",
+            )
+
+    @app.get(
+        "/media/samples",
+        response_model=MediaSamplesListResponse,
+        dependencies=[Depends(verify_token)],
+    )
+    async def list_media_samples(
+        media_type: Optional[MediaType] = Query(None),
+        after_timestamp: Optional[str] = Query(None),
+        limit: int = Query(50, ge=1, le=100),
+        offset: int = Query(0, ge=0),
+    ) -> MediaSamplesListResponse:
+        """
+        List media samples with optional filtering and pagination.
+
+        Supports filtering by media type and timestamp, with pagination
+        controls for large result sets.
+
+        Requires authentication via Bearer token.
+        """
+        if not _media_ingestion:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Media ingestion service not available",
+            )
+
+        try:
+            # Parse timestamp string to datetime if provided
+            parsed_timestamp = None
+            if after_timestamp:
+                from datetime import datetime
+
+                parsed_timestamp = datetime.fromisoformat(after_timestamp)
+
+            query = MediaSampleQuery(
+                media_type=media_type,
+                after_timestamp=parsed_timestamp,
+                limit=limit,
+                offset=offset,
+            )
+            result = _media_ingestion.list_media_samples(query)
+            return result
+
+        except Exception as e:
+            logger.error(f"Error listing media samples: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list media samples: {str(e)}",
+            )
+
+    @app.get(
+        "/media/samples/{sample_id}",
+        response_model=MediaSampleResponse,
+        dependencies=[Depends(verify_token)],
+    )
+    async def get_media_sample(
+        sample_id: str,
+    ) -> MediaSampleResponse:
+        """
+        Retrieve a specific media sample by ID.
+
+        Returns the sample metadata and usage count (number of simulations
+        that have referenced this sample).
+
+        Requires authentication via Bearer token.
+        """
+        if not _media_ingestion:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Media ingestion service not available",
+            )
+
+        try:
+            result = _media_ingestion.get_media_sample(sample_id)
+            if not result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Media sample not found: {sample_id}",
+                )
+            return result
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving media sample: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to retrieve media sample: {str(e)}",
             )
 
     return app

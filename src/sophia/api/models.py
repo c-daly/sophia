@@ -233,6 +233,11 @@ class SimulateRequest(BaseModel):
             ]
         },
     )
+    media_sample_id: Optional[str] = Field(
+        default=None,
+        description="Optional media sample ID to use as visual context for JEPA simulation",
+        json_schema_extra={"example": "sample_abc123"},
+    )
     sensor_refs: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Sensor references for perception data",
@@ -286,6 +291,14 @@ class SimulateResponse(BaseModel):
     model_version: str = Field(..., description="JEPA model version used")
     overall_confidence: float = Field(
         ..., description="Overall confidence of the simulation", ge=0.0, le=1.0
+    )
+    media_sample_id: Optional[str] = Field(
+        default=None,
+        description="Media sample ID if simulation used visual context",
+    )
+    media_embeddings: Optional[List[str]] = Field(
+        default=None,
+        description="Milvus embedding IDs for JEPA-generated visual representations",
     )
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
