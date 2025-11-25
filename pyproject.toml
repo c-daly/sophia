@@ -13,7 +13,11 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-packages = [{include = "sophia", from = "src"}]
+packages = [
+    {include = "sophia", from = "src"},
+    {include = "logos_hcg", from = "src"},
+    {include = "logos_sophia_sdk", from = "src"},
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0"
@@ -26,8 +30,6 @@ tenacity = ">=8.0.0"
 fastapi = ">=0.100.0"
 uvicorn = {extras = ["standard"], version = "^0.32.0"}
 python-multipart = ">=0.0.6"
-logos-foundry = {path = "../logos", develop = true}
-logos_sophia_sdk = {path = "../logos/sdk/python/sophia", develop = true}
 pillow = ">=10.0.0"
 
 [tool.poetry.group.dev.dependencies]

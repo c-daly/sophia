@@ -45,6 +45,9 @@ pip install poetry
 git clone https://github.com/c-daly/sophia.git
 cd sophia
 
+# Note: logos_hcg and logos_sophia_sdk are currently vendored inside src/
+# to keep installation self-contained until the shared packages are published.
+
 # Install dependencies (includes both runtime and development dependencies)
 poetry install
 
