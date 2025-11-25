@@ -42,6 +42,7 @@ mypy = ">=1.0.0"
 httpx = ">=0.24.0"
 pytest-asyncio = ">=0.21.0"
 types-networkx = ">=2.6.0"
+types-python-dateutil = ">=2.8.19.14"
 
 [build-system]
 requires = ["poetry-core"]
@@ -66,6 +67,12 @@ ignore_missing_imports = true
 module = "tests.*"
 disallow_untyped_defs = false
 
+[[tool.mypy.overrides]]
+module = [
+    "logos_hcg.*",
+    "logos_sophia_sdk.*",
+]
+ignore_errors = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
