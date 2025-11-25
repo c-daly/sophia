@@ -23,27 +23,3 @@ jobs:
       coverage_python_version: '3.12'
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  prototype-integration:
-    needs: standard
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Poetry
-        run: pip install poetry
-
-      - name: Install dependencies
-        run: poetry install --with dev
-
-      - name: Run prototype integration tests
-        env:
-          COMPOSE_CMD: docker compose
-          RUN_PROTOTYPE_INTEGRATION: "1"
-        run: ./scripts/run_prototype_integration.sh

@@ -42,6 +42,11 @@ The prototype implements:
 - Neo4j 5.x (via Docker)
 - Milvus 2.x (via Docker)
 
+## CI Coverage
+
+- **Standard CI** runs on every PR/push, covering lint, unit tests, and non-integration API suites.
+- **Prototype Integration** lives in `.github/workflows/prototype-integration.yml` and runs nightly, on demand (`workflow_dispatch`), and when prototype-specific files change on `main`. It executes `scripts/run_prototype_integration.sh`, which now fails fast if Neo4j/Milvus containers cannot become healthy within 15 minutes, capturing recent Docker logs for debugging.
+
 ## Quick Start
 
 ### 1. Start Services
