@@ -143,16 +143,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "sophiadev")
-    milvus_host = os.getenv("MILVUS_HOST", "localhost")
-    milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
 
     try:
         _hcg_client = HCGClient(
             neo4j_uri=neo4j_uri,
             neo4j_username=neo4j_user,
             neo4j_password=neo4j_password,
-            milvus_host=milvus_host,
-            milvus_port=milvus_port,
         )
         logger.info("HCG client initialized")
 
@@ -384,6 +380,8 @@ def create_app() -> FastAPI:
             )
 
         try:
+            goal_payload = request.goal_dict()
+
             # Read current state from Neo4j HCG
             state_node = _hcg_client.get_node("current_state")
             if state_node:
@@ -391,7 +389,7 @@ def create_app() -> FastAPI:
                 _planner.update_state(current_state)
 
             # Generate plan using backward chaining
-            plan_steps = _planner.plan(request.goal)
+            plan_steps = _planner.plan(goal_payload)
 
             # Convert to response format
             plan_step_models = [
@@ -412,7 +410,7 @@ def create_app() -> FastAPI:
                 node_id=plan_id,
                 node_type="plan",
                 properties={
-                    "goal": request.goal,
+                    "goal": goal_payload,
                     "steps": [
                         {
                             "id": step.id,
@@ -426,7 +424,7 @@ def create_app() -> FastAPI:
             )
 
             # Link plan to goal if it exists in HCG
-            goal_id = request.goal.get("target_state", "")
+            goal_id = goal_payload.get("target_state", "")
             goal_node_id = f"goal_{goal_id}" if goal_id else None
             if goal_node_id:
                 try:
@@ -443,7 +441,7 @@ def create_app() -> FastAPI:
 
             return PlanResponse(
                 plan=plan_step_models,
-                goal=request.goal,
+                goal=goal_payload,
                 plan_id=plan_id,
             )
 

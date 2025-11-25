@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 
@@ -8,16 +8,38 @@ from datetime import datetime, timezone
 class PlanRequest(BaseModel):
     """Request model for the /plan endpoint."""
 
-    goal: Dict[str, Any] = Field(
+    goal: Union[str, Dict[str, Any]] = Field(
         ...,
-        description="Goal specification with description and target_state",
+        description="Goal specification (string or structured payload)",
         json_schema_extra={
-            "example": {
-                "description": "red block in bin",
-                "target_state": "red_block_in_bin",
-            }
+            "examples": [
+                "Place the red block into the bin",
+                {
+                    "description": "red block in bin",
+                    "target_state": "red_block_in_bin",
+                },
+            ]
         },
     )
+    context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional context describing entities, constraints, or media references",
+    )
+    constraints: Optional[List[str]] = Field(
+        default=None, description="Hard constraints the planner must honor"
+    )
+    priority: Optional[str] = Field(
+        default=None, description="Informational priority label (e.g., P0/P1/P2)"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Arbitrary metadata for downstream audits"
+    )
+
+    def goal_dict(self) -> Dict[str, Any]:
+        """Return the goal as a structured dictionary."""
+        if isinstance(self.goal, dict):
+            return self.goal
+        return {"description": self.goal, "target_state": ""}
 
 
 class PlanStep(BaseModel):
