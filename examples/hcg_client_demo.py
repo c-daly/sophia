@@ -78,8 +78,8 @@ def main() -> None:
         # This should fail - missing required type
         client.add_node("invalid", "", {})
         print("   ✗ Validation should have failed!")
-    except ValueError as e:
-        print(f"   ✓ Validation correctly rejected invalid node")
+    except ValueError:
+        print("   ✓ Validation correctly rejected invalid node")
     print()
 
     # Query the graph

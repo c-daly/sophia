@@ -8,7 +8,6 @@ This example shows how to:
 """
 
 import requests
-from pathlib import Path
 from PIL import Image
 import io
 
@@ -112,7 +111,7 @@ def main():
     )
 
     sample_id = ingest_result["sample_id"]
-    print(f"   ✓ Upload successful!")
+    print("   ✓ Upload successful!")
     print(f"   Sample ID: {sample_id}")
     print(f"   Media Type: {ingest_result['media_type']}")
     print(f"   File Path: {ingest_result['file_path']}")
@@ -122,7 +121,7 @@ def main():
 
     if ingest_result.get("metadata"):
         metadata = ingest_result["metadata"]
-        print(f"   Metadata:")
+        print("   Metadata:")
         print(f"     - Width: {metadata.get('width')}")
         print(f"     - Height: {metadata.get('height')}")
         print(f"     - Format: {metadata.get('format')}")
@@ -145,7 +144,7 @@ def main():
     print(f"\n4. Retrieving sample {sample_id}...")
     sample_detail = get_media_sample(sample_id)
 
-    print(f"   ✓ Sample details:")
+    print("   ✓ Sample details:")
     print(f"   Sample ID: {sample_detail['sample_id']}")
     print(f"   Media Type: {sample_detail['media_type']}")
     print(f"   File Path: {sample_detail['file_path']}")
@@ -154,7 +153,7 @@ def main():
 
     if sample_detail.get("metadata"):
         metadata = sample_detail["metadata"]
-        print(f"   Metadata:")
+        print("   Metadata:")
         for key, value in metadata.items():
             if value is not None:
                 print(f"     - {key}: {value}")
