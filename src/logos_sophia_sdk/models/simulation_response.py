@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, field_validato
 from typing import Any, ClassVar, Dict, List, Optional
 from uuid import UUID
 from logos_sophia_sdk.models.cwm_state import CWMState
-from typing import Optional, Set
+from typing import Set
 from typing_extensions import Self
 
 

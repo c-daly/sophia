@@ -34,11 +34,6 @@ from logos_sophia_sdk import rest
 from logos_sophia_sdk.exceptions import (
     ApiValueError,
     ApiException,
-    BadRequestException,
-    UnauthorizedException,
-    ForbiddenException,
-    NotFoundException,
-    ServiceException,
 )
 
 RequestSerialized = Tuple[str, str, Dict[str, str], Optional[str], List[str]]

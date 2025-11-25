@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
 from logos_sophia_sdk.models.cwm_state_data import CWMStateData
 from logos_sophia_sdk.models.cwm_state_links import CWMStateLinks
-from typing import Optional, Set
+from typing import Set
 from typing_extensions import Self
 
 

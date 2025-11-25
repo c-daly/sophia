@@ -18,18 +18,15 @@ import pprint
 from pydantic import (
     BaseModel,
     ConfigDict,
-    Field,
-    StrictStr,
     ValidationError,
     field_validator,
 )
-from typing import Any, List, Optional
+from typing import Any, Optional
 from logos_sophia_sdk.models.cwma_graph_data import CWMAGraphData
 from logos_sophia_sdk.models.cwme_sentiment_data import CWMESentimentData
 from logos_sophia_sdk.models.cwmg_imagined_data import CWMGImaginedData
-from pydantic import StrictStr, Field
-from typing import Union, List, Set, Optional, Dict
-from typing_extensions import Literal, Self
+from typing import Union, Set, Dict
+from typing_extensions import Self
 
 CWMSTATEDATA_ONE_OF_SCHEMAS = ["CWMAGraphData", "CWMESentimentData", "CWMGImaginedData"]
 
@@ -75,7 +72,7 @@ class CWMStateData(BaseModel):
 
     @field_validator("actual_instance")
     def actual_instance_must_validate_oneof(cls, v):
-        instance = CWMStateData.model_construct()
+        CWMStateData.model_construct()
         error_messages = []
         match = 0
         # validate data type: CWMAGraphData

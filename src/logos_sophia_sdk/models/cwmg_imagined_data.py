@@ -27,7 +27,7 @@ from pydantic import (
     StrictStr,
 )
 from typing import Any, ClassVar, Dict, List, Optional, Union
-from typing import Optional, Set
+from typing import Set
 from typing_extensions import Self
 
 
