@@ -12,7 +12,15 @@ from sophia.api.app import create_app
 from sophia.hcg_client import HCGClient
 
 
-pytestmark = pytest.mark.integration
+RUN_PROTOTYPE_INTEGRATION = os.getenv("RUN_PROTOTYPE_INTEGRATION") == "1"
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not RUN_PROTOTYPE_INTEGRATION,
+        reason="Prototype integration tests require external Neo4j/Milvus; set RUN_PROTOTYPE_INTEGRATION=1 to enable.",
+    ),
+]
 
 
 @pytest.fixture
