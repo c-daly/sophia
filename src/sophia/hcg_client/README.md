@@ -1,32 +1,32 @@
 # HCG Client - Hierarchical Cognitive Graph Management
 
-The HCG (Hierarchical Cognitive Graph) client provides a unified interface for managing knowledge graphs with Neo4j and Milvus, featuring SHACL validation on all graph mutations.
+The HCG (Hierarchical Cognitive Graph) client now reuses the canonical `logos_hcg`
+package for connection management while layering on Sophia-specific SHACL validation
+and helper utilities.
 
 ## Features
 
-- **Neo4j Integration**: Graph database for nodes and edges
-- **Milvus Integration**: Vector database for semantic embeddings
-- **SHACL Validation**: Enforces constraints on graph mutations
-- **Connection Pooling**: Efficient connection management
-- **Retry Logic**: Automatic retries with exponential backoff
-- **Type-Safe API**: Minimal, clean API for CWM-A/Planner
+- **Shared LOGOS client**: Delegates connectivity/retry logic to `logos_hcg`
+- **Neo4j Integration**: CRUD helpers for nodes/edges
+- **SHACL Validation**: Enforces constraints on every mutation
+- **Type-Safe API**: Minimal surface for CWM-A/Planner consumers
+- **Extensible**: Ready for future Milvus/vector integration without copy/paste
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              HCGClient (Unified API)            │
-├─────────────────┬───────────────────────────────┤
-│  Neo4jAdapter   │      MilvusAdapter            │
-│  - Nodes/Edges  │      - Embeddings             │
-│  - Queries      │      - Similarity Search      │
-└─────────────────┴───────────────────────────────┘
-         │                      │
-         ↓                      ↓
-    ┌─────────┐           ┌──────────┐
-    │ Neo4j   │           │ Milvus   │
-    │ (Graph) │           │ (Vector) │
-    └─────────┘           └──────────┘
+┌────────────────────────────────────────────┐
+│           Sophia HCGClient Wrapper         │
+├────────────────────────────────────────────┤
+│  - Extends `logos_hcg.client.HCGClient`    │
+│  - Adds SHACL validation helpers           │
+│  - Provides high-level graph utilities     │
+└────────────────────────────────────────────┘
+                   │
+                   ↓
+            ┌──────────────┐
+            │  Neo4j (HCG) │
+            └──────────────┘
 ```
 
 ## Installation
@@ -34,7 +34,6 @@ The HCG (Hierarchical Cognitive Graph) client provides a unified interface for m
 1. Add dependencies to your project (already included in Sophia):
    ```toml
    neo4j = ">=5.0.0"
-   pymilvus = ">=2.3.0"
    pyshacl = ">=0.25.0"
    tenacity = ">=8.0.0"
    ```
@@ -54,8 +53,6 @@ client = HCGClient(
     neo4j_uri="bolt://localhost:7687",
     neo4j_username="neo4j",
     neo4j_password="sophiadev",
-    milvus_host="localhost",
-    milvus_port=19530,
 )
 
 # Add nodes (with automatic SHACL validation)
@@ -84,17 +81,6 @@ node = client.get_node("learning")
 neighbors = client.query_neighbors("learning")
 edges = client.query_edges_from("learning")
 
-# Add embeddings for semantic search
-embedding = [0.1] * 768  # 768-dimensional vector
-client.add_embedding("learning", embedding)
-
-# Search for similar nodes
-similar = client.search_similar_nodes(
-    query_embedding=embedding,
-    top_k=5,
-    node_type_filter="concept",  # Optional: filter by type
-)
-
 # Cleanup
 client.close()
 ```
@@ -116,30 +102,18 @@ Main client for managing knowledge graph.
 - `query_edges_from(node_id)` - Get outgoing edges
 - `delete_node(node_id)` - Delete node and its embedding
 
-**Vector Operations:**
-- `add_embedding(node_id, embedding)` - Add/update embedding
-- `search_similar_nodes(query_embedding, top_k, node_type_filter)` - Semantic search
-
 **Utility:**
 - `health_check()` - Check Neo4j and Milvus health
 - `clear_all()` - Clear all data (dangerous!)
 - `close()` - Close all connections
 
-### Neo4jAdapter
+### Implementation Details
 
-Low-level Neo4j operations with connection pooling and retries.
-
-- Automatic retry on `ServiceUnavailable` and `TransientError`
-- Connection pooling (default: 50 connections)
-- SHACL validation on mutations
-
-### MilvusAdapter
-
-Low-level Milvus operations for vector storage.
-
-- Automatic collection creation with schema
-- IVF_FLAT indexing for similarity search
-- L2 distance metric
+- Connection pooling, retry logic, and Cypher helpers come from
+  `logos_hcg.client.HCGClient`.
+- Sophia adds SHACL validation plus tiny helper queries used by the API layer.
+- Vector/embedding helpers will return once the shared Milvus sync module
+  (`logos_hcg.sync.HCGMilvusSync`) is wired into the service.
 
 ### SHACLValidator
 
@@ -262,18 +236,15 @@ ValueError: Node validation failed: ...
 - Verify edge has `source`, `target`, and `relation`
 - Review custom SHACL shapes if using them
 
-### Embedding Dimension Errors
-```
-ValueError: Embedding dimension 512 doesn't match expected dimension 768
-```
-- Ensure embedding vectors are 768-dimensional (default)
-- Or configure MilvusAdapter with custom dimension
+### Embedding Support
+
+Vector/embedding helpers will return once the shared Milvus sync utilities are in
+place. Until then, the public API focuses purely on graph mutations/queries.
 
 ## Performance Considerations
 
 - **Batch Operations**: For bulk imports, consider using Neo4j's batch import tools
-- **Connection Pooling**: Adjust pool size based on workload
-- **Milvus Indexing**: Larger nlist values improve accuracy but reduce speed
+- **Connection Pooling**: Managed by `logos_hcg` and configurable via env vars
 - **SHACL Validation**: Can be disabled for trusted data sources (not recommended)
 
 ## Security

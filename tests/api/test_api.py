@@ -1,9 +1,11 @@
 """Tests for Sophia API endpoints."""
 
 import os
+from unittest.mock import Mock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch
+from logos_sophia_sdk.models.plan_request import PlanRequest as SDKPlanRequest
 
 from sophia.api.app import create_app
 
@@ -110,6 +112,17 @@ class TestPlanEndpoint:
             assert "plan_id" in data
             assert "created_at" in data
             assert isinstance(data["plan"], list)
+
+    def test_plan_sdk_request_schema(self, client, auth_headers):
+        """Ensure shared SDK payload highlights current contract gap."""
+        sdk_request = SDKPlanRequest(goal="Place red block in bin")
+        response = client.post(
+            "/plan",
+            json=sdk_request.to_dict(),
+            headers=auth_headers,
+        )
+        # The SDK payload should now be accepted and move further into planning
+        assert response.status_code != 422
 
 
 class TestImagineEndpoint:

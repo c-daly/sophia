@@ -1,62 +1,49 @@
-"""HCG Client for managing knowledge graph with Neo4j and Milvus."""
+"""Lightweight wrapper around the shared LOGOS HCG client.
 
-from typing import Dict, Any, List, Optional
+This module reuses the canonical `logos_hcg` package for connection management,
+retry logic, and query helpers while layering on Sophia-specific SHACL
+validation and helper methods that were previously duplicated in this repo.
+"""
+
+from __future__ import annotations
+
+import json
 import logging
+from collections.abc import Sequence
+from typing import Any, Dict, List, Mapping, Optional, cast
 
-from sophia.hcg_client.neo4j_adapter import Neo4jAdapter
-from sophia.hcg_client.milvus_adapter import MilvusAdapter
+from logos_hcg.client import HCGClient as LogosHCGClient
+
 from sophia.hcg_client.shacl_validator import SHACLValidator
-
 
 logger = logging.getLogger(__name__)
 
 
-class HCGClient:
-    """Unified HCG client for managing knowledge graph with Neo4j and Milvus.
+class HCGClient(LogosHCGClient):
+    """Sophia-specific helper that extends the shared LOGOS HCG client."""
 
-    Provides a simplified API for CWM-A/Planner to query and update HCG,
-    with SHACL validation on mutations.
-    """
+    _JSON_SENTINEL = "__LOGOS_JSON__:"
 
     def __init__(
         self,
         neo4j_uri: str = "bolt://localhost:7687",
         neo4j_username: str = "neo4j",
         neo4j_password: str = "sophiadev",
-        milvus_host: str = "localhost",
-        milvus_port: int = 19530,
+        neo4j_database: str = "neo4j",
         validator: Optional[SHACLValidator] = None,
     ) -> None:
-        """Initialize HCG client.
-
-        Args:
-            neo4j_uri: Neo4j connection URI
-            neo4j_username: Neo4j username
-            neo4j_password: Neo4j password
-            milvus_host: Milvus host
-            milvus_port: Milvus port
-            validator: Optional SHACL validator
-        """
+        """Initialize the client and SHACL validator."""
         self._validator = validator or SHACLValidator()
-        self._neo4j = Neo4jAdapter(
+        super().__init__(
             uri=neo4j_uri,
-            username=neo4j_username,
+            user=neo4j_username,
             password=neo4j_password,
-            validator=self._validator,
+            database=neo4j_database,
         )
-        self._milvus = MilvusAdapter(
-            host=milvus_host,
-            port=milvus_port,
-        )
-        logger.info("HCG client initialized")
 
-    def close(self) -> None:
-        """Close all connections."""
-        self._neo4j.close()
-        self._milvus.close()
-        logger.info("HCG client connections closed")
-
+    # ------------------------------------------------------------------
     # Graph operations
+    # ------------------------------------------------------------------
 
     def add_node(
         self,
@@ -64,25 +51,35 @@ class HCGClient:
         node_type: str,
         properties: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Add a node to the graph with SHACL validation.
-
-        Args:
-            node_id: Unique node ID
-            node_type: Type of the node
-            properties: Optional node properties
-
-        Returns:
-            Node ID
-
-        Raises:
-            ValueError: If validation fails
-        """
+        """Create or update a node after SHACL validation."""
         node_data = {
             "id": node_id,
             "type": node_type,
             "properties": properties or {},
         }
-        return self._neo4j.add_node(node_data)
+
+        is_valid, errors = self._validator.validate_node(node_data)
+        if not is_valid:
+            raise ValueError(f"Node validation failed: {'; '.join(errors)}")
+
+        query = """
+        MERGE (n:Node {id: $id})
+        SET n.type = $type
+        SET n += $properties
+        RETURN n.id as id
+        """
+        encoded_properties = self._encode_properties(
+            cast(Mapping[str, Any], node_data["properties"])
+        )
+        records = self._execute_query(
+            query,
+            {
+                "id": node_id,
+                "type": node_type,
+                "properties": encoded_properties,
+            },
+        )
+        return str(records[0]["id"]) if records else node_id
 
     def add_edge(
         self,
@@ -92,21 +89,7 @@ class HCGClient:
         relation: str,
         properties: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Add an edge to the graph with SHACL validation.
-
-        Args:
-            edge_id: Unique edge ID
-            source_id: Source node ID
-            target_id: Target node ID
-            relation: Relationship type
-            properties: Optional edge properties
-
-        Returns:
-            Edge ID
-
-        Raises:
-            ValueError: If validation fails
-        """
+        """Create or update an edge after SHACL validation."""
         edge_data = {
             "id": edge_id,
             "source": source_id,
@@ -114,164 +97,206 @@ class HCGClient:
             "relation": relation,
             "properties": properties or {},
         }
-        return self._neo4j.add_edge(edge_data)
+
+        is_valid, errors = self._validator.validate_edge(edge_data)
+        if not is_valid:
+            raise ValueError(f"Edge validation failed: {'; '.join(errors)}")
+
+        query = """
+        MATCH (source:Node {id: $source_id})
+        MATCH (target:Node {id: $target_id})
+        MERGE (source)-[r:RELATION {id: $edge_id}]->(target)
+        SET r.relation_type = $relation
+        SET r += $properties
+        RETURN r.id as id
+        """
+        encoded_properties = self._encode_properties(
+            cast(Mapping[str, Any], edge_data["properties"])
+        )
+        records = self._execute_query(
+            query,
+            {
+                "edge_id": edge_id,
+                "source_id": source_id,
+                "target_id": target_id,
+                "relation": relation,
+                "properties": encoded_properties,
+            },
+        )
+        return str(records[0]["id"]) if records else edge_id
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Get a node from the graph.
-
-        Args:
-            node_id: Node ID
-
-        Returns:
-            Node data or None if not found
+        """Fetch a node by ID."""
+        query = """
+        MATCH (n:Node {id: $id})
+        RETURN n.id as id, n.type as type, properties(n) as props
         """
-        return self._neo4j.get_node(node_id)
+        records = self._execute_read(query, {"id": node_id})
+        if not records:
+            return None
 
-    def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
-        """Get an edge from the graph.
-
-        Args:
-            edge_id: Edge ID
-
-        Returns:
-            Edge data or None if not found
-        """
-        return self._neo4j.get_edge(edge_id)
-
-    def query_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
-        """Query neighbors of a node.
-
-        Args:
-            node_id: Node ID
-
-        Returns:
-            List of neighbor nodes
-        """
-        return self._neo4j.query_neighbors(node_id)
-
-    def query_edges_from(self, node_id: str) -> List[Dict[str, Any]]:
-        """Query outgoing edges from a node.
-
-        Args:
-            node_id: Node ID
-
-        Returns:
-            List of outgoing edges
-        """
-        return self._neo4j.query_edges_from(node_id)
-
-    def delete_node(self, node_id: str) -> bool:
-        """Delete a node from the graph.
-
-        Also deletes associated embedding if present.
-
-        Args:
-            node_id: Node ID
-
-        Returns:
-            True if deleted, False if not found
-        """
-        # Delete from Neo4j
-        deleted = self._neo4j.delete_node(node_id)
-
-        # Delete embedding from Milvus if exists
-        if deleted:
-            try:
-                self._milvus.delete_embedding(node_id)
-            except Exception as e:
-                logger.warning(f"Failed to delete embedding for {node_id}: {e}")
-
-        return deleted
-
-    # Vector operations
-
-    def add_embedding(
-        self,
-        node_id: str,
-        embedding: List[float],
-    ) -> str:
-        """Add or update embedding for a node.
-
-        Args:
-            node_id: Node ID
-            embedding: Embedding vector
-
-        Returns:
-            Embedding ID
-
-        Raises:
-            ValueError: If node doesn't exist or embedding dimension is wrong
-        """
-        # Verify node exists
-        node = self._neo4j.get_node(node_id)
-        if not node:
-            raise ValueError(f"Node {node_id} does not exist")
-
-        # Insert embedding
-        embedding_id = f"emb_{node_id}"
-        return self._milvus.insert_embedding(
-            embedding_id=embedding_id,
-            node_id=node_id,
-            node_type=node["type"],
-            embedding=embedding,
-        )
-
-    def search_similar_nodes(
-        self,
-        query_embedding: List[float],
-        top_k: int = 10,
-        node_type_filter: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Search for nodes with similar embeddings.
-
-        Args:
-            query_embedding: Query embedding vector
-            top_k: Number of results to return
-            node_type_filter: Optional filter by node type
-
-        Returns:
-            List of similar nodes with their data and distances
-        """
-        # Search in Milvus
-        similar = self._milvus.search_similar(
-            query_embedding=query_embedding,
-            top_k=top_k,
-            node_type_filter=node_type_filter,
-        )
-
-        # Enrich with node data from Neo4j
-        enriched_results = []
-        for result in similar:
-            node_id = result["node_id"]
-            node = self._neo4j.get_node(node_id)
-            if node:
-                enriched_results.append(
-                    {
-                        **result,
-                        "node_data": node,
-                    }
-                )
-
-        return enriched_results
-
-    # Utility methods
-
-    def health_check(self) -> Dict[str, bool]:
-        """Check health of all components.
-
-        Returns:
-            Dictionary with health status of Neo4j and Milvus
-        """
+        props = dict(records[0]["props"])
+        props.pop("id", None)
+        props.pop("type", None)
+        props = self._decode_properties(props)
         return {
-            "neo4j": self._neo4j.health_check(),
-            "milvus": self._milvus.health_check(),
+            "id": records[0]["id"],
+            "type": records[0]["type"],
+            "properties": props,
         }
 
-    def clear_all(self) -> None:
-        """Clear all data from Neo4j and Milvus.
-
-        WARNING: This deletes all data!
+    def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch an edge by ID."""
+        query = """
+        MATCH (source:Node)-[r:RELATION {id: $id}]->(target:Node)
+        RETURN r.id as id, source.id as source, target.id as target,
+               r.relation_type as relation, properties(r) as props
         """
-        self._neo4j.clear_all()
-        self._milvus.clear_all()
-        logger.warning("Cleared all data from HCG")
+        records = self._execute_read(query, {"id": edge_id})
+        if not records:
+            return None
+
+        props = dict(records[0]["props"])
+        props.pop("id", None)
+        props.pop("relation_type", None)
+        props = self._decode_properties(props)
+        return {
+            "id": records[0]["id"],
+            "source": records[0]["source"],
+            "target": records[0]["target"],
+            "relation": records[0]["relation"],
+            "properties": props,
+        }
+
+    def query_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+        """Return unique neighbor nodes for the provided node."""
+        query = """
+        MATCH (n:Node {id: $id})-[r]-(neighbor:Node)
+        RETURN DISTINCT neighbor.id as id, neighbor.type as type,
+               properties(neighbor) as props
+        """
+        records = self._execute_read(query, {"id": node_id})
+        neighbors: List[Dict[str, Any]] = []
+        for record in records:
+            props = dict(record["props"])
+            props.pop("id", None)
+            props.pop("type", None)
+            props = self._decode_properties(props)
+            neighbors.append(
+                {
+                    "id": record["id"],
+                    "type": record["type"],
+                    "properties": props,
+                }
+            )
+        return neighbors
+
+    def query_edges_from(self, node_id: str) -> List[Dict[str, Any]]:
+        """Return outgoing edges for the provided node."""
+        query = """
+        MATCH (source:Node {id: $id})-[r:RELATION]->(target:Node)
+        RETURN r.id as id, source.id as source, target.id as target,
+               r.relation_type as relation, properties(r) as props
+        """
+        records = self._execute_read(query, {"id": node_id})
+        edges: List[Dict[str, Any]] = []
+        for record in records:
+            props = dict(record["props"])
+            props.pop("id", None)
+            props.pop("relation_type", None)
+            props = self._decode_properties(props)
+            edges.append(
+                {
+                    "id": record["id"],
+                    "source": record["source"],
+                    "target": record["target"],
+                    "relation": record["relation"],
+                    "properties": props,
+                }
+            )
+        return edges
+
+    def delete_node(self, node_id: str) -> bool:
+        """Delete a node and all relationships."""
+        query = """
+        MATCH (n:Node {id: $id})
+        DETACH DELETE n
+        RETURN count(n) as deleted
+        """
+        records = self._execute_query(query, {"id": node_id})
+        deleted = records[0]["deleted"] if records else 0
+        return bool(deleted)
+
+    def clear_all(self) -> None:
+        """Remove all nodes/edges from the graph."""
+        self._execute_query("MATCH (n) DETACH DELETE n")
+        logger.info("Cleared all nodes and edges from Neo4j")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_primitive(value: Any) -> bool:
+        return isinstance(value, (str, int, float, bool))
+
+    def _encode_properties(self, properties: Mapping[str, Any]) -> Dict[str, Any]:
+        encoded: Dict[str, Any] = {}
+        for key, value in (properties or {}).items():
+            encoded[key] = self._encode_value(value)
+        return encoded
+
+    def _encode_value(self, value: Any) -> Any:
+        if self._is_primitive(value):
+            return value
+
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
+            sanitized: List[Any] = []
+            for item in value:
+                if self._is_primitive(item):
+                    sanitized.append(item)
+                else:
+                    return self._JSON_SENTINEL + json.dumps(value)
+            return sanitized
+
+        return self._JSON_SENTINEL + json.dumps(value)
+
+    def _decode_properties(self, properties: Mapping[str, Any]) -> Dict[str, Any]:
+        decoded: Dict[str, Any] = {}
+        for key, value in properties.items():
+            decoded[key] = self._decode_value(value)
+        return decoded
+
+    def _decode_value(self, value: Any) -> Any:
+        if isinstance(value, str) and value.startswith(self._JSON_SENTINEL):
+            json_payload = value[len(self._JSON_SENTINEL) :]
+            try:
+                return json.loads(json_payload)
+            except json.JSONDecodeError:
+                logger.warning("Failed to decode JSON payload for value: %s", value)
+                return json_payload
+
+        if isinstance(value, list):
+            return [self._decode_value(item) for item in value]
+
+        return value
+
+    # ------------------------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------------------------
+
+    def health_check(self) -> Dict[str, bool]:
+        """Return a simple component health summary."""
+        neo4j_ok = False
+        try:
+            with self._session() as session:
+                result = session.run("RETURN 1 as ok")
+                record = result.single()
+                neo4j_ok = bool(record and record["ok"] == 1)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Neo4j health check failed: %s", exc)
+
+        # Milvus support has not yet migrated to the shared package.
+        return {"neo4j": neo4j_ok, "milvus": False}

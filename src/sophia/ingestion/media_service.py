@@ -258,7 +258,8 @@ class MediaIngestionService:
             # Get total count
             with self.hcg_client.driver.session() as session:  # type: ignore[attr-defined]
                 result = session.run(count_query, parameters)
-                total = result.single()["total"]
+                count_record = result.single()
+                total = int(count_record["total"]) if count_record else 0
 
                 # Get samples
                 result = session.run(list_query, parameters)

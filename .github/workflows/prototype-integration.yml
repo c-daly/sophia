@@ -1,0 +1,60 @@
+name: Prototype Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (defaults to the workflow ref)"
+        required: false
+  schedule:
+    - cron: "0 6 * * *"
+  push:
+    branches: [ main ]
+    paths:
+      - "docker-compose.yml"
+      - "scripts/run_prototype_integration.sh"
+      - "tests/api/test_prototype_integration.py"
+      - ".github/workflows/prototype-integration.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  prototype-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Run prototype integration tests
+        env:
+          COMPOSE_CMD: docker compose
+          HEALTH_TIMEOUT: "900"
+          RUN_PROTOTYPE_INTEGRATION: "1"
+        run: ./scripts/run_prototype_integration.sh
+
+      - name: Collect docker logs
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --tail=300 > prototype-integration.log
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prototype-integration-logs
+          path: prototype-integration.log
+          retention-days: 5
