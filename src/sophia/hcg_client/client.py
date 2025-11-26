@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, cast
 
 from logos_hcg.client import HCGClient as LogosHCGClient
 
@@ -68,7 +68,9 @@ class HCGClient(LogosHCGClient):
         SET n += $properties
         RETURN n.id as id
         """
-        encoded_properties = self._encode_properties(node_data["properties"])
+        encoded_properties = self._encode_properties(
+            cast(Mapping[str, Any], node_data["properties"])
+        )
         records = self._execute_query(
             query,
             {
@@ -108,7 +110,9 @@ class HCGClient(LogosHCGClient):
         SET r += $properties
         RETURN r.id as id
         """
-        encoded_properties = self._encode_properties(edge_data["properties"])
+        encoded_properties = self._encode_properties(
+            cast(Mapping[str, Any], edge_data["properties"])
+        )
         records = self._execute_query(
             query,
             {
@@ -236,7 +240,7 @@ class HCGClient(LogosHCGClient):
     def _is_primitive(value: Any) -> bool:
         return isinstance(value, (str, int, float, bool))
 
-    def _encode_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+    def _encode_properties(self, properties: Mapping[str, Any]) -> Dict[str, Any]:
         encoded: Dict[str, Any] = {}
         for key, value in (properties or {}).items():
             encoded[key] = self._encode_value(value)
@@ -259,7 +263,7 @@ class HCGClient(LogosHCGClient):
 
         return self._JSON_SENTINEL + json.dumps(value)
 
-    def _decode_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+    def _decode_properties(self, properties: Mapping[str, Any]) -> Dict[str, Any]:
         decoded: Dict[str, Any] = {}
         for key, value in properties.items():
             decoded[key] = self._decode_value(value)
