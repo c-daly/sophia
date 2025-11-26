@@ -7,7 +7,9 @@ validation and helper methods that were previously duplicated in this repo.
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Sequence
 from typing import Any, Dict, List, Optional
 
 from logos_hcg.client import HCGClient as LogosHCGClient
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 class HCGClient(LogosHCGClient):
     """Sophia-specific helper that extends the shared LOGOS HCG client."""
+
+    _JSON_SENTINEL = "__LOGOS_JSON__:"
 
     def __init__(
         self,
@@ -64,12 +68,13 @@ class HCGClient(LogosHCGClient):
         SET n += $properties
         RETURN n.id as id
         """
+        encoded_properties = self._encode_properties(node_data["properties"])
         records = self._execute_query(
             query,
             {
                 "id": node_id,
                 "type": node_type,
-                "properties": node_data["properties"],
+                "properties": encoded_properties,
             },
         )
         return str(records[0]["id"]) if records else node_id
@@ -103,6 +108,7 @@ class HCGClient(LogosHCGClient):
         SET r += $properties
         RETURN r.id as id
         """
+        encoded_properties = self._encode_properties(edge_data["properties"])
         records = self._execute_query(
             query,
             {
@@ -110,7 +116,7 @@ class HCGClient(LogosHCGClient):
                 "source_id": source_id,
                 "target_id": target_id,
                 "relation": relation,
-                "properties": edge_data["properties"],
+                "properties": encoded_properties,
             },
         )
         return str(records[0]["id"]) if records else edge_id
@@ -128,6 +134,7 @@ class HCGClient(LogosHCGClient):
         props = dict(records[0]["props"])
         props.pop("id", None)
         props.pop("type", None)
+        props = self._decode_properties(props)
         return {
             "id": records[0]["id"],
             "type": records[0]["type"],
@@ -148,6 +155,7 @@ class HCGClient(LogosHCGClient):
         props = dict(records[0]["props"])
         props.pop("id", None)
         props.pop("relation_type", None)
+        props = self._decode_properties(props)
         return {
             "id": records[0]["id"],
             "source": records[0]["source"],
@@ -169,6 +177,7 @@ class HCGClient(LogosHCGClient):
             props = dict(record["props"])
             props.pop("id", None)
             props.pop("type", None)
+            props = self._decode_properties(props)
             neighbors.append(
                 {
                     "id": record["id"],
@@ -191,6 +200,7 @@ class HCGClient(LogosHCGClient):
             props = dict(record["props"])
             props.pop("id", None)
             props.pop("relation_type", None)
+            props = self._decode_properties(props)
             edges.append(
                 {
                     "id": record["id"],
@@ -217,6 +227,57 @@ class HCGClient(LogosHCGClient):
         """Remove all nodes/edges from the graph."""
         self._execute_query("MATCH (n) DETACH DELETE n")
         logger.info("Cleared all nodes and edges from Neo4j")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_primitive(value: Any) -> bool:
+        return isinstance(value, (str, int, float, bool))
+
+    def _encode_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+        encoded: Dict[str, Any] = {}
+        for key, value in (properties or {}).items():
+            encoded[key] = self._encode_value(value)
+        return encoded
+
+    def _encode_value(self, value: Any) -> Any:
+        if self._is_primitive(value):
+            return value
+
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
+            sanitized: List[Any] = []
+            for item in value:
+                if self._is_primitive(item):
+                    sanitized.append(item)
+                else:
+                    return self._JSON_SENTINEL + json.dumps(value)
+            return sanitized
+
+        return self._JSON_SENTINEL + json.dumps(value)
+
+    def _decode_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+        decoded: Dict[str, Any] = {}
+        for key, value in properties.items():
+            decoded[key] = self._decode_value(value)
+        return decoded
+
+    def _decode_value(self, value: Any) -> Any:
+        if isinstance(value, str) and value.startswith(self._JSON_SENTINEL):
+            json_payload = value[len(self._JSON_SENTINEL) :]
+            try:
+                return json.loads(json_payload)
+            except json.JSONDecodeError:
+                logger.warning("Failed to decode JSON payload for value: %s", value)
+                return json_payload
+
+        if isinstance(value, list):
+            return [self._decode_value(item) for item in value]
+
+        return value
 
     # ------------------------------------------------------------------
     # Diagnostics

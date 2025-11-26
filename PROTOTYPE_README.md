@@ -45,7 +45,8 @@ The prototype implements:
 ## CI Coverage
 
 - **Standard CI** runs on every PR/push, covering lint, unit tests, and non-integration API suites.
-- **Prototype Integration** lives in `.github/workflows/prototype-integration.yml` and runs nightly, on demand (`workflow_dispatch`), and when prototype-specific files change on `main`. It executes `scripts/run_prototype_integration.sh`, which now fails fast if Neo4j/Milvus containers cannot become healthy within 15 minutes, capturing recent Docker logs for debugging.
+- **Prototype Integration** lives in `.github/workflows/prototype-integration.yml` and runs nightly, on demand (`workflow_dispatch`), and when prototype-specific files change on `main`. It executes `scripts/run_prototype_integration.sh`, which fails fast if Neo4j/Milvus containers cannot become healthy (3-minute timeout locally, 15 minutes in CI) and captures recent Docker logs for debugging.
+- Neo4j runs with `neo4j/sophiadev` credentials and disables rate limiting so repeated local health checks don’t lock out the test client. Adjust `NEO4J_USER`/`NEO4J_PASSWORD` in `scripts/run_prototype_integration.sh` if you need different secrets locally.
 
 ## Quick Start
 

@@ -4,7 +4,7 @@ set -euo pipefail
 COMPOSE=${COMPOSE_CMD:-"docker compose"}
 COMPOSE_FILE=${COMPOSE_FILE:-"docker-compose.yml"}
 SERVICES=("neo4j" "milvus-etcd" "milvus-minio" "milvus-standalone")
-HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-900} # 15 minutes default
+HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-180} # 3 minutes default (CI can override)
 
 cleanup() {
   echo "Stopping integration services..."
@@ -14,15 +14,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Starting Neo4j + Milvus services for prototype integration tests..."
-if ! $COMPOSE -f "$COMPOSE_FILE" up -d "${SERVICES[@]}"; then
+if ! timeout "${HEALTH_TIMEOUT}s" $COMPOSE -f "$COMPOSE_FILE" up -d --wait "${SERVICES[@]}"; then
   echo "Failed to start containers. Recent logs:"
-  $COMPOSE -f "$COMPOSE_FILE" logs --tail=200 || true
-  exit 1
-fi
-
-echo "Waiting for services to become healthy (timeout: ${HEALTH_TIMEOUT}s)..."
-if ! timeout "${HEALTH_TIMEOUT}s" $COMPOSE -f "$COMPOSE_FILE" wait "${SERVICES[@]}"; then
-  echo "Services failed to report healthy before timeout. Recent logs:"
   $COMPOSE -f "$COMPOSE_FILE" logs --tail=200 || true
   exit 1
 fi

@@ -88,7 +88,8 @@ def app(api_token):
 @pytest.fixture
 def client(app):
     """Create test client."""
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture
