@@ -30,10 +30,19 @@ class HCGClient(LogosHCGClient):
         neo4j_username: str = "neo4j",
         neo4j_password: str = "sophiadev",
         neo4j_database: str = "neo4j",
+        milvus_host: Optional[str] = None,
+        milvus_port: Optional[int] = None,
         validator: Optional[SHACLValidator] = None,
     ) -> None:
-        """Initialize the client and SHACL validator."""
+        """Initialize the client and SHACL validator.
+
+        `milvus_host`/`milvus_port` are currently unused but we accept them to
+        remain API-compatible with existing test fixtures and deployment
+        scripts that still pass Milvus connection data alongside Neo4j creds.
+        """
         self._validator = validator or SHACLValidator()
+        self._milvus_host = milvus_host
+        self._milvus_port = milvus_port
         super().__init__(
             uri=neo4j_uri,
             user=neo4j_username,
