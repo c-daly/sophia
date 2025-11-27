@@ -28,4 +28,4 @@ export MILVUS_PORT=${MILVUS_PORT:-"19530"}
 export RUN_PROTOTYPE_INTEGRATION=1
 
 echo "Running prototype integration tests..."
-poetry run pytest tests/api/test_prototype_integration.py -m integration "$@"
+poetry run pytest tests/integration/test_prototype_integration.py -m integration "$@"

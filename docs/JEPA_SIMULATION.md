@@ -519,7 +519,7 @@ poetry run pytest tests/api/test_api.py::TestSimulateEndpoint -v
 Integration tests with live Neo4j can be run with:
 
 ```bash
-poetry run pytest -m integration tests/api/test_prototype_integration.py
+poetry run pytest -m integration tests/integration/test_prototype_integration.py
 ```
 
 ### Example Test

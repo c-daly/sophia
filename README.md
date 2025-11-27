@@ -64,7 +64,7 @@ poetry run python your_script.py
 ## Prototype Integration Tests
 
 Most tests run without external services. The prototype end-to-end suite under
-`tests/api/test_prototype_integration.py` requires Neo4j and Milvus. These tests
+`tests/integration/test_prototype_integration.py` requires Neo4j and Milvus. These tests
 are skipped by default; use the helper script to run them with Docker:
 
 ```bash

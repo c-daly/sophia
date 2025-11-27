@@ -145,7 +145,7 @@ When `POST /state` is called, the HCG client validates the state node before wri
   - 92 component tests
 
 #### Integration Tests (7 tests)
-**New File:** `tests/api/test_prototype_integration.py`
+**New File:** `tests/integration/test_prototype_integration.py`
 
 Tests requiring Neo4j:
 1. Health check with Neo4j
@@ -158,7 +158,7 @@ Tests requiring Neo4j:
 
 **Run with:**
 ```bash
-pytest tests/api/test_prototype_integration.py -v -m integration
+pytest tests/integration/test_prototype_integration.py -v -m integration
 ```
 
 ### 6. Documentation
@@ -231,7 +231,7 @@ CLEAR_BEFORE_SEED=false
 - `src/sophia/hcg_client/seeder.py` (144 lines)
   - Complete pick-and-place data seeding
 
-- `tests/api/test_prototype_integration.py` (268 lines)
+- `tests/integration/test_prototype_integration.py` (268 lines)
   - 7 comprehensive integration tests
 
 - `PROTOTYPE_README.md` (385 lines)
@@ -240,7 +240,7 @@ CLEAR_BEFORE_SEED=false
 - `examples/prototype_demo.sh` (159 lines)
   - Executable demo script
 
-- `IMPLEMENTATION_SUMMARY.md` (this file)
+- `SOPHIA_TEST_GUIDE.md` (this file)
 
 ## Test Results
 
@@ -257,7 +257,7 @@ All tests passing including:
 ### Integration Tests
 7 tests ready, require Neo4j to run:
 ```bash
-pytest tests/api/test_prototype_integration.py -v -m integration
+pytest tests/integration/test_prototype_integration.py -v -m integration
 ```
 
 ### Code Quality

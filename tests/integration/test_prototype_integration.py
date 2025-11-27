@@ -1,7 +1,7 @@
 """Integration tests for the Sophia prototype (plan/state API over HCG).
 
 These tests require Neo4j and Milvus to be running.
-Run with: pytest tests/api/test_prototype_integration.py -v -m integration
+Run with: pytest tests/integration/test_prototype_integration.py -v -m integration
 """
 
 import os
