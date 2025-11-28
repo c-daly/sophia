@@ -91,7 +91,7 @@ SOPHIA_API_TOKEN=your-secure-token-here
 # Neo4j (optional, defaults shown)
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=sophiadev
+NEO4J_PASSWORD=neo4jtest
 
 # Milvus (optional, defaults shown)
 MILVUS_HOST=localhost
@@ -127,7 +127,7 @@ poetry install
 export SOPHIA_API_TOKEN=dev-token
 export NEO4J_URI=bolt://localhost:7687
 export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=sophiadev
+export NEO4J_PASSWORD=neo4jtest
 
 # Start dependencies (Neo4j + Milvus)
 docker-compose up -d neo4j milvus-standalone
