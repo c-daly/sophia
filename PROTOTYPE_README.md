@@ -46,7 +46,7 @@ The prototype implements:
 
 - **Standard CI** runs on every PR/push, covering lint, unit tests, and non-integration API suites.
 - **Prototype Integration** lives in `.github/workflows/prototype-integration.yml` and runs nightly, on demand (`workflow_dispatch`), and when prototype-specific files change on `main`. It executes `scripts/run_prototype_integration.sh`, which fails fast if Neo4j/Milvus containers cannot become healthy (3-minute timeout locally, 15 minutes in CI) and captures recent Docker logs for debugging.
-- Neo4j runs with `neo4j/sophiadev` credentials and disables rate limiting so repeated local health checks don’t lock out the test client. Adjust `NEO4J_USER`/`NEO4J_PASSWORD` in `scripts/run_prototype_integration.sh` if you need different secrets locally.
+- Neo4j runs with `neo4j/neo4jtest` credentials and disables rate limiting so repeated local health checks don’t lock out the test client. Adjust `NEO4J_USER`/`NEO4J_PASSWORD` in `scripts/run_prototype_integration.sh` if you need different secrets locally.
 
 ## Quick Start
 
@@ -75,7 +75,7 @@ poetry install
 export SOPHIA_API_TOKEN=test-token
 export NEO4J_URI=bolt://localhost:7687
 export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=sophiadev
+export NEO4J_PASSWORD=neo4jtest
 export SEED_PICK_AND_PLACE_DATA=true  # Enable data seeding
 
 # Run the API server
@@ -358,7 +358,7 @@ export SOPHIA_API_TOKEN=test-token
 | `SOPHIA_API_TOKEN` | (required) | API authentication token |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
 | `NEO4J_USER` | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | `sophiadev` | Neo4j password |
+| `NEO4J_PASSWORD` | `neo4jtest` | Neo4j password |
 | `MILVUS_HOST` | `localhost` | Milvus host |
 | `MILVUS_PORT` | `19530` | Milvus port |
 | `SEED_PICK_AND_PLACE_DATA` | `true` | Auto-seed pick-and-place data |
@@ -392,7 +392,7 @@ docker-compose ps neo4j
 docker-compose logs neo4j
 
 # Verify credentials
-docker exec -it sophia-neo4j-1 cypher-shell -u neo4j -p sophiadev
+docker exec -it sophia-neo4j-1 cypher-shell -u neo4j -p neo4jtest
 ```
 
 ### SHACL Validation Errors

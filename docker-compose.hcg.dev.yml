@@ -8,7 +8,7 @@ services:
       - "7474:7474"  # HTTP
       - "7687:7687"  # Bolt
     environment:
-      - NEO4J_AUTH=neo4j/sophiadev
+      - NEO4J_AUTH=neo4j/neo4jtest
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
       - NEO4J_dbms_memory_pagecache_size=512M
       - NEO4J_dbms_memory_heap_initial__size=512M
@@ -19,7 +19,7 @@ services:
       - neo4j_import:/var/lib/neo4j/import
       - neo4j_plugins:/plugins
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "sophiadev", "RETURN 1"]
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "neo4jtest", "RETURN 1"]
       interval: 10s
       timeout: 5s
       retries: 5

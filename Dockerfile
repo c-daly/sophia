@@ -1,40 +1,14 @@
-FROM python:3.12-slim
+FROM ghcr.io/c-daly/logos-foundry:0.1.0
 
 # Set working directory
-WORKDIR /app
+WORKDIR /app/sophia
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Poetry
-RUN pip install poetry==2.2.1
-
-# Copy poetry files
-COPY pyproject.toml poetry.lock ./
-
-# Configure poetry to not create a virtual environment
-RUN poetry config virtualenvs.create false
-
-# Install dependencies
-RUN poetry install --only main --no-interaction --no-ansi
-
-# Copy application code
+# Copy application code and configuration
 COPY src/ ./src/
+COPY pyproject.toml poetry.lock README.md ./
 
-# Create non-root user
-RUN useradd -m -u 1000 sophia && \
-    chown -R sophia:sophia /app
-
-USER sophia
+# Install sophia dependencies
+RUN poetry install --only main --no-interaction --no-ansi
 
 # Expose port
 EXPOSE 8000

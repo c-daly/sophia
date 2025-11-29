@@ -38,7 +38,7 @@ def neo4j_username():
 @pytest.fixture
 def neo4j_password():
     """Neo4j password."""
-    return os.getenv("NEO4J_PASSWORD", "sophiadev")
+    return os.getenv("NEO4J_PASSWORD", "neo4jtest")
 
 
 @pytest.fixture

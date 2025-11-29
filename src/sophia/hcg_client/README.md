@@ -52,7 +52,7 @@ from sophia import HCGClient
 client = HCGClient(
     neo4j_uri="bolt://localhost:7687",
     neo4j_username="neo4j",
-    neo4j_password="sophiadev",
+    neo4j_password="neo4jtest",
 )
 
 # Add nodes (with automatic SHACL validation)
@@ -181,7 +181,7 @@ docker-compose -f docker-compose.hcg.dev.yml down
 ### Neo4j Settings
 - **URI**: `bolt://localhost:7687`
 - **Username**: `neo4j`
-- **Password**: `sophiadev`
+- **Password**: `neo4jtest`
 - **Connection Pool**: 50 connections (configurable)
 - **Retry Policy**: 3 attempts with exponential backoff (2-10s)
 
