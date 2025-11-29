@@ -8,12 +8,11 @@ from datetime import datetime, timezone
 class PlanRequest(BaseModel):
     """Request model for the /plan endpoint."""
 
-    goal: Union[str, Dict[str, Any]] = Field(
+    goal: Dict[str, Any] = Field(
         ...,
-        description="Goal specification (string or structured payload)",
+        description="Goal specification as structured dict",
         json_schema_extra={
             "examples": [
-                "Place the red block into the bin",
                 {
                     "description": "red block in bin",
                     "target_state": "red_block_in_bin",

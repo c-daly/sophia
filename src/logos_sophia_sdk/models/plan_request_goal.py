@@ -18,21 +18,17 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from logos_sophia_sdk.models.plan_request_goal import PlanRequestGoal
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class PlanRequest(BaseModel):
+class PlanRequestGoal(BaseModel):
     """
-    PlanRequest
+    Goal specification with description and target_state
     """ # noqa: E501
-    goal: PlanRequestGoal
-    context: Optional[Dict[str, Any]] = Field(default=None, description="Optional context (entities, constraints, media references)")
-    constraints: Optional[List[StrictStr]] = Field(default=None, description="Hard constraints the planner must honor")
-    priority: Optional[StrictStr] = Field(default=None, description="Informational priority label (e.g., P0/P1/P2)")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Arbitrary metadata for downstream audits")
-    __properties: ClassVar[List[str]] = ["goal", "context", "constraints", "priority", "metadata"]
+    description: StrictStr = Field(description="Natural-language description of the goal")
+    target_state: StrictStr = Field(description="Identifier for the desired target state")
+    __properties: ClassVar[List[str]] = ["description", "target_state"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -52,7 +48,7 @@ class PlanRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of PlanRequest from a JSON string"""
+        """Create an instance of PlanRequestGoal from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,14 +69,11 @@ class PlanRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of goal
-        if self.goal:
-            _dict['goal'] = self.goal.to_dict()
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of PlanRequest from a dict"""
+        """Create an instance of PlanRequestGoal from a dict"""
         if obj is None:
             return None
 
@@ -88,11 +81,8 @@ class PlanRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "goal": PlanRequestGoal.from_dict(obj["goal"]) if obj.get("goal") is not None else None,
-            "context": obj.get("context"),
-            "constraints": obj.get("constraints"),
-            "priority": obj.get("priority"),
-            "metadata": obj.get("metadata")
+            "description": obj.get("description"),
+            "target_state": obj.get("target_state")
         })
         return _obj
 
