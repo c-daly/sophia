@@ -103,7 +103,7 @@ def test_delete_node_reports_deleted(
 def test_health_check_uses_session(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
-    """health_check should report Neo4j health and keep placeholder for Milvus."""
+    """health_check should report Neo4j health and Milvus health (True when not configured)."""
 
     @contextmanager
     def fake_session() -> Iterator[MagicMock]:
@@ -115,4 +115,5 @@ def test_health_check_uses_session(
 
     health = client.health_check()
 
-    assert health == {"neo4j": True, "milvus": False}
+    # Milvus returns True when not configured (no host/port set)
+    assert health == {"neo4j": True, "milvus": True}
