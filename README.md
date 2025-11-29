@@ -61,6 +61,27 @@ Alternatively, run commands without activating the shell:
 poetry run python your_script.py
 ```
 
+### Using Docker
+
+Sophia is available as a pre-built container image for easy deployment:
+
+```bash
+# Pull the latest Sophia image
+docker pull ghcr.io/c-daly/sophia:latest
+
+# Run Sophia service
+docker run -d \
+  -p 8000:8000 \
+  -e NEO4J_URI=bolt://neo4j:7687 \
+  -e NEO4J_USER=neo4j \
+  -e NEO4J_PASSWORD=your_password \
+  -e MILVUS_HOST=milvus \
+  -e MILVUS_PORT=19530 \
+  ghcr.io/c-daly/sophia:latest
+```
+
+The container includes all Python dependencies and the Sophia API service. For development and testing, Sophia uses the `logos-foundry` base image which includes all LOGOS shared packages.
+
 ## Prototype Integration Tests
 
 Most tests run without external services. The prototype end-to-end suite under

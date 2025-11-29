@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from contextlib import suppress
 from collections.abc import Sequence
 from typing import Any, Dict, List, Mapping, Optional, cast
 
@@ -17,6 +19,11 @@ from logos_hcg.client import HCGClient as LogosHCGClient
 from sophia.hcg_client.shacl_validator import SHACLValidator
 
 logger = logging.getLogger(__name__)
+
+try:  # pragma: no cover - optional dependency checked at runtime
+    from pymilvus import connections as milvus_connections
+except ImportError:  # pragma: no cover - fallback when pymilvus missing
+    milvus_connections = None  # type: ignore[assignment]
 
 
 class HCGClient(LogosHCGClient):
@@ -41,8 +48,13 @@ class HCGClient(LogosHCGClient):
         scripts that still pass Milvus connection data alongside Neo4j creds.
         """
         self._validator = validator or SHACLValidator()
-        self._milvus_host = milvus_host
-        self._milvus_port = milvus_port
+        self._milvus_host = milvus_host or os.getenv("MILVUS_HOST")
+        port_value = milvus_port or os.getenv("MILVUS_PORT")
+        try:
+            self._milvus_port = int(port_value) if port_value else None
+        except (TypeError, ValueError):
+            logger.warning("Invalid MILVUS_PORT value: %s", port_value)
+            self._milvus_port = None
         super().__init__(
             uri=neo4j_uri,
             user=neo4j_username,
@@ -307,5 +319,35 @@ class HCGClient(LogosHCGClient):
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Neo4j health check failed: %s", exc)
 
-        # Milvus support has not yet migrated to the shared package.
-        return {"neo4j": neo4j_ok, "milvus": False}
+        milvus_ok = False
+        if (
+            milvus_connections is not None
+            and self._milvus_host
+            and self._milvus_port
+        ):
+            alias = f"sophia-health-{id(self)}"
+            try:
+                milvus_connections.connect(
+                    alias=alias,
+                    host=self._milvus_host,
+                    port=str(self._milvus_port),
+                    timeout=2.0,
+                )
+                milvus_ok = True
+            except Exception as exc:  # pragma: no cover - diagnostics only
+                logger.warning("Milvus health check failed: %s", exc)
+            finally:
+                with suppress(Exception):
+                    milvus_connections.disconnect(alias)
+        elif self._milvus_host or self._milvus_port:
+            logger.debug(
+                "Skipping Milvus health check (pymilvus unavailable: %s)",
+                milvus_connections is None,
+            )
+            milvus_ok = milvus_connections is None
+        else:
+            # Milvus not configured; treat as healthy for environments that
+            # only require Neo4j (avoids perpetual degraded status).
+            milvus_ok = True
+
+        return {"neo4j": neo4j_ok, "milvus": milvus_ok}

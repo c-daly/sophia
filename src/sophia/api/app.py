@@ -164,12 +164,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "neo4jtest")
+    milvus_host = os.getenv("MILVUS_HOST", "localhost")
+    try:
+        milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+    except ValueError:
+        logger.warning("Invalid MILVUS_PORT value; falling back to 19530")
+        milvus_port = 19530
 
     try:
         _hcg_client = HCGClient(
             neo4j_uri=neo4j_uri,
             neo4j_username=neo4j_user,
             neo4j_password=neo4j_password,
+            milvus_host=milvus_host,
+            milvus_port=milvus_port,
         )
         logger.info("HCG client initialized")
 
