@@ -320,11 +320,7 @@ class HCGClient(LogosHCGClient):
             logger.warning("Neo4j health check failed: %s", exc)
 
         milvus_ok = False
-        if (
-            milvus_connections is not None
-            and self._milvus_host
-            and self._milvus_port
-        ):
+        if milvus_connections is not None and self._milvus_host and self._milvus_port:
             alias = f"sophia-health-{id(self)}"
             try:
                 milvus_connections.connect(
