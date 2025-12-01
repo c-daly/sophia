@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Determine repo root: use SOPHIA_REPO_ROOT if set, otherwise compute from script location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOPHIA_REPO_ROOT="${SOPHIA_REPO_ROOT:-$(dirname "$SCRIPT_DIR")}"
+export SOPHIA_REPO_ROOT
+
+# Load environment from .env.test if it exists
+if [[ -f "${SOPHIA_REPO_ROOT}/.env.test" ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  source "${SOPHIA_REPO_ROOT}/.env.test"
+  set +a
+fi
+
 COMPOSE=${COMPOSE_CMD:-"docker compose"}
-COMPOSE_FILE=${COMPOSE_FILE:-"docker-compose.yml"}
+COMPOSE_FILE=${COMPOSE_FILE:-"${SOPHIA_REPO_ROOT}/docker-compose.yml"}
 SERVICES=("neo4j" "milvus-etcd" "milvus-minio" "milvus-standalone")
 PROJECT_NAME=${COMPOSE_PROJECT_NAME:-"sophia"}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-180} # 3 minutes default (CI can override)
