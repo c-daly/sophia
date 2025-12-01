@@ -116,7 +116,10 @@ class TestPlanEndpoint:
     def test_plan_sdk_request_schema(self, client, auth_headers):
         """Ensure shared SDK payload uses dict format for goal."""
         sdk_request = SDKPlanRequest(
-            goal={"description": "Place red block in bin", "target_state": "block_in_bin"}
+            goal={
+                "description": "Place red block in bin",
+                "target_state": "block_in_bin",
+            }
         )
         response = client.post(
             "/plan",

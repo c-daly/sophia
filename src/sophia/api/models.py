@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 
