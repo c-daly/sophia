@@ -13,13 +13,16 @@ from fastapi.testclient import TestClient
 from sophia.api.app import create_app
 
 
+# Support both new and legacy env var names for backwards compatibility
+RUN_SOPHIA_INTEGRATION = os.getenv("RUN_SOPHIA_INTEGRATION") == "1"
 RUN_MEDIA_INTEGRATION = os.getenv("RUN_MEDIA_INTEGRATION") == "1"
+INTEGRATION_ENABLED = RUN_SOPHIA_INTEGRATION or RUN_MEDIA_INTEGRATION
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        not RUN_MEDIA_INTEGRATION,
-        reason="Media integration tests require external Neo4j; set RUN_MEDIA_INTEGRATION=1 to enable.",
+        not INTEGRATION_ENABLED,
+        reason="Integration tests require external Neo4j; set RUN_SOPHIA_INTEGRATION=1 to enable.",
     ),
 ]
 
@@ -27,17 +30,19 @@ pytestmark = [
 @pytest.fixture
 def test_token():
     """Get test token for API auth."""
-    return os.getenv("API_TOKEN", "dev-token")
+    return os.getenv("SOPHIA_API_TOKEN", os.getenv("API_TOKEN", "dev-token"))
 
 
 @pytest.fixture
-def client():
+def client(test_token):
     """Create FastAPI test client with lifespan context."""
     # Set up environment for integration testing
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
+    # Use 37xxx ports to match CI docker-compose.test.yml
+    os.environ.setdefault("NEO4J_URI", "bolt://localhost:37687")
     os.environ.setdefault("NEO4J_USER", "neo4j")
     os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
     os.environ.setdefault("MEDIA_STORAGE_ROOT", "./test_media_storage")
+    os.environ["SOPHIA_API_TOKEN"] = test_token
 
     app = create_app()
     with TestClient(app) as test_client:
