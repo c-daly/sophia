@@ -15,7 +15,7 @@ example, the prototype integration flow) are called out explicitly.
 | HCG client & envelopes | `tests/hcg_client/test_client_wrapper.py`, `tests/test_cwmstate_envelope.py` | Low-level client wrapper around Neo4j/Milvus plus the schema used to exchange state with CWM. | `poetry run pytest tests/hcg_client tests/test_cwmstate_envelope.py` |
 | CWM connectors | `tests/cwm_a/test_cwm_a.py`, `tests/cwm_g/test_cwm_g.py` | Serializers/parsers that map Sophia data structures to CWM-A/G representations. | `poetry run pytest tests/cwm_a tests/cwm_g` |
 | Media ingestion & JEPA perception | `tests/test_media_ingestion.py`, `tests/jepa/test_jepa_runner.py`, `tests/test_jepa_integration.py`, `tests/test_jepa_simulation.py` | Upload pipeline, metadata extraction, JEPA runner behavior, and simulation coupling. | `poetry run pytest tests/test_media_ingestion.py tests/jepa tests/test_jepa_integration.py tests/test_jepa_simulation.py` |
-| Prototype end-to-end integration | `tests/integration/test_prototype_integration.py` | Full plan/state API flow backed by Neo4j + Milvus seeded via `run_prototype_integration.sh`. | `./scripts/run_prototype_integration.sh` |
+| Integration tests | `tests/integration/test_prototype_integration.py` | Full plan/state API flow backed by Neo4j + Milvus via standardized stack. | `./scripts/run_integration_stack.sh` |
 | Data fixtures | `tests/data/test_data_pick_and_place.cypher` | Validates that the Cypher seed used for pick-and-place stays in sync with tests and docs. | `poetry run pytest tests/data` |
 
 ## Tips
@@ -23,8 +23,8 @@ example, the prototype integration flow) are called out explicitly.
 - Use `pytest -k <keyword>` to filter within any category.
 - When editing multiple areas, run `poetry run pytest` from the repo root to
   execute the entire suite.
-- The integration suite requires Docker; see `scripts/run_prototype_integration.sh`
-  for the exact compose command and environment variables.
+- The integration suite requires Docker; see `scripts/run_integration_stack.sh`
+  and `tests/e2e/README.md` for stack details and environment variables.
 
 ## Environment Variables
 
@@ -59,11 +59,12 @@ The following variables are used by integration tests and helper scripts:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SOPHIA_REPO_ROOT` | (auto-detected) | Repository root directory |
-| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
+| `RUN_SOPHIA_INTEGRATION` | `0` | Set to `1` to enable integration tests |
+| `NEO4J_URI` | `bolt://localhost:37687` | Neo4j connection URI |
 | `NEO4J_USER` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | `neo4jtest` | Neo4j password |
 | `MILVUS_HOST` | `localhost` | Milvus host |
-| `MILVUS_PORT` | `19530` | Milvus port |
+| `MILVUS_PORT` | `39530` | Milvus port |
 
 These can be set in `.env.test` or exported directly. The helper module
 `sophia.env` provides functions to load and access these values:
