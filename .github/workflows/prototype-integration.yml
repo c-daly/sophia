@@ -1,4 +1,4 @@
-name: Prototype Integration
+name: Integration Tests
 
 on:
   workflow_dispatch:
@@ -11,16 +11,16 @@ on:
   push:
     branches: [ main ]
     paths:
-      - "docker-compose.yml"
-      - "scripts/run_prototype_integration.sh"
-      - "tests/integration/test_prototype_integration.py"
+      - "tests/e2e/stack/**"
+      - "scripts/run_integration_stack.sh"
+      - "tests/integration/**"
       - ".github/workflows/prototype-integration.yml"
 
 permissions:
   contents: read
 
 jobs:
-  prototype-integration:
+  integration:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -43,21 +43,22 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev
 
-      - name: Run prototype integration tests
+      - name: Run integration tests
         env:
           COMPOSE_CMD: docker compose
           HEALTH_TIMEOUT: "900"
-          RUN_PROTOTYPE_INTEGRATION: "1"
-        run: ./scripts/run_prototype_integration.sh
+          RUN_SOPHIA_INTEGRATION: "1"
+          SOPHIA_REPO_ROOT: ${{ github.workspace }}
+        run: ./scripts/run_integration_stack.sh
 
       - name: Collect docker logs
         if: failure()
-        run: docker compose -f docker-compose.yml logs --tail=300 > prototype-integration.log
+        run: docker compose -f tests/e2e/stack/sophia/docker-compose.test.yml logs --tail=300 > integration.log
 
       - name: Upload logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: prototype-integration-logs
-          path: prototype-integration.log
+          name: integration-logs
+          path: integration.log
           retention-days: 5

@@ -12,13 +12,16 @@ from sophia.api.app import create_app
 from sophia.hcg_client import HCGClient
 
 
+# Support both new and legacy env var names for backwards compatibility
+RUN_SOPHIA_INTEGRATION = os.getenv("RUN_SOPHIA_INTEGRATION") == "1"
 RUN_PROTOTYPE_INTEGRATION = os.getenv("RUN_PROTOTYPE_INTEGRATION") == "1"
+INTEGRATION_ENABLED = RUN_SOPHIA_INTEGRATION or RUN_PROTOTYPE_INTEGRATION
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        not RUN_PROTOTYPE_INTEGRATION,
-        reason="Prototype integration tests require external Neo4j/Milvus; set RUN_PROTOTYPE_INTEGRATION=1 to enable.",
+        not INTEGRATION_ENABLED,
+        reason="Integration tests require external Neo4j/Milvus; set RUN_SOPHIA_INTEGRATION=1 to enable.",
     ),
 ]
 
@@ -26,7 +29,7 @@ pytestmark = [
 @pytest.fixture
 def neo4j_uri():
     """Neo4j connection URI."""
-    return os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    return os.getenv("NEO4J_URI", "bolt://localhost:37687")
 
 
 @pytest.fixture
@@ -50,7 +53,7 @@ def milvus_host():
 @pytest.fixture
 def milvus_port():
     """Milvus port."""
-    return int(os.getenv("MILVUS_PORT", "19530"))
+    return int(os.getenv("MILVUS_PORT", "39530"))
 
 
 @pytest.fixture

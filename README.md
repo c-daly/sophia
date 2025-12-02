@@ -82,21 +82,32 @@ docker run -d \
 
 The container includes all Python dependencies and the Sophia API service. For development and testing, Sophia uses the `logos-foundry` base image which includes all LOGOS shared packages.
 
-## Prototype Integration Tests
+## Integration Tests
 
-Most tests run without external services. The prototype end-to-end suite under
-`tests/integration/test_prototype_integration.py` requires Neo4j and Milvus. These tests
-are skipped by default; use the helper script to run them with Docker:
+Most tests run without external services. The integration suite under
+`tests/integration/` requires Neo4j and Milvus. These tests are skipped by
+default; use the helper script to run them with Docker:
 
 ```bash
-./scripts/run_prototype_integration.sh
+./scripts/run_integration_stack.sh
 ```
 
-The script starts the `neo4j`, `milvus-etcd`, `milvus-minio`, and
-`milvus-standalone` services defined in `docker-compose.yml`, waits for them to
-become healthy, and executes the prototype suite with
-`RUN_PROTOTYPE_INTEGRATION=1`. Set `COMPOSE_CMD` or `COMPOSE_FILE` to override
-the Docker command or compose file if needed.
+The script starts the Neo4j and Milvus services from
+`tests/e2e/stack/sophia/docker-compose.test.yml`, waits for them to become
+healthy, and runs the integration tests with `RUN_SOPHIA_INTEGRATION=1`.
+
+### Stack Configuration
+
+The test stack uses non-conflicting ports (37xxx/39xxx range) to allow
+multiple repo stacks to run concurrently:
+- Neo4j: 37474 (HTTP), 37687 (Bolt)
+- Milvus: 39530 (gRPC), 39091 (Health)
+
+Stack files are generated from LOGOS. To regenerate:
+```bash
+cd /path/to/logos
+poetry run render-test-stacks --repo sophia
+```
 
 ## Quick Start
 

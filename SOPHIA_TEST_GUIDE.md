@@ -161,15 +161,15 @@ Tests requiring Neo4j:
 pytest tests/integration/test_prototype_integration.py -v -m integration
 ```
 
-#### Prototype Integration Helper Script
+#### Integration Stack Helper Script
 
-Use `scripts/run_prototype_integration.sh` to bring up Neo4j + Milvus with Docker Compose and execute the suite end-to-end:
+Use `scripts/run_integration_stack.sh` to bring up the Neo4j + Milvus stack and execute the integration tests:
 
 ```bash
-./scripts/run_prototype_integration.sh
+./scripts/run_integration_stack.sh
 ```
 
-Environment overrides such as `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `MILVUS_HOST`, and `MILVUS_PORT` are honored if you already have services running. The script now queries `docker compose ps -q <service>` to discover the real container IDs, which fixes the earlier issue where Neo4j never appeared healthy because the compose file specifies explicit `container_name` values. If a service fails to reach `healthy`, the script will print its logs before exiting so you can diagnose the problem without the containers being torn down prematurely.
+The script uses the standardized stack from `tests/e2e/stack/sophia/` which is generated from LOGOS. Environment overrides such as `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `MILVUS_HOST`, and `MILVUS_PORT` are honored if you already have services running. The stack uses non-conflicting ports (37xxx/39xxx) to allow concurrent testing with other repos.
 
 ### 6. Documentation
 
