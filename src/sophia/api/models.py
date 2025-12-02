@@ -230,7 +230,9 @@ class CWMStateResponse(BaseModel):
     timestamp: str = Field(..., description="ISO timestamp")
     confidence: float = Field(..., description="Certainty score (0.0-1.0)")
     status: str = Field(..., description="observed, imagined, or reflected")
-    links: Dict[str, Any] = Field(default_factory=dict, description="Related entity IDs")
+    links: Dict[str, Any] = Field(
+        default_factory=dict, description="Related entity IDs"
+    )
     tags: List[str] = Field(default_factory=list, description="Free-form labels")
     data: Dict[str, Any] = Field(..., description="Model-specific payload")
 

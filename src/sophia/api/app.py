@@ -386,12 +386,14 @@ def create_app() -> FastAPI:
 
                 # Treat each top-level key in state as an entity
                 diffs = []
-                all_keys = set(list(before_properties.keys()) + list(request.state.keys()))
-                
+                all_keys = set(
+                    list(before_properties.keys()) + list(request.state.keys())
+                )
+
                 for key in all_keys:
                     before_val = before_properties.get(key)
                     after_val = request.state.get(key)
-                    
+
                     if before_val != after_val:
                         if before_val is None:
                             operation = "create"
@@ -399,22 +401,37 @@ def create_app() -> FastAPI:
                             operation = "delete"
                         else:
                             operation = "update"
-                        
+
                         changed_props = []
                         if isinstance(before_val, dict) and isinstance(after_val, dict):
                             changed_props = [
-                                k for k in set(list(before_val.keys()) + list(after_val.keys()))
+                                k
+                                for k in set(
+                                    list(before_val.keys()) + list(after_val.keys())
+                                )
                                 if before_val.get(k) != after_val.get(k)
                             ]
-                        
-                        diffs.append(EntityDiff(
-                            entity_id=key,
-                            entity_type="state_entity",
-                            operation=operation,
-                            before=before_val if isinstance(before_val, dict) else {"value": before_val} if before_val else None,
-                            after=after_val if isinstance(after_val, dict) else {"value": after_val} if after_val else None,
-                            changed_properties=changed_props if changed_props else None,
-                        ))
+
+                        diffs.append(
+                            EntityDiff(
+                                entity_id=key,
+                                entity_type="state_entity",
+                                operation=operation,
+                                before=(
+                                    before_val
+                                    if isinstance(before_val, dict)
+                                    else {"value": before_val} if before_val else None
+                                ),
+                                after=(
+                                    after_val
+                                    if isinstance(after_val, dict)
+                                    else {"value": after_val} if after_val else None
+                                ),
+                                changed_properties=(
+                                    changed_props if changed_props else None
+                                ),
+                            )
+                        )
 
                 if diffs:
                     cwm_state = _cwm_a_state.emit_state_update(
@@ -440,10 +457,11 @@ def create_app() -> FastAPI:
         except ValueError as e:
             # SHACL validation failed
             logger.error(f"State validation failed: {e}")
-            
+
             # Emit failed validation state
             if _cwm_a_state:
                 from sophia.cwm_a import ValidationResult
+
                 _cwm_a_state.emit_state_update(
                     entity_diffs=[],
                     validation=ValidationResult(passed=False, violations=[str(e)]),
@@ -451,7 +469,7 @@ def create_app() -> FastAPI:
                     status="observed",
                     tags=["source:api", "endpoint:/state", "validation:failed"],
                 )
-            
+
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"State validation failed: {str(e)}",
@@ -491,28 +509,30 @@ def create_app() -> FastAPI:
         Requires authentication via Bearer token.
         """
         states = []
-        
+
         # Get CWM-A states
         if _cwm_a_state and (model_type is None or model_type == "CWM_A"):
             cwm_a_states = _cwm_a_state.get_state_history(limit=limit)
             for s in cwm_a_states:
-                states.append(CWMStateResponse(
-                    state_id=s.state_id,
-                    model_type=s.model_type,
-                    source=s.source,
-                    timestamp=s.timestamp.isoformat(),
-                    confidence=s.confidence,
-                    status=s.status,
-                    links=s.links.model_dump(),
-                    tags=s.tags,
-                    data=s.data.model_dump(),
-                ))
-        
+                states.append(
+                    CWMStateResponse(
+                        state_id=s.state_id,
+                        model_type=s.model_type,
+                        source=s.source,
+                        timestamp=s.timestamp.isoformat(),
+                        confidence=s.confidence,
+                        status=s.status,
+                        links=s.links.model_dump(),
+                        tags=s.tags,
+                        data=s.data.model_dump(),
+                    )
+                )
+
         # TODO: Add CWM-G and CWM-E state retrieval when available
-        
+
         # Sort by timestamp descending
         states.sort(key=lambda x: x.timestamp, reverse=True)
-        
+
         return CWMStateListResponse(
             states=states[:limit],
             total=len(states),
