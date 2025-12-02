@@ -37,6 +37,8 @@ from sophia.api.models import (
     SimulateResponse,
     HermesProposalRequest,
     HermesProposalResponse,
+    CWMStateResponse,
+    CWMStateListResponse,
 )
 from sophia.jepa.models import SimulationResult
 from sophia.models.media_models import (
@@ -53,7 +55,7 @@ from sophia.knowledge_graph import KnowledgeGraph, Node, Edge
 from sophia.hcg_client import HCGClient
 from sophia.hcg_client.seeder import seed_pick_and_place_data
 from sophia.cwm_g import ContinuousWorkingMemoryGenerative
-from sophia.cwm_a import ContinuousWorkingMemoryAssociative
+from sophia.cwm_a import ContinuousWorkingMemoryAssociative, CWMAStateService
 from sophia.jepa import JEPARunner
 from sophia.jepa.models import (
     SimulationContext,
@@ -143,6 +145,7 @@ _executor: Optional[Executor] = None
 _hcg_client: Optional[HCGClient] = None
 _cwm_g: Optional[ContinuousWorkingMemoryGenerative] = None
 _cwm_a: Optional[ContinuousWorkingMemoryAssociative] = None
+_cwm_a_state: Optional[CWMAStateService] = None
 _kg: Optional[KnowledgeGraph] = None
 _jepa_runner: Optional[JEPARunner] = None
 _media_storage: Optional[MediaStorageService] = None
@@ -152,7 +155,7 @@ _media_ingestion: Optional[MediaIngestionService] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg, _jepa_runner, _media_storage, _media_ingestion
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -218,6 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _executor = Executor()
     _cwm_g = ContinuousWorkingMemoryGenerative()
     _cwm_a = ContinuousWorkingMemoryAssociative()
+    _cwm_a_state = CWMAStateService(source="sophia_api")
     _jepa_runner = JEPARunner(model_version="jepa-stub-v1.0")
 
     # Initialize media ingestion services
@@ -342,8 +346,9 @@ def create_app() -> FastAPI:
     async def update_state(request: StateUpdateRequest) -> StateUpdateResponse:
         """Update the world state in Neo4j HCG with SHACL validation.
 
-        This endpoint updates the current state node in Neo4j.
-        SHACL validation is applied automatically by the HCG client.
+        This endpoint updates the current state node in Neo4j and emits
+        a CWM-A state envelope for the change. The emitted CWMState follows
+        the unified contract defined in PHASE2_SPEC.
 
         Requires authentication via Bearer token.
         """
@@ -354,8 +359,11 @@ def create_app() -> FastAPI:
             )
 
         try:
-            # Check if current_state node exists
+            # Get existing state for diff computation
             existing_state = _hcg_client.get_node("current_state")
+            before_properties = (
+                existing_state.get("properties", {}) if existing_state else {}
+            )
 
             if existing_state:
                 # Update existing state node
@@ -369,18 +377,99 @@ def create_app() -> FastAPI:
                 properties=request.state,
             )
 
+            # Emit CWM-A state envelope
+            cwm_state = None
+            entity_diffs = None
+            if _cwm_a_state:
+                # Compute entity diffs from the state update
+                from sophia.cwm_a import EntityDiff, ValidationResult
+
+                # Treat each top-level key in state as an entity
+                diffs = []
+                all_keys = set(
+                    list(before_properties.keys()) + list(request.state.keys())
+                )
+
+                for key in all_keys:
+                    before_val = before_properties.get(key)
+                    after_val = request.state.get(key)
+
+                    if before_val != after_val:
+                        if before_val is None:
+                            operation = "create"
+                        elif after_val is None:
+                            operation = "delete"
+                        else:
+                            operation = "update"
+
+                        changed_props = []
+                        if isinstance(before_val, dict) and isinstance(after_val, dict):
+                            changed_props = [
+                                k
+                                for k in set(
+                                    list(before_val.keys()) + list(after_val.keys())
+                                )
+                                if before_val.get(k) != after_val.get(k)
+                            ]
+
+                        diffs.append(
+                            EntityDiff(
+                                entity_id=key,
+                                entity_type="state_entity",
+                                operation=operation,
+                                before=(
+                                    before_val
+                                    if isinstance(before_val, dict)
+                                    else {"value": before_val} if before_val else None
+                                ),
+                                after=(
+                                    after_val
+                                    if isinstance(after_val, dict)
+                                    else {"value": after_val} if after_val else None
+                                ),
+                                changed_properties=(
+                                    changed_props if changed_props else None
+                                ),
+                            )
+                        )
+
+                if diffs:
+                    cwm_state = _cwm_a_state.emit_state_update(
+                        entity_diffs=diffs,
+                        validation=ValidationResult(passed=True),
+                        confidence=1.0,
+                        status="observed",
+                        tags=["source:api", "endpoint:/state"],
+                    )
+                    entity_diffs = [d.model_dump() for d in diffs]
+
             # Also update in-memory planner state if available
             if _planner:
                 _planner.update_state(request.state)
 
             return StateUpdateResponse(
                 state_id="current_state",
+                cwm_state_id=cwm_state.state_id if cwm_state else None,
                 validation_passed=True,
+                entity_diffs=entity_diffs,
             )
 
         except ValueError as e:
             # SHACL validation failed
             logger.error(f"State validation failed: {e}")
+
+            # Emit failed validation state
+            if _cwm_a_state:
+                from sophia.cwm_a import ValidationResult
+
+                _cwm_a_state.emit_state_update(
+                    entity_diffs=[],
+                    validation=ValidationResult(passed=False, violations=[str(e)]),
+                    confidence=0.0,
+                    status="observed",
+                    tags=["source:api", "endpoint:/state", "validation:failed"],
+                )
+
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"State validation failed: {str(e)}",
@@ -391,6 +480,64 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to update state: {str(e)}",
             )
+
+    # CWM State history endpoint
+    @app.get(
+        "/state/cwm",
+        response_model=CWMStateListResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["state"],
+    )
+    async def get_cwm_states(
+        model_type: Optional[str] = Query(
+            default=None,
+            description="Filter by model type (CWM_A, CWM_G, CWM_E)",
+        ),
+        limit: int = Query(
+            default=100,
+            ge=1,
+            le=1000,
+            description="Maximum number of states to return",
+        ),
+    ) -> CWMStateListResponse:
+        """Get CWM state history.
+
+        Returns recent CWMState emissions for diagnostics and auditing.
+        Currently returns CWM-A states; future versions will aggregate
+        across all CWM model types.
+
+        Requires authentication via Bearer token.
+        """
+        states = []
+
+        # Get CWM-A states
+        if _cwm_a_state and (model_type is None or model_type == "CWM_A"):
+            cwm_a_states = _cwm_a_state.get_state_history(limit=limit)
+            for s in cwm_a_states:
+                states.append(
+                    CWMStateResponse(
+                        state_id=s.state_id,
+                        model_type=s.model_type,
+                        source=s.source,
+                        timestamp=s.timestamp.isoformat(),
+                        confidence=s.confidence,
+                        status=s.status,
+                        links=s.links.model_dump(),
+                        tags=s.tags,
+                        data=s.data.model_dump(),
+                    )
+                )
+
+        # TODO: Add CWM-G and CWM-E state retrieval when available
+
+        # Sort by timestamp descending
+        states.sort(key=lambda x: x.timestamp, reverse=True)
+
+        return CWMStateListResponse(
+            states=states[:limit],
+            total=len(states),
+            model_type=model_type,
+        )
 
     # Plan endpoint
     @app.post(
