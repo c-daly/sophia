@@ -15,7 +15,6 @@ classifiers = [
 ]
 packages = [
     {include = "sophia", from = "src"},
-    {include = "logos_hcg", from = "src"},
     {include = "logos_sophia_sdk", from = "src"},
 ]
 
