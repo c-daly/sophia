@@ -49,9 +49,9 @@ class TestPlanAPIPickAndPlace:
         expected_sequence = ["MOVE", "GRASP", "MOVE", "RELEASE"]
         actual_sequence = [step["action_type"] for step in plan]
 
-        assert actual_sequence == expected_sequence, (
-            f"Expected {expected_sequence}, got {actual_sequence}"
-        )
+        assert (
+            actual_sequence == expected_sequence
+        ), f"Expected {expected_sequence}, got {actual_sequence}"
 
         # Verify each step references HCG nodes
         for step in plan:
@@ -141,9 +141,9 @@ class TestPlanAPIPickAndPlace:
 
         # Verify each plan step references a real HCG node
         for step in plan:
-            assert step["id"] in all_node_ids, (
-                f"Plan step {step['id']} should reference a real HCG node"
-            )
+            assert (
+                step["id"] in all_node_ids
+            ), f"Plan step {step['id']} should reference a real HCG node"
 
     def test_plan_goal_not_achievable_returns_empty(self) -> None:
         """Test that planning for unachievable goal returns empty plan."""

@@ -74,9 +74,9 @@ class TestMediaIngestionIntegration:
             headers={"Authorization": f"Bearer {test_token}"},
         )
 
-        assert response.status_code == 201, (
-            f"Expected 201, got {response.status_code}: {response.text}"
-        )
+        assert (
+            response.status_code == 201
+        ), f"Expected 201, got {response.status_code}: {response.text}"
         data = response.json()
 
         # Verify response structure

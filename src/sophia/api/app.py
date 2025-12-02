@@ -152,16 +152,7 @@ _media_ingestion: Optional[MediaIngestionService] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global \
-        _planner, \
-        _executor, \
-        _hcg_client, \
-        _cwm_g, \
-        _cwm_a, \
-        _kg, \
-        _jepa_runner, \
-        _media_storage, \
-        _media_ingestion
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _kg, _jepa_runner, _media_storage, _media_ingestion
 
     # Startup
     logger.info("Starting Sophia API service...")
