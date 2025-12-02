@@ -148,9 +148,10 @@ for service in "${SERVICES[@]}"; do
 done
 
 # Export standard env vars (from .env.test, with localhost for host access)
-export MILVUS_HOST=${MILVUS_HOST:-"localhost"}
+# Override the Docker network hostnames with localhost since pytest runs from host
+export MILVUS_HOST="localhost"
 export MILVUS_PORT=${MILVUS_PORT:-"39530"}
-export NEO4J_URI=${NEO4J_URI:-"bolt://localhost:37687"}
+export NEO4J_URI="bolt://localhost:37687"
 export NEO4J_USER=${NEO4J_USER:-"neo4j"}
 export NEO4J_PASSWORD=${NEO4J_PASSWORD:-"neo4jtest"}
 export RUN_SOPHIA_INTEGRATION=1
