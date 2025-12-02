@@ -162,19 +162,19 @@ class CWMAStateService:
             entity_diffs: Entity changes applied
             relation_diffs: Relationship changes applied
         """
-        for diff in entity_diffs:
-            key = f"entity:{diff.entity_id}"
-            if diff.operation == "delete":
+        for entity_diff in entity_diffs:
+            key = f"entity:{entity_diff.entity_id}"
+            if entity_diff.operation == "delete":
                 self._current_snapshot.pop(key, None)
             else:
-                self._current_snapshot[key] = diff.after or {}
+                self._current_snapshot[key] = entity_diff.after or {}
 
-        for diff in relation_diffs:
-            key = f"rel:{diff.source_id}:{diff.relation_type}:{diff.target_id}"
-            if diff.operation == "delete":
+        for rel_diff in relation_diffs:
+            key = f"rel:{rel_diff.source_id}:{rel_diff.relation_type}:{rel_diff.target_id}"
+            if rel_diff.operation == "delete":
                 self._current_snapshot.pop(key, None)
             else:
-                self._current_snapshot[key] = diff.properties or {}
+                self._current_snapshot[key] = rel_diff.properties or {}
 
     def emit_state_update(
         self,
