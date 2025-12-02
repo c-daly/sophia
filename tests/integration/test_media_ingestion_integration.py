@@ -7,7 +7,6 @@ Run with: pytest tests/integration/test_media_ingestion_integration.py -v -m int
 import io
 import os
 import pytest
-from datetime import datetime
 from PIL import Image
 from fastapi.testclient import TestClient
 
@@ -39,7 +38,7 @@ def client():
     os.environ.setdefault("NEO4J_USER", "neo4j")
     os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
     os.environ.setdefault("MEDIA_STORAGE_ROOT", "./test_media_storage")
-    
+
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
@@ -74,10 +73,12 @@ class TestMediaIngestionIntegration:
             data={"media_type": "image"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
-        
-        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+
+        assert response.status_code == 201, (
+            f"Expected 201, got {response.status_code}: {response.text}"
+        )
         data = response.json()
-        
+
         # Verify response structure
         assert "sample_id" in data
         assert data["media_type"] == "image"
@@ -85,10 +86,10 @@ class TestMediaIngestionIntegration:
         assert data["file_size"] > 0
         assert "timestamp" in data
         assert "neo4j_node_id" in data
-        
+
         # Store sample_id for later tests
         sample_id = data["sample_id"]
-        
+
         # Verify we can retrieve it
         get_response = client.get(
             f"/media/samples/{sample_id}",
@@ -110,7 +111,7 @@ class TestMediaIngestionIntegration:
             },
             headers={"Authorization": f"Bearer {test_token}"},
         )
-        
+
         assert response.status_code == 201
         data = response.json()
         assert "sample_id" in data
@@ -126,7 +127,7 @@ class TestMediaIngestionIntegration:
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert ingest_response.status_code == 201
-        
+
         # List samples
         list_response = client.get(
             "/media/samples",
@@ -135,7 +136,7 @@ class TestMediaIngestionIntegration:
         )
         assert list_response.status_code == 200
         data = list_response.json()
-        
+
         assert "samples" in data
         assert "total" in data
         assert data["total"] > 0
@@ -151,7 +152,7 @@ class TestMediaIngestionIntegration:
         )
         assert response.status_code == 200
         data = response.json()
-        
+
         # All returned samples should be images
         for sample in data["samples"]:
             assert sample["media_type"] == "image"
@@ -164,10 +165,10 @@ class TestMediaIngestionIntegration:
             data={"media_type": "image"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
-        
+
         assert response.status_code == 201
         data = response.json()
-        
+
         # Verify metadata extraction
         assert "metadata" in data
         metadata = data["metadata"]
@@ -217,7 +218,9 @@ class TestMediaIngestionErrors:
         """Test that wrong file extension for media type is rejected."""
         response = client.post(
             "/ingest/media",
-            files={"file": ("test.mp4", sample_image, "video/mp4")},  # JPG content with MP4 name
+            files={
+                "file": ("test.mp4", sample_image, "video/mp4")
+            },  # JPG content with MP4 name
             data={"media_type": "image"},  # Claiming it's an image
             headers={"Authorization": f"Bearer {test_token}"},
         )
