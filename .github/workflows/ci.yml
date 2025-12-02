@@ -21,5 +21,4 @@ jobs:
       mypy_targets: 'src'
       pytest_command: 'pytest tests/ -v -m "not integration" --cov=sophia --cov-report=term --cov-report=xml'
       coverage_python_version: '3.12'
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      upload_coverage: false
