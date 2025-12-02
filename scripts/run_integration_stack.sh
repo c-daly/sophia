@@ -83,8 +83,9 @@ wait_for_container() {
     status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)
 
     case "$status" in
-      healthy)
-        info "$service ($display_name) is healthy"
+      healthy|running)
+        # 'healthy' = has healthcheck and passed; 'running' = no healthcheck, container is up
+        info "$service ($display_name) is healthy (status: $status)"
         return 0
         ;;
       unhealthy)
