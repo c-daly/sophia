@@ -534,7 +534,7 @@ def create_app() -> FastAPI:
                 state_id = f"{imagination_id}_state_{i}"
                 state = ImaginedState(
                     state_id=state_id,
-                    description=f"Imagined state {i+1} based on provided context",
+                    description=f"Imagined state {i + 1} based on provided context",
                     confidence=0.8 - (i * 0.1),  # Decreasing confidence
                     properties={
                         "horizon_step": i,
@@ -627,7 +627,9 @@ def create_app() -> FastAPI:
                     # (embeddings themselves are in Milvus, we just track the IDs)
                     try:
                         # Query Neo4j for embedding nodes linked to this sample
-                        with _hcg_client._neo4j._driver.session(database=_hcg_client._neo4j._database) as session:  # type: ignore
+                        with _hcg_client._neo4j._driver.session(
+                            database=_hcg_client._neo4j._database
+                        ) as session:  # type: ignore
                             neo4j_result = session.run(
                                 """
                                 MATCH (m {sample_id: $sample_id})-[:has_embedding]->(e)

@@ -90,7 +90,7 @@ class TestConfidenceDecay:
         for i in range(len(confidences) - 1):
             assert confidences[i] >= confidences[i + 1], (
                 f"Confidence should decay: step {i} ({confidences[i]:.3f}) "
-                f">= step {i+1} ({confidences[i+1]:.3f})"
+                f">= step {i + 1} ({confidences[i + 1]:.3f})"
             )
 
     def test_initial_confidence_reasonable(self, jepa_runner, simulation_context):
