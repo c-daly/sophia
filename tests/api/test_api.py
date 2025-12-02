@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi.testclient import TestClient
 from logos_sophia_sdk.models.plan_request import PlanRequest as SDKPlanRequest
+from logos_sophia_sdk.models.plan_request_goal import PlanRequestGoal
 
 from sophia.api.app import create_app
 
@@ -114,12 +115,12 @@ class TestPlanEndpoint:
             assert isinstance(data["plan"], list)
 
     def test_plan_sdk_request_schema(self, client, auth_headers):
-        """Ensure shared SDK payload uses dict format for goal."""
+        """Ensure shared SDK payload uses PlanRequestGoal for goal."""
         sdk_request = SDKPlanRequest(
-            goal={
-                "description": "Place red block in bin",
-                "target_state": "block_in_bin",
-            }
+            goal=PlanRequestGoal(
+                description="Place red block in bin",
+                target_state="block_in_bin",
+            )
         )
         response = client.post(
             "/plan",
