@@ -589,6 +589,27 @@ files = [
 ]
 
 [[package]]
+name = "logos-foundry"
+version = "0.1.0"
+description = "LOGOS Foundry - Canonical source of truth for Project LOGOS specifications, ontology, and infrastructure"
+optional = false
+python-versions = "^3.10"
+groups = ["main"]
+files = []
+develop = false
+
+[package.dependencies]
+fastapi = "^0.115.0"
+pydantic = "^2.0.0"
+uvicorn = {version = "^0.32.0", extras = ["standard"]}
+
+[package.source]
+type = "git"
+url = "https://github.com/c-daly/logos.git"
+reference = "main"
+resolved_reference = "efafa9c5721fc1608f1a826359f31c30799165df"
+
+[[package]]
 name = "mypy"
 version = "1.18.2"
 description = "Optional static typing for Python"
@@ -2283,4 +2304,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "93c2b664195e083919196c439a9a3127fc265dfc4b026819a7d0d57e4fed7bc1"
+content-hash = "e882eb19c25ba89c9a3d80a60171aa4fd4496c964f3e5af0754bf76753abc053"
