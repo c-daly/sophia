@@ -206,12 +206,42 @@ class StateUpdateResponse(BaseModel):
     """Response model for POST /state endpoint."""
 
     state_id: str = Field(..., description="New state identifier")
+    cwm_state_id: Optional[str] = Field(
+        default=None, description="CWM-A state envelope ID"
+    )
     updated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO timestamp of update",
     )
     validation_passed: bool = Field(
         default=True, description="Whether SHACL validation passed"
+    )
+    entity_diffs: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Entity changes in this update"
+    )
+
+
+class CWMStateResponse(BaseModel):
+    """Response model for CWMState records."""
+
+    state_id: str = Field(..., description="Globally unique identifier")
+    model_type: str = Field(..., description="CWM_A, CWM_G, or CWM_E")
+    source: str = Field(..., description="Subsystem that emitted the record")
+    timestamp: str = Field(..., description="ISO timestamp")
+    confidence: float = Field(..., description="Certainty score (0.0-1.0)")
+    status: str = Field(..., description="observed, imagined, or reflected")
+    links: Dict[str, Any] = Field(default_factory=dict, description="Related entity IDs")
+    tags: List[str] = Field(default_factory=list, description="Free-form labels")
+    data: Dict[str, Any] = Field(..., description="Model-specific payload")
+
+
+class CWMStateListResponse(BaseModel):
+    """Response model for listing CWMState records."""
+
+    states: List[CWMStateResponse] = Field(..., description="List of CWM states")
+    total: int = Field(..., description="Total number of states")
+    model_type: Optional[str] = Field(
+        default=None, description="Filter by model type if applied"
     )
 
 
