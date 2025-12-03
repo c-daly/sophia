@@ -78,7 +78,7 @@ Upload a media file for processing.
 **Example (curl):**
 ```bash
 curl -X POST http://localhost:8000/ingest/media \
-  -H "Authorization: Bearer dev-token-change-in-production" \
+  -H "Authorization: Bearer sophia_dev" \
   -F "file=@/path/to/image.jpg" \
   -F "media_type=image" \
   -F "question=What objects are visible?"
@@ -89,7 +89,7 @@ curl -X POST http://localhost:8000/ingest/media \
 import requests
 
 url = "http://localhost:8000/ingest/media"
-headers = {"Authorization": "Bearer dev-token-change-in-production"}
+headers = {"Authorization": "Bearer sophia_dev"}
 
 files = {"file": ("photo.jpg", open("photo.jpg", "rb"), "image/jpeg")}
 data = {
@@ -148,11 +148,11 @@ List media samples with optional filtering and pagination.
 ```bash
 # List all images
 curl -X GET "http://localhost:8000/media/samples?media_type=image&limit=10" \
-  -H "Authorization: Bearer dev-token-change-in-production"
+  -H "Authorization: Bearer sophia_dev"
 
 # List samples after a timestamp
 curl -X GET "http://localhost:8000/media/samples?after_timestamp=2025-01-15T00:00:00Z" \
-  -H "Authorization: Bearer dev-token-change-in-production"
+  -H "Authorization: Bearer sophia_dev"
 ```
 
 **Example (Python):**
@@ -160,7 +160,7 @@ curl -X GET "http://localhost:8000/media/samples?after_timestamp=2025-01-15T00:0
 import requests
 
 url = "http://localhost:8000/media/samples"
-headers = {"Authorization": "Bearer dev-token-change-in-production"}
+headers = {"Authorization": "Bearer sophia_dev"}
 params = {
     "media_type": "image",
     "limit": 20,
@@ -213,7 +213,7 @@ Retrieve details for a specific media sample.
 **Example (curl):**
 ```bash
 curl -X GET http://localhost:8000/media/samples/ms_abc123 \
-  -H "Authorization: Bearer dev-token-change-in-production"
+  -H "Authorization: Bearer sophia_dev"
 ```
 
 **Example (Python):**
@@ -222,7 +222,7 @@ import requests
 
 sample_id = "ms_abc123"
 url = f"http://localhost:8000/media/samples/{sample_id}"
-headers = {"Authorization": "Bearer dev-token-change-in-production"}
+headers = {"Authorization": "Bearer sophia_dev"}
 
 response = requests.get(url, headers=headers)
 if response.status_code == 200:

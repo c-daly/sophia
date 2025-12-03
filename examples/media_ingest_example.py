@@ -13,7 +13,7 @@ import io
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
-API_TOKEN = "dev-token-change-in-production"
+API_TOKEN = "sophia_dev"
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 
