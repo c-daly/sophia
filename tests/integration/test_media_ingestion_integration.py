@@ -2,6 +2,9 @@
 
 These tests require Neo4j to be running.
 Run with: pytest tests/integration/test_media_ingestion_integration.py -v -m integration
+
+In CI, these run automatically with containerized Neo4j.
+Locally, start services with: docker compose -f docker-compose.test.yml up -d
 """
 
 import io
@@ -13,17 +16,10 @@ from fastapi.testclient import TestClient
 from sophia.api.app import create_app
 
 
-# Support both new and legacy env var names for backwards compatibility
-RUN_SOPHIA_INTEGRATION = os.getenv("RUN_SOPHIA_INTEGRATION") == "1"
-RUN_MEDIA_INTEGRATION = os.getenv("RUN_MEDIA_INTEGRATION") == "1"
-INTEGRATION_ENABLED = RUN_SOPHIA_INTEGRATION or RUN_MEDIA_INTEGRATION
-
+# Integration tests are run by CI with real services.
+# The pytest.mark.integration marker allows running unit tests separately with -m "not integration"
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(
-        not INTEGRATION_ENABLED,
-        reason="Integration tests require external Neo4j; set RUN_SOPHIA_INTEGRATION=1 to enable.",
-    ),
 ]
 
 
@@ -36,8 +32,8 @@ def test_token():
 @pytest.fixture
 def client(test_token):
     """Create FastAPI test client with lifespan context."""
-    # Set up environment for integration testing
-    # Use 37xxx ports to match CI docker-compose.test.yml
+    # Use offset ports (37xxx) to avoid conflicts with other repos' test stacks
+    # CI sets these via env vars; defaults match tests/e2e/stack/sophia/docker-compose.test.yml
     os.environ.setdefault("NEO4J_URI", "bolt://localhost:37687")
     os.environ.setdefault("NEO4J_USER", "neo4j")
     os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
