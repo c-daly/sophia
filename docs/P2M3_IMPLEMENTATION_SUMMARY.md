@@ -2,13 +2,6 @@
 
 ## Status: ✅ COMPLETE
 
-**Pull Request**: copilot/add-jepa-runner-schema  
-**Date Completed**: November 20, 2025  
-**Tests**: 149 passed, 17 deselected (76% coverage)  
-**Security**: 0 vulnerabilities (CodeQL scan)
-
----
-
 ## Acceptance Criteria
 
 All acceptance criteria from the issue have been met:
