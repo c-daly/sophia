@@ -389,9 +389,3 @@ The system successfully demonstrates:
 - **Tests**: `tests/planner/test_planner.py`, `tests/test_plan_api_pick_and_place.py`
 - **Demo**: `examples/milestone_m3_demo.py`
 - **Research**: `docs/research/planner-applicability-notes.md`
-
----
-
-**Verified by**: Copilot SWE Agent  
-**Date**: November 19, 2025  
-**Version**: 0.1.0
