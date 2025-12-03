@@ -41,6 +41,7 @@ function print_usage() {
     echo "  up         Start services only"
     echo "  down       Stop and remove services"
     echo "  logs       Show service logs"
+    echo "  seed       Seed test data into Neo4j"
     echo "  status     Check service status"
     echo "  clean      Clean up everything including volumes"
     echo "  help       Show this help message"
@@ -50,8 +51,9 @@ function print_usage() {
     echo "  Milvus: ${MILVUS_PORT} (grpc), ${MILVUS_METRICS_PORT} (health)"
     echo ""
     echo "Examples:"
-    echo "  $0                  # Run full test"
+    echo "  $0                  # Run full test (start, seed, test)"
     echo "  $0 up              # Start services for manual testing"
+    echo "  $0 seed            # Seed test data"
     echo "  $0 logs            # View logs"
     echo "  $0 down            # Stop services"
 }
@@ -150,6 +152,38 @@ function check_status() {
     fi
 }
 
+function seed_data() {
+    echo -e "${BLUE}Seeding test data...${NC}"
+    cd "${REPO_ROOT}"
+    
+    # Export environment variables for seeding
+    export NEO4J_URI="bolt://localhost:${NEO4J_BOLT_PORT}"
+    export NEO4J_USER NEO4J_PASSWORD
+    
+    echo -e "${YELLOW}Seeding pick-and-place scenario into Neo4j...${NC}"
+    poetry run python -c "
+from sophia.hcg_client import HCGClient
+from sophia.hcg_client.seeder import seed_pick_and_place_data
+import os
+
+client = HCGClient(
+    neo4j_uri=os.environ['NEO4J_URI'],
+    neo4j_username=os.environ['NEO4J_USER'],
+    neo4j_password=os.environ['NEO4J_PASSWORD'],
+)
+print('Clearing existing data...')
+client.clear_all()
+print('Seeding pick-and-place data...')
+seed_pick_and_place_data(client)
+nodes = client.get_all_nodes()
+print(f'Seeded {len(nodes)} nodes')
+client.close()
+print('Done!')
+"
+    
+    echo -e "${GREEN}✓ Test data seeded${NC}"
+}
+
 function run_tests() {
     echo -e "${BLUE}Running Sophia integration tests...${NC}"
     cd "${REPO_ROOT}"
@@ -183,6 +217,7 @@ COMMAND="${1:-test}"
 case "$COMMAND" in
     test)
         start_services
+        seed_data
         run_tests
         ;;
     up)
@@ -190,6 +225,9 @@ case "$COMMAND" in
         ;;
     down)
         stop_services
+        ;;
+    seed)
+        seed_data
         ;;
     logs)
         shift

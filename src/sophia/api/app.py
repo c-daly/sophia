@@ -53,7 +53,6 @@ from sophia.planner import Planner
 from sophia.executor import Executor
 from sophia.knowledge_graph import KnowledgeGraph, Node, Edge
 from sophia.hcg_client import HCGClient
-from sophia.hcg_client.seeder import seed_pick_and_place_data
 from sophia.cwm_g import ContinuousWorkingMemoryGenerative
 from sophia.cwm_a import ContinuousWorkingMemoryAssociative, CWMAStateService
 from sophia.jepa import JEPARunner
@@ -183,24 +182,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             milvus_port=milvus_port,
         )
         logger.info("HCG client initialized")
-
-        # Seed pick-and-place data if enabled
-        seed_data = os.getenv("SEED_PICK_AND_PLACE_DATA", "true").lower() == "true"
-        if seed_data:
-            logger.info("Seeding pick-and-place data into Neo4j...")
-            try:
-                # Clear existing data first (optional, controlled by env var)
-                clear_before_seed = (
-                    os.getenv("CLEAR_BEFORE_SEED", "false").lower() == "true"
-                )
-                if clear_before_seed:
-                    _hcg_client.clear_all()
-                    logger.info("Cleared existing HCG data")
-
-                seed_pick_and_place_data(_hcg_client)
-                logger.info("Pick-and-place data seeded successfully")
-            except Exception as e:
-                logger.warning(f"Failed to seed pick-and-place data: {e}")
 
         # Load knowledge graph from Neo4j
         logger.info("Loading knowledge graph from Neo4j HCG...")

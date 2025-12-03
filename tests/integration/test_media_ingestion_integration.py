@@ -32,9 +32,9 @@ def test_token():
 @pytest.fixture
 def client(test_token):
     """Create FastAPI test client with lifespan context."""
-    # Use offset ports (37xxx) to avoid conflicts with other repos' test stacks
-    # CI sets these via env vars; defaults match tests/e2e/stack/sophia/docker-compose.test.yml
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:37687")
+    # Default ports match docker-compose.test.yml (7687)
+    # CI can override via env vars if needed
+    os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
     os.environ.setdefault("NEO4J_USER", "neo4j")
     os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
     os.environ.setdefault("MEDIA_STORAGE_ROOT", "./test_media_storage")

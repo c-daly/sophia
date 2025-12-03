@@ -74,10 +74,8 @@ def api_token():
 
 @pytest.fixture
 def app(api_token):
-    """Create test application with Neo4j seeding enabled."""
+    """Create test application."""
     os.environ["SOPHIA_API_TOKEN"] = api_token
-    os.environ["SEED_PICK_AND_PLACE_DATA"] = "true"
-    os.environ["CLEAR_BEFORE_SEED"] = "true"
     return create_app()
 
 
