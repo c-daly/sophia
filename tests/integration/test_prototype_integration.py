@@ -2,6 +2,9 @@
 
 These tests require Neo4j and Milvus to be running.
 Run with: pytest tests/integration/test_prototype_integration.py -v -m integration
+
+In CI, these run automatically with containerized Neo4j and Milvus.
+Locally, start services with: docker compose -f docker-compose.test.yml up -d
 """
 
 import os
@@ -12,23 +15,16 @@ from sophia.api.app import create_app
 from sophia.hcg_client import HCGClient
 
 
-# Support both new and legacy env var names for backwards compatibility
-RUN_SOPHIA_INTEGRATION = os.getenv("RUN_SOPHIA_INTEGRATION") == "1"
-RUN_PROTOTYPE_INTEGRATION = os.getenv("RUN_PROTOTYPE_INTEGRATION") == "1"
-INTEGRATION_ENABLED = RUN_SOPHIA_INTEGRATION or RUN_PROTOTYPE_INTEGRATION
-
+# Integration tests are run by CI with real services.
+# The pytest.mark.integration marker allows running unit tests separately with -m "not integration"
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(
-        not INTEGRATION_ENABLED,
-        reason="Integration tests require external Neo4j/Milvus; set RUN_SOPHIA_INTEGRATION=1 to enable.",
-    ),
 ]
 
 
 @pytest.fixture
 def neo4j_uri():
-    """Neo4j connection URI."""
+    """Neo4j connection URI - uses offset port 37687."""
     return os.getenv("NEO4J_URI", "bolt://localhost:37687")
 
 
@@ -52,25 +48,22 @@ def milvus_host():
 
 @pytest.fixture
 def milvus_port():
-    """Milvus port."""
+    """Milvus port - uses offset port 39530."""
     return int(os.getenv("MILVUS_PORT", "39530"))
 
 
 @pytest.fixture
 def hcg_client(neo4j_uri, neo4j_username, neo4j_password, milvus_host, milvus_port):
     """Create HCG client for test setup."""
-    try:
-        client = HCGClient(
-            neo4j_uri=neo4j_uri,
-            neo4j_username=neo4j_username,
-            neo4j_password=neo4j_password,
-            milvus_host=milvus_host,
-            milvus_port=milvus_port,
-        )
-        yield client
-        client.close()
-    except Exception as e:
-        pytest.skip(f"HCG services not available: {e}")
+    client = HCGClient(
+        neo4j_uri=neo4j_uri,
+        neo4j_username=neo4j_username,
+        neo4j_password=neo4j_password,
+        milvus_host=milvus_host,
+        milvus_port=milvus_port,
+    )
+    yield client
+    client.close()
 
 
 @pytest.fixture
