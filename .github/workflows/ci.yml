@@ -20,6 +20,10 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Standard CI: Full tests with real services (Neo4j, Milvus)
+  # Uses offset ports (37xxx, 39xxx) to avoid conflicts with other repos
+  # ---------------------------------------------------------------------------
   standard:
     uses: c-daly/logos/.github/workflows/reusable-standard-ci.yml@main
     with:
