@@ -7,6 +7,30 @@ the code you are changing.
 Most suites can be run with `poetry run pytest <path>`. Long-running tests (for
 example, the prototype integration flow) are called out explicitly.
 
+## CI Testing Behavior
+
+### Coverage Requirement
+
+All CI jobs enforce a **60% minimum coverage** threshold. Tests will fail if coverage drops below 60%.
+
+### CI Jobs Overview
+
+| Job | Triggers | Services | Purpose |
+|-----|----------|----------|---------|
+| **standard** | All PRs/pushes | ✅ Neo4j, Milvus | Lint + type check + full test suite (via reusable workflow) |
+
+The standard job:
+- Starts Neo4j and Milvus via docker-compose
+- Runs ALL tests including integration tests
+- Enforces 60% minimum coverage
+- Reports skip reasons with `-r sS`
+
+### Weekly Scheduled Run
+
+Full integration tests run automatically every **Sunday at 4 AM UTC** to catch any regressions.
+
+---
+
 | Category | Paths | What it exercises | Typical command |
 | --- | --- | --- | --- |
 | API surface & Hermes ingestion | `tests/api/test_api.py`, `tests/api/test_hermes_ingestion.py`, `tests/test_plan_api_pick_and_place.py`, `tests/test_error_handling.py` | FastAPI endpoints, validation, routing, Hermes payload handling, and HTTP error semantics. | `poetry run pytest tests/api tests/test_plan_api_pick_and_place.py tests/test_error_handling.py` |

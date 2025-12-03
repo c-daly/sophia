@@ -5,6 +5,16 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Run full integration tests weekly on Sunday at 4 AM UTC
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run full integration tests with services'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -19,6 +29,27 @@ jobs:
       poetry_install_args: '--with dev'
       python_lint_paths: 'src tests'
       mypy_targets: 'src'
-      pytest_command: 'pytest tests/ -v -m "not integration" --cov=sophia --cov-report=term --cov-report=xml'
+      # Start test services (Neo4j, Milvus) for full test coverage
+      docker_compose_file: 'tests/e2e/stack/sophia/docker-compose.test.yml'
+      docker_compose_wait_script: |
+        echo "Waiting for Neo4j..."
+        timeout 60 bash -c 'until docker exec sophia-test-neo4j cypher-shell -u neo4j -p neo4jtest "RETURN 1" 2>/dev/null; do sleep 2; done'
+        echo "Waiting for etcd..."
+        timeout 60 bash -c 'until docker exec sophia-test-milvus-etcd etcdctl endpoint health 2>/dev/null; do sleep 2; done'
+        echo "Waiting for MinIO..."
+        timeout 60 bash -c 'until curl -f http://localhost:9000/minio/health/live 2>/dev/null; do sleep 2; done'
+        echo "Waiting for Milvus..."
+        timeout 120 bash -c 'until curl -f http://localhost:39091/healthz 2>/dev/null; do sleep 2; done'
+      pytest_env_script: |
+        export NEO4J_URI=bolt://localhost:37687
+        export NEO4J_USER=neo4j
+        export NEO4J_PASSWORD=neo4jtest
+        export MILVUS_HOST=localhost
+        export MILVUS_PORT=39530
+        export RUN_SOPHIA_INTEGRATION=1
+      # Run ALL tests with services available
+      # --cov-fail-under=60: Enforce 60% minimum coverage
+      pytest_command: 'pytest tests/ -v --cov=sophia --cov-report=term --cov-report=xml --cov-fail-under=60 -r sS'
       coverage_python_version: '3.12'
-      upload_coverage: false
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
