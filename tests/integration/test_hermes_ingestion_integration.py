@@ -18,21 +18,24 @@ class TestHermesIngestionIntegration:
 
     @pytest.fixture
     def sample_proposal(self):
-        """Sample Hermes proposal payload."""
+        """Sample Hermes proposal payload matching HermesProposalRequest model."""
         return {
             "proposal_id": "test-proposal-001",
-            "source": "hermes",
-            "content": {
-                "raw_text": "The robot should pick up the red block and place it in the bin.",
-                "parsed_intent": "pick_and_place",
-                "entities": [
-                    {"type": "object", "name": "red_block"},
-                    {"type": "location", "name": "bin"},
-                ],
-            },
+            "source_service": "hermes",
+            "llm_provider": "openai",
+            "model": "gpt-4",
+            "generated_at": "2025-01-01T00:00:00Z",
+            "confidence": 0.95,
+            "raw_text": "The robot should pick up the red block and place it in the bin.",
+            "plan_steps": [
+                {"action": "pick_up", "target": "red_block"},
+                {"action": "place", "target": "bin"},
+            ],
+            "imagined_states": [
+                {"state_id": "state_1", "entities": {"red_block": {"location": "bin"}}},
+            ],
             "metadata": {
-                "timestamp": "2025-01-01T00:00:00Z",
-                "confidence": 0.95,
+                "session_id": "test-session",
             },
         }
 
@@ -50,24 +53,28 @@ class TestHermesIngestionIntegration:
     ):
         """Test that ingesting a proposal creates nodes in Neo4j."""
         response = http_client.post(
-            "/ingest/proposal",
+            "/ingest/hermes_proposal",
             json=sample_proposal,
             headers=auth_headers,
         )
         assert response.status_code in [200, 201]
 
         data = response.json()
-        assert "ingestion_id" in data or "proposal_id" in data
+        assert "proposal_id" in data
+        assert "stored_node_ids" in data
 
     def test_ingest_minimal_proposal(self, http_client, auth_headers):
         """Test ingesting a minimal valid proposal."""
         minimal_proposal = {
             "proposal_id": "minimal-001",
-            "source": "hermes",
-            "content": {"raw_text": "Test proposal"},
+            "source_service": "hermes",
+            "llm_provider": "openai",
+            "model": "gpt-4",
+            "generated_at": "2025-01-01T00:00:00Z",
+            "confidence": 0.8,
         }
         response = http_client.post(
-            "/ingest/proposal",
+            "/ingest/hermes_proposal",
             json=minimal_proposal,
             headers=auth_headers,
         )
@@ -77,13 +84,15 @@ class TestHermesIngestionIntegration:
         """Test ingesting proposal with only raw text."""
         proposal = {
             "proposal_id": "text-only-001",
-            "source": "hermes",
-            "content": {
-                "raw_text": "Move the blue block to the table.",
-            },
+            "source_service": "hermes",
+            "llm_provider": "anthropic",
+            "model": "claude-3-opus",
+            "generated_at": "2025-01-01T00:00:00Z",
+            "confidence": 0.9,
+            "raw_text": "Move the blue block to the table.",
         }
         response = http_client.post(
-            "/ingest/proposal",
+            "/ingest/hermes_proposal",
             json=proposal,
             headers=auth_headers,
         )
@@ -94,15 +103,19 @@ class TestHermesIngestionIntegration:
         proposals = [
             {
                 "proposal_id": f"batch-{i}",
-                "source": "hermes",
-                "content": {"raw_text": f"Proposal number {i}"},
+                "source_service": "hermes",
+                "llm_provider": "openai",
+                "model": "gpt-4",
+                "generated_at": "2025-01-01T00:00:00Z",
+                "confidence": 0.85,
+                "raw_text": f"Proposal number {i}",
             }
             for i in range(3)
         ]
 
         for proposal in proposals:
             response = http_client.post(
-                "/ingest/proposal",
+                "/ingest/hermes_proposal",
                 json=proposal,
                 headers=auth_headers,
             )
@@ -113,7 +126,7 @@ class TestHermesIngestionIntegration:
     ):
         """Test that ingested proposal nodes can be retrieved from Neo4j."""
         response = http_client.post(
-            "/ingest/proposal",
+            "/ingest/hermes_proposal",
             json=sample_proposal,
             headers=auth_headers,
         )
@@ -123,7 +136,7 @@ class TestHermesIngestionIntegration:
         with hcg_client.driver.session(database=hcg_client.database) as session:
             result = session.run(
                 """
-                MATCH (n {proposal_id: $proposal_id})
+                MATCH (n {id: $proposal_id})
                 RETURN n
                 """,
                 {"proposal_id": sample_proposal["proposal_id"]},
@@ -137,12 +150,16 @@ class TestHermesIngestionIntegration:
         """Test that ingested proposals preserve source provenance."""
         proposal = {
             "proposal_id": "provenance-test-001",
-            "source": "hermes-test",
-            "content": {"raw_text": "Test provenance"},
+            "source_service": "hermes-test",
+            "llm_provider": "openai",
+            "model": "gpt-4",
+            "generated_at": "2025-01-01T00:00:00Z",
+            "confidence": 0.9,
+            "raw_text": "Test provenance",
         }
 
         response = http_client.post(
-            "/ingest/proposal",
+            "/ingest/hermes_proposal",
             json=proposal,
             headers=auth_headers,
         )
@@ -150,5 +167,5 @@ class TestHermesIngestionIntegration:
 
         # Verify provenance in response
         data = response.json()
-        if "source" in data:
-            assert data["source"] == "hermes-test"
+        assert "proposal_id" in data
+        assert data["proposal_id"] == proposal["proposal_id"]

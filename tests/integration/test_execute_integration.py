@@ -72,10 +72,12 @@ class TestExecuteIntegration:
         )
         assert response.status_code == 201
 
-        # Verify state unchanged
+        # Verify state unchanged (compare state content, ignoring timestamp)
         state_response = http_client.get("/state", headers=auth_headers)
         final_state = state_response.json()
-        assert initial_state == final_state
+        # Compare state and state_id, but not timestamp which changes between calls
+        assert initial_state.get("state") == final_state.get("state")
+        assert initial_state.get("state_id") == final_state.get("state_id")
 
     def test_execute_returns_results_for_each_step(self, http_client, auth_headers):
         """Test that /execute returns results for each plan step."""
