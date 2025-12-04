@@ -229,7 +229,7 @@ class TestExecuteWorkflow:
                 """
             )
             # Just verify the query runs without error
-            record = result.single()
+            result.single()
 
     def test_multiple_executions_generate_unique_ids(self, http_client, auth_headers):
         """Test that each execution has a unique ID."""

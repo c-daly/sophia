@@ -128,9 +128,8 @@ class TestHermesIngestionIntegration:
                 """,
                 {"proposal_id": sample_proposal["proposal_id"]},
             )
-            records = list(result)
-            # Should find at least one node related to the proposal
-            # (may be 0 if proposal storage is different)
+            # Just verify query runs; may be 0 if proposal storage is different
+            list(result)
 
     def test_ingest_proposal_preserves_provenance(
         self, http_client, auth_headers, hcg_client

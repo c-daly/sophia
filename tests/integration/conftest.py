@@ -171,7 +171,9 @@ def http_client(sophia_url: str, verify_sophia) -> httpx.Client:
 
 
 @pytest.fixture(scope="module")
-def hcg_client(neo4j_uri: str, neo4j_username: str, neo4j_password: str, verify_infrastructure):
+def hcg_client(
+    neo4j_uri: str, neo4j_username: str, neo4j_password: str, verify_infrastructure
+):
     """Create HCG client for direct database verification."""
     from sophia.hcg_client import HCGClient
 

@@ -66,7 +66,9 @@ class TestPlannerIntegration:
         # Unachievable goals should return empty steps
         assert len(data["steps"]) == 0
 
-    def test_plan_steps_reference_hcg_nodes(self, http_client, auth_headers, hcg_client):
+    def test_plan_steps_reference_hcg_nodes(
+        self, http_client, auth_headers, hcg_client
+    ):
         """Test that plan steps reference valid HCG nodes."""
         response = http_client.post(
             "/plan",
@@ -79,10 +81,8 @@ class TestPlannerIntegration:
         # Verify any referenced nodes exist in Neo4j
         for step in data["steps"]:
             if "node_id" in step:
-                with hcg_client.driver.session(
-                    database=hcg_client.database
-                ) as session:
-                    result = session.run(
+                with hcg_client.driver.session(database=hcg_client.database) as session:
+                    session.run(
                         "MATCH (n {id: $id}) RETURN n.id as id",
                         {"id": step["node_id"]},
                     )
@@ -102,7 +102,7 @@ class TestPlannerIntegration:
 
         # Query for plan in Neo4j
         with hcg_client.driver.session(database=hcg_client.database) as session:
-            result = session.run(
+            session.run(
                 """
                 MATCH (n {plan_id: $plan_id})
                 RETURN count(n) as count

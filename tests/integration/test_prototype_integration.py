@@ -138,4 +138,4 @@ class TestPrototypeIntegration:
                 {"plan_id": plan_id},
             )
             # Plan may or may not be persisted depending on implementation
-            records = list(result)
+            list(result)
