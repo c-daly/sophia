@@ -102,7 +102,9 @@ def created_plan(client, auth_headers):
 class TestExecuteIntegration:
     """Integration tests for the /execute endpoint."""
 
-    def test_execute_plan_returns_execution_id(self, client, auth_headers, created_plan):
+    def test_execute_plan_returns_execution_id(
+        self, client, auth_headers, created_plan
+    ):
         """Test that executing a plan returns an execution ID."""
         plan_id = created_plan["plan_id"]
 
@@ -121,7 +123,9 @@ class TestExecuteIntegration:
         assert "results" in data
         assert "overall_status" in data
 
-    def test_execute_dry_run_does_not_change_state(self, client, auth_headers, created_plan):
+    def test_execute_dry_run_does_not_change_state(
+        self, client, auth_headers, created_plan
+    ):
         """Test that dry run execution doesn't modify state."""
         plan_id = created_plan["plan_id"]
 
@@ -152,7 +156,9 @@ class TestExecuteIntegration:
         final_state = final_state_response.json()["state"]
         assert initial_state == final_state
 
-    def test_execute_returns_results_for_each_step(self, client, auth_headers, created_plan):
+    def test_execute_returns_results_for_each_step(
+        self, client, auth_headers, created_plan
+    ):
         """Test that execution returns results for executed steps."""
         plan_id = created_plan["plan_id"]
 
@@ -224,7 +230,9 @@ class TestExecuteIntegration:
         # In a real implementation, this might return 404
         assert response.status_code in [201, 404]
 
-    def test_execute_overall_status_reflects_results(self, client, auth_headers, created_plan):
+    def test_execute_overall_status_reflects_results(
+        self, client, auth_headers, created_plan
+    ):
         """Test that overall_status reflects the execution results."""
         plan_id = created_plan["plan_id"]
 
@@ -302,7 +310,9 @@ class TestExecuteWorkflow:
         assert state_response.status_code == 200
         assert "state" in state_response.json()
 
-    def test_multiple_executions_generate_unique_ids(self, client, auth_headers, created_plan):
+    def test_multiple_executions_generate_unique_ids(
+        self, client, auth_headers, created_plan
+    ):
         """Test that multiple executions generate unique execution IDs."""
         plan_id = created_plan["plan_id"]
         execution_ids = []

@@ -140,7 +140,9 @@ class TestHermesIngestionIntegration:
         """Test that ingesting a proposal creates nodes in Neo4j."""
         response = client.post("/ingest/hermes_proposal", json=sample_proposal)
 
-        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+        assert (
+            response.status_code == 201
+        ), f"Expected 201, got {response.status_code}: {response.text}"
         data = response.json()
 
         # Verify response structure
@@ -153,7 +155,9 @@ class TestHermesIngestionIntegration:
         assert len(data["stored_node_ids"]) == 7
         assert data["stored_node_ids"][0] == sample_proposal["proposal_id"]
 
-    def test_ingest_proposal_nodes_retrievable(self, client, sample_proposal, hcg_client):
+    def test_ingest_proposal_nodes_retrievable(
+        self, client, sample_proposal, hcg_client
+    ):
         """Test that ingested proposal nodes can be retrieved from Neo4j."""
         response = client.post("/ingest/hermes_proposal", json=sample_proposal)
         assert response.status_code == 201
@@ -225,7 +229,9 @@ class TestHermesIngestionIntegration:
             response = client.post("/ingest/hermes_proposal", json=proposal)
             assert response.status_code == 201
 
-    def test_ingest_proposal_preserves_provenance(self, client, sample_proposal, hcg_client):
+    def test_ingest_proposal_preserves_provenance(
+        self, client, sample_proposal, hcg_client
+    ):
         """Test that all provenance metadata is preserved in Neo4j."""
         response = client.post("/ingest/hermes_proposal", json=sample_proposal)
         assert response.status_code == 201

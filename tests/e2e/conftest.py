@@ -115,21 +115,19 @@ def check_milvus_health(ports: dict) -> bool:
 def verify_infrastructure(infrastructure_ports: dict) -> None:
     """
     Verify that infrastructure services are running before tests.
-    
+
     This fixture runs automatically and will skip all e2e tests
     if the required services are not available.
     """
     neo4j_ok = check_neo4j_health(infrastructure_ports)
     milvus_ok = check_milvus_health(infrastructure_ports)
-    
+
     if not neo4j_ok and not milvus_ok:
         pytest.skip(
             "E2E infrastructure not running. Start with: ./scripts/start_services.sh"
         )
     elif not neo4j_ok:
-        pytest.skip(
-            f"Neo4j not available on port {infrastructure_ports['neo4j_http']}"
-        )
+        pytest.skip(f"Neo4j not available on port {infrastructure_ports['neo4j_http']}")
     elif not milvus_ok:
         pytest.skip(
             f"Milvus not available on port {infrastructure_ports['milvus_health']}"
@@ -140,6 +138,7 @@ def verify_infrastructure(infrastructure_ports: dict) -> None:
 def unique_id() -> str:
     """Generate a unique ID for test isolation."""
     import uuid
+
     return f"e2e_test_{uuid.uuid4().hex[:8]}"
 
 
