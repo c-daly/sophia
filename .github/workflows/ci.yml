@@ -33,8 +33,8 @@ jobs:
       poetry_install_args: '--with dev'
       python_lint_paths: 'src tests'
       mypy_targets: 'src'
-      # Start test services (Neo4j, Milvus) for full test coverage
-      docker_compose_file: 'tests/e2e/stack/sophia/docker-compose.test.yml'
+      # Start test services (Neo4j, Milvus, Sophia) using compose overlay
+      docker_compose_file: 'docker-compose.test.yml -f docker-compose.test.sophia.yml'
       docker_compose_wait_script: |
         echo "Waiting for Neo4j..."
         timeout 60 bash -c 'until docker exec sophia-test-neo4j cypher-shell -u neo4j -p neo4jtest "RETURN 1" 2>/dev/null; do sleep 2; done'

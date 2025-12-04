@@ -1,28 +1,41 @@
+# Overlay for docker-compose.test.yml that adds the Sophia API service
+# Usage: docker compose -f docker-compose.test.yml -f docker-compose.test.sophia.yml up
+#
+# This allows running the full test stack locally with the same config as CI.
+
+volumes:
+  sophia_test_media_storage: {}
+
 services:
-  test-runner:
-    image: ghcr.io/c-daly/logos-foundry:0.1.0
-    container_name: sophia-test-runner
-    volumes:
-      - ${SOPHIA_ROOT:-.}:/app/sophia:ro
-    working_dir: /app/sophia
+  sophia:
+    container_name: sophia-test-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "38001:8000"
     environment:
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: neo4jtest
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      PYTHONPATH: /app:/app/sophia/src
-    entrypoint: /bin/sh
-    command: 
-      - -c
-      - |
-        cd /app/sophia
-        poetry install --no-root --only main
-        pytest tests/ -m "not integration" -v --no-cov
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=neo4jtest
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - SOPHIA_API_TOKEN=test-token-for-sophia
+      - SEED_PICK_AND_PLACE_DATA=true
+      - CLEAR_BEFORE_SEED=false
+      - MEDIA_STORAGE_ROOT=/app/media_storage
     depends_on:
       neo4j:
         condition: service_healthy
       milvus:
         condition: service_healthy
+    volumes:
+      - sophia_test_media_storage:/app/media_storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - default
