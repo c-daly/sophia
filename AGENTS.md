@@ -8,9 +8,9 @@ This guidance applies to the Sophia repository and governs how AI agents interac
 Sophia is one of **five tightly coupled repositories** that compose the LOGOS cognitive architecture:
 
 | Repo | Purpose |
-|------|---------|
+|------|---------||
 | **logos** | Foundry—canonical contracts, ontology, SDKs, shared tooling |
-| **sophia** (this repo) | Non-linguistic cognitive core (Orchestrator, CWM-A/G, Planner, Executor) |
+| **sophia** (this repo) | Non-linguistic cognitive core (Orchestrator, CWM-A/G/E, Planner, Executor) |
 | **hermes** | Stateless language & embedding utility (STT, TTS, NLP, embeddings) |
 | **talos** | Hardware abstraction layer for sensors/actuators |
 | **apollo** | Thin client UI and command layer |
@@ -20,7 +20,7 @@ Sophia is a **core downstream consumer** of logos contracts and a **provider** t
 ### This repository
 Sophia provides the non-linguistic cognitive core for LOGOS:
 - **Orchestrator** – Coordinates cognitive processes
-- **CWM-A / CWM-G** – Causal World Models (Active/Generative)
+- **CWM-A / CWM-G / CWM-E** – Causal World Models (Active/Generative/Emotional)
 - **Planner** – Goal-directed planning and reasoning
 - **Executor** – Plan execution and monitoring
 - **JEPA Integration** – Joint-Embedding Predictive Architecture for perception
@@ -62,12 +62,25 @@ If your change will affect behavior, logging, error handling, or external APIs, 
 ### Never work directly on `main`
 Always create a feature branch before making any changes. Branch naming convention:
 ```
-{kind}/{issue-number}-{short-kebab}
-# e.g., feature/1234-planner-retry-logic
+{kind}/{repo}{issue-number}-{short-kebab}
+# e.g., feature/sophia1234-planner-retry-logic
+# e.g., fix/sophia42-connection-timeout
+# e.g., chore/sophia63-test-reorganization
 ```
+
+The repo prefix (`sophia`) makes branches identifiable across the ecosystem.
 
 ### Never push without a pull request
 All changes—no matter how small—must go through a PR. Direct pushes to any shared branch are forbidden.
+
+### Cross-repository changes
+When a change spans multiple repositories:
+1. **Create a tracking issue** in the most relevant repo (usually `logos` for ecosystem-wide changes)
+2. **Reference it from each repo's PR** using `Part of c-daly/logos#N`
+3. **Use consistent branch names** across repos: `chore/logos420-testing-standards`
+4. **Close the tracking issue** only after all PRs merge
+
+See `logos/docs/GIT_PROJECT_STANDARDS.md` for full cross-repo workflow documentation.
 
 ### Respect cross-repo dependencies
 Before shipping a change that modifies shared contracts, APIs, or data structures:
@@ -141,6 +154,33 @@ Document what you tried and why it didn't work so you (or another agent) don't r
 
 ---
 
+## Do's and Don'ts
+
+### Definitely Do
+- **Create a branch before any changes** – Never work directly on `main`
+- **Run tests before pushing** – At minimum: `./scripts/run_tests.sh unit`
+- **Ask before large refactors** – Describe intent, wait for acknowledgment
+- **Reference issues in commits/PRs** – Use `Closes #N` or `Part of #N`
+- **Update tests when changing behavior** – Tests document expectations
+- **Check downstream impact** – Apollo depends on Sophia's API
+- **Use the standard scripts** – `./scripts/run_tests.sh` handles env setup
+- **Read the error message** – Most issues are explained in the output
+- **Commit `poetry.lock` with `pyproject.toml`** – Always together
+
+### Definitely Don't
+- **Don't push directly to `main`** – All changes require a PR
+- **Don't ignore failing tests** – Fix them or explain why they're skipped
+- **Don't make unrelated changes in a PR** – Keep PRs focused; file follow-up tickets
+- **Don't hardcode ports** – Use environment variables; ports differ per repo
+- **Don't commit secrets or tokens** – Ever. Check your diffs.
+- **Don't skip the PR description** – Reviewers need context
+- **Don't merge without CI passing** – If CI is broken, fix it first
+- **Don't guess at cross-repo impacts** – Check contracts in logos
+- **Don't leave zombie containers running** – `./scripts/run_tests.sh down`
+- **Don't copy-paste code without understanding it** – Especially test fixtures
+
+---
+
 ## How to work
 
 ### Searching
@@ -159,9 +199,84 @@ Stay focused on the task. Avoid drive-by refactors, unrelated formatting changes
 
 ## Testing and linting
 
+### Linting and formatting
+
+All Python code must pass ruff and mypy before merge.
+
+**Ruff** (linting + formatting):
+```bash
+# Check for issues
+poetry run ruff check .
+
+# Auto-fix what's possible
+poetry run ruff check --fix .
+
+# Format code
+poetry run ruff format .
+
+# Check formatting without changing files
+poetry run ruff format --check .
+```
+
+**Mypy** (type checking):
+```bash
+poetry run mypy src/
+```
+
+**Pre-commit workflow**:
+```bash
+# Before committing, run:
+poetry run ruff check --fix .
+poetry run ruff format .
+poetry run mypy src/
+poetry run pytest tests/unit/
+```
+
+**Common issues and fixes**:
+- `F401 imported but unused` → Remove the import or add `# noqa: F401` if re-exported
+- `E501 line too long` → Ruff format usually fixes this; if not, break the line manually
+- `I001 import order` → `ruff check --fix` will reorder imports
+- Mypy `missing-imports` → Add type stubs or `# type: ignore[import-untyped]`
+
+### Test infrastructure
+Sophia follows the LOGOS ecosystem testing standards (see `logos/docs/TESTING_STANDARDS.md`):
+
+| Test Type | Location | Services Required | Command |
+|-----------|----------|-------------------|---------|
+| Unit | `tests/unit/` | None | `./scripts/run_tests.sh unit` |
+| Integration | `tests/integration/` | Neo4j, Milvus | `./scripts/run_tests.sh integration` |
+| E2E | `tests/e2e/` | Neo4j, Milvus, Sophia API | `./scripts/run_tests.sh e2e` |
+
+Port allocation (+40000 offset per ecosystem standard):
+- Neo4j: 47474 (HTTP), 47687 (Bolt)
+- Milvus: 59530 (gRPC), 49091 (health)
+- Sophia API: 48000
+
+### Quick commands
+```bash
+# Run all tests (starts services automatically)
+./scripts/run_tests.sh all
+
+# Run specific test tier
+./scripts/run_tests.sh unit
+./scripts/run_tests.sh integration
+./scripts/run_tests.sh e2e
+
+# Service management
+./scripts/run_tests.sh up      # Start infrastructure
+./scripts/run_tests.sh down    # Stop infrastructure
+./scripts/run_tests.sh status  # Check health
+./scripts/run_tests.sh seed    # Seed test data
+
+# Full CI parity
+./scripts/run_tests.sh ci
+```
+
 ### Local CI parity
 For full CI parity, run:
 ```bash
+./scripts/run_tests.sh ci
+# or
 ./.github/workflows/run_ci.sh
 ```
 This wraps Ruff, Black, mypy, and pytest with the same arguments as the GitHub Actions workflow.
@@ -172,19 +287,6 @@ For scoped changes, run the smallest relevant subset:
 poetry run pytest <path>
 poetry run ruff check <path>
 poetry run mypy src/
-```
-
-### Integration tests
-Sophia has integration tests requiring Neo4j and Milvus:
-```bash
-# Start the test stack
-./tests/e2e/run_e2e.sh up
-
-# Run integration tests
-poetry run pytest tests/integration/
-
-# Tear down
-./tests/e2e/run_e2e.sh down
 ```
 
 ### Always note what you ran
@@ -280,11 +382,23 @@ Closes #427
 - Added unit tests for retry behavior
 
 ## Testing
-- `poetry run pytest tests/unit/test_connection.py` – ✅
+- `./scripts/run_tests.sh unit` – ✅
 - `poetry run ruff check src/sophia/` – ✅
 
 ## Notes (optional)
 Anything reviewers should know—tradeoffs, follow-up work, etc.
+```
+
+**For cross-repo changes**, add a section:
+```markdown
+## Cross-Repository Change
+This PR is part of a multi-repo change tracked in c-daly/logos#420.
+
+### Related PRs
+- c-daly/logos#421 - Standards doc (merged)
+- c-daly/sophia#64 - This PR
+
+Part of c-daly/logos#420
 ```
 
 ---
@@ -334,14 +448,116 @@ The script populates `GITHUB_MCP_PAT` with a fresh token. You may need to restar
 
 ---
 
+## Troubleshooting
+
+### Port conflicts
+If services fail to start with "port already in use":
+```bash
+# Check what's using the port
+lsof -i :47474
+
+# Stop any existing test containers
+./scripts/run_tests.sh down
+docker ps | grep sophia-test | awk '{print $1}' | xargs docker stop
+```
+
+### Neo4j won't start
+```bash
+# Check container logs
+docker logs sophia-test-neo4j
+
+# Common fix: clear volumes and restart
+./scripts/run_tests.sh clean
+./scripts/run_tests.sh up
+```
+
+### Milvus health check failing
+Milvus can take 60-90 seconds to become healthy. If it times out:
+```bash
+# Check etcd and minio are healthy first
+docker logs sophia-test-milvus-etcd
+docker logs sophia-test-milvus-minio
+
+# Then check milvus
+docker logs sophia-test-milvus
+```
+
+### Tests can't connect to services
+Ensure environment variables are set:
+```bash
+export NEO4J_URI=bolt://localhost:47687
+export MILVUS_HOST=localhost
+export MILVUS_PORT=59530
+```
+Or just use `./scripts/run_tests.sh` which sets these automatically.
+
+### GitHub MCP authentication errors
+```bash
+# Refresh the GitHub token
+~/mcp
+# Then retry the operation
+```
+
+### Import errors after pulling
+```bash
+poetry install
+```
+
+### Coverage not collecting in e2e tests
+E2E tests run sophia in a subprocess. Coverage should still work, but if it doesn't:
+```bash
+# Run with explicit coverage
+poetry run coverage run -m pytest tests/e2e/
+poetry run coverage report
+```
+
+---
+
+## GitHub Access
+
+**You have full access to GitHub.** Do not claim otherwise. If one method doesn't work, try another.
+
+| Method | Best For | Example |
+|--------|----------|---------|
+| **MCP tools** | Most operations | `mcp_github_list_issues`, `mcp_github_create_pull_request` |
+| **GitHub CLI** | Complex queries, projects | `gh issue list`, `gh project item-add` |
+| **GraphQL API** | Projects, advanced queries | `gh api graphql -f query='...'` |
+| **REST API** | Simple operations | `gh api repos/c-daly/sophia/issues` |
+
+### Quick examples
+```bash
+# Add issue to project 10
+gh project item-add 10 --owner c-daly --url https://github.com/c-daly/sophia/issues/63
+
+# Add labels
+gh issue edit 63 --repo c-daly/sophia --add-label "testing,phase:3"
+
+# Search across repos
+gh search issues "testing" --owner c-daly --state open
+```
+
+For complete documentation, see `logos/AGENTS.md` (GitHub Access section).
+
+---
+
 ## Quick reference
 
 | Task | Command / Location |
 |------|-------------------|
 | Install deps | `poetry install` |
-| Run all tests | `poetry run pytest` |
-| Full CI locally | `./.github/workflows/run_ci.sh` |
-| Start test stack | `./tests/e2e/run_e2e.sh up` |
-| Stop test stack | `./tests/e2e/run_e2e.sh down` |
-| Run integration tests | `poetry run pytest tests/integration/` |
+| Run all tests | `./scripts/run_tests.sh all` |
+| Run unit tests | `./scripts/run_tests.sh unit` |
+| Run integration tests | `./scripts/run_tests.sh integration` |
+| Run e2e tests | `./scripts/run_tests.sh e2e` |
+| Full CI locally | `./scripts/run_tests.sh ci` |
+| Start test infrastructure | `./scripts/run_tests.sh up` |
+| Stop test infrastructure | `./scripts/run_tests.sh down` |
+| Check service health | `./scripts/run_tests.sh status` |
+| Seed test data | `./scripts/run_tests.sh seed` |
 | Refresh GitHub token | `~/mcp` |
+
+### Ecosystem standards
+| Document | Location |
+|----------|----------|
+| Testing standards | `logos/docs/TESTING_STANDARDS.md` |
+| Git/project standards | `logos/docs/GIT_PROJECT_STANDARDS.md` |
