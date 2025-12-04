@@ -41,7 +41,8 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4jtest")
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 
 # Test auth token (for endpoints requiring authentication)
-TEST_AUTH_TOKEN = os.getenv("SOPHIA_TEST_TOKEN", "test-token-for-sophia")
+# Must match SOPHIA_API_TOKEN in docker-compose.test.yml
+TEST_AUTH_TOKEN = os.getenv("SOPHIA_API_TOKEN", "test-token-12345")
 
 
 @pytest.fixture(scope="session")
