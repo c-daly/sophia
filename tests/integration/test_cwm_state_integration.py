@@ -30,12 +30,9 @@ class TestCWMStateIntegration:
         update_response = http_client.post(
             "/state",
             json={
-                "updates": [
-                    {
-                        "node_id": "red_block",
-                        "properties": {"location": "bin"},
-                    }
-                ]
+                "state": {
+                    "red_block": {"location": "bin", "grasped": False},
+                }
             },
             headers=auth_headers,
         )

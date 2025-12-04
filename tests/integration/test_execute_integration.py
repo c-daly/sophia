@@ -12,6 +12,12 @@ pytestmark = [
     pytest.mark.integration,
 ]
 
+# Common goal payload for tests - goal must be a dict, not a string
+GOAL_PAYLOAD = {
+    "description": "move red_block to bin",
+    "target_state": "red_block_in_bin",
+}
+
 
 class TestExecuteIntegration:
     """Integration tests for the /execute endpoint."""
@@ -21,7 +27,7 @@ class TestExecuteIntegration:
         # First create a plan
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         assert plan_response.status_code == 201
@@ -51,7 +57,7 @@ class TestExecuteIntegration:
         # Create and execute plan in dry run mode
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -75,7 +81,7 @@ class TestExecuteIntegration:
         """Test that /execute returns results for each plan step."""
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -92,14 +98,14 @@ class TestExecuteIntegration:
 
         data = response.json()
         assert "results" in data
-        if plan_data.get("steps"):
-            assert len(data["results"]) == len(plan_data["steps"])
+        if plan_data.get("plan"):
+            assert len(data["results"]) == len(plan_data["plan"])
 
     def test_execute_specific_step_index(self, http_client, auth_headers):
         """Test executing only a specific step by index."""
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -135,7 +141,7 @@ class TestExecuteIntegration:
         """Test that overall status reflects individual step results."""
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -163,7 +169,7 @@ class TestExecuteIntegration:
         """Test that /execute returns execution timestamp."""
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -185,7 +191,7 @@ class TestExecuteIntegration:
         """Test that invalid step_index returns appropriate error."""
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -211,7 +217,7 @@ class TestExecuteWorkflow:
         # Create and execute a plan
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()
@@ -241,7 +247,7 @@ class TestExecuteWorkflow:
         """Test that each execution has a unique ID."""
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         plan_data = plan_response.json()

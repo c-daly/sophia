@@ -12,6 +12,12 @@ pytestmark = [
     pytest.mark.integration,
 ]
 
+# Common goal payload for tests - goal must be a dict, not a string
+GOAL_PAYLOAD = {
+    "description": "move red_block to bin",
+    "target_state": "red_block_in_bin",
+}
+
 
 class TestPrototypeIntegration:
     """Integration tests for the prototype demonstrating the complete flow."""
@@ -36,14 +42,14 @@ class TestPrototypeIntegration:
         """Test that plan generation uses Neo4j data."""
         response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         assert response.status_code == 201
 
         data = response.json()
         assert "plan_id" in data
-        assert "steps" in data
+        assert "plan" in data
 
     def test_update_state_writes_to_neo4j(self, http_client, auth_headers, hcg_client):
         """Test that state updates are written to Neo4j."""
@@ -51,13 +57,9 @@ class TestPrototypeIntegration:
         update_response = http_client.post(
             "/state",
             json={
-                "updates": [
-                    {
-                        "node_id": "test_node",
-                        "node_type": "object",
-                        "properties": {"status": "updated"},
-                    }
-                ]
+                "state": {
+                    "test_node": {"status": "updated"},
+                }
             },
             headers=auth_headers,
         )
@@ -73,7 +75,7 @@ class TestPrototypeIntegration:
         # 2. Generate plan
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         assert plan_response.status_code == 201
@@ -93,7 +95,7 @@ class TestPrototypeIntegration:
         # 4. Verify execution result
         exec_data = exec_response.json()
         assert "execution_id" in exec_data
-        assert "status" in exec_data
+        assert "overall_status" in exec_data
 
     def test_shacl_validation_on_state_update(self, http_client, auth_headers):
         """Test that SHACL validation is applied to state updates."""
@@ -101,13 +103,9 @@ class TestPrototypeIntegration:
         response = http_client.post(
             "/state",
             json={
-                "updates": [
-                    {
-                        "node_id": "invalid_node",
-                        "node_type": "unknown_type",
-                        "properties": {},
-                    }
-                ]
+                "state": {
+                    "invalid_node": {"status": "unknown"},
+                }
             },
             headers=auth_headers,
         )
@@ -121,7 +119,7 @@ class TestPrototypeIntegration:
         # Generate a plan
         plan_response = http_client.post(
             "/plan",
-            json={"goal": "move red_block to bin"},
+            json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
         assert plan_response.status_code == 201
