@@ -29,7 +29,7 @@ def setup_test_environment():
 
     Environment variables can be set by:
       - scripts/run_integration.sh (sets NEO4J_URI, etc.)
-      - tests/e2e/stack/sophia/.env.test
+      - docker-compose.test.sophia.yml
       - Manual export before running pytest
     """
     # Set defaults only if not already set (allows override by scripts)

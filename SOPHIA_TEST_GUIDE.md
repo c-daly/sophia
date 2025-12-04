@@ -166,10 +166,12 @@ pytest tests/integration/test_prototype_integration.py -v -m integration
 Use `scripts/run_integration_stack.sh` to bring up the Neo4j + Milvus stack and execute the integration tests:
 
 ```bash
-./scripts/run_integration_stack.sh
+./scripts/test_integration.sh up
+./scripts/test_integration.sh test
+./scripts/test_integration.sh down
 ```
 
-The script uses the standardized stack from `tests/e2e/stack/sophia/` which is generated from LOGOS. Environment overrides such as `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `MILVUS_HOST`, and `MILVUS_PORT` are honored if you already have services running. The stack uses non-conflicting ports (37xxx/39xxx) to allow concurrent testing with other repos.
+The test stack is defined in `docker-compose.test.yml` (infrastructure) and `docker-compose.test.sophia.yml` (Sophia API overlay). Environment overrides such as `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `MILVUS_HOST`, and `MILVUS_PORT` are honored if you already have services running. The stack uses non-conflicting ports (37xxx/38xxx/39xxx) to allow concurrent testing with other repos.
 
 ### 6. Documentation
 

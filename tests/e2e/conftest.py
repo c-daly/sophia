@@ -41,7 +41,7 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4jtest")
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 
 # Test auth token (for endpoints requiring authentication)
-# Default matches tests/e2e/stack/sophia/docker-compose.test.yml (used by CI)
+# Default matches docker-compose.test.yml (used by CI)
 # For local dev, set SOPHIA_API_TOKEN env var to match your running stack
 TEST_AUTH_TOKEN = os.getenv("SOPHIA_API_TOKEN", "test-token-for-sophia")
 

@@ -5,16 +5,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-STACK_DIR="${REPO_ROOT}/tests/e2e/stack/sophia"
-COMPOSE_FILE="${STACK_DIR}/docker-compose.test.yml"
+COMPOSE_FILE="${REPO_ROOT}/docker-compose.test.yml"
+COMPOSE_SOPHIA="${REPO_ROOT}/docker-compose.test.sophia.yml"
 
 # Sophia uses offset ports to avoid conflicts with other LOGOS repos
 NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-37474}"
 NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-37687}"
 MILVUS_PORT="${MILVUS_PORT:-39530}"
 MILVUS_METRICS_PORT="${MILVUS_METRICS_PORT:-39091}"
+SOPHIA_PORT="${SOPHIA_PORT:-38001}"
 
-export NEO4J_HTTP_PORT NEO4J_BOLT_PORT MILVUS_PORT MILVUS_METRICS_PORT
+export NEO4J_HTTP_PORT NEO4J_BOLT_PORT MILVUS_PORT MILVUS_METRICS_PORT SOPHIA_PORT
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,7 +25,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 compose() {
-    docker compose -f "${COMPOSE_FILE}" "$@"
+    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_SOPHIA}" "$@"
 }
 
 function stop_containers_on_ports() {
