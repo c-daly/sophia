@@ -73,9 +73,12 @@ def api_token():
 
 
 @pytest.fixture
-def app(api_token):
+def app(api_token, neo4j_uri, neo4j_username, neo4j_password):
     """Create test application."""
     os.environ["SOPHIA_API_TOKEN"] = api_token
+    os.environ["NEO4J_URI"] = neo4j_uri
+    os.environ["NEO4J_USER"] = neo4j_username
+    os.environ["NEO4J_PASSWORD"] = neo4j_password
     return create_app()
 
 

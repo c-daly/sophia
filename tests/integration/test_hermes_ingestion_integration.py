@@ -53,12 +53,11 @@ def hcg_client(neo4j_uri, neo4j_username, neo4j_password):
 
 
 @pytest.fixture
-def app():
+def app(neo4j_uri, neo4j_username, neo4j_password):
     """Create test application."""
-    # Use offset ports for sophia test stack
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:37687")
-    os.environ.setdefault("NEO4J_USER", "neo4j")
-    os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
+    os.environ["NEO4J_URI"] = neo4j_uri
+    os.environ["NEO4J_USER"] = neo4j_username
+    os.environ["NEO4J_PASSWORD"] = neo4j_password
     return create_app()
 
 

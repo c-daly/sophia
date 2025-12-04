@@ -58,14 +58,14 @@ def api_token():
 
 
 @pytest.fixture
-def app(api_token):
+def app(api_token, neo4j_uri, neo4j_username, neo4j_password):
     """Create test application with Neo4j seeding."""
     os.environ["SOPHIA_API_TOKEN"] = api_token
+    os.environ["NEO4J_URI"] = neo4j_uri
+    os.environ["NEO4J_USER"] = neo4j_username
+    os.environ["NEO4J_PASSWORD"] = neo4j_password
     os.environ["SEED_PICK_AND_PLACE_DATA"] = "true"
     os.environ["CLEAR_BEFORE_SEED"] = "true"
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:37687")
-    os.environ.setdefault("NEO4J_USER", "neo4j")
-    os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
     return create_app()
 
 

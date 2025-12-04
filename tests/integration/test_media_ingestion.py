@@ -119,10 +119,7 @@ def test_app(api_token, temp_storage_dir):
     """Create test FastAPI application with real Neo4j."""
     os.environ["SOPHIA_API_TOKEN"] = api_token
     os.environ["MEDIA_STORAGE_ROOT"] = str(temp_storage_dir)
-    # Use real Neo4j from docker-compose.test.yml
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
-    os.environ.setdefault("NEO4J_USER", "neo4j")
-    os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
+    # NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD should be set by CI or test runner
     return create_app()
 
 

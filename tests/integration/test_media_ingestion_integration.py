@@ -32,11 +32,8 @@ def test_token():
 @pytest.fixture
 def client(test_token):
     """Create FastAPI test client with lifespan context."""
-    # Default ports match docker-compose.test.yml (7687)
-    # CI can override via env vars if needed
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
-    os.environ.setdefault("NEO4J_USER", "neo4j")
-    os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
+    # NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD should be set by CI or test runner
+    # Default port is 37687 for test stack to avoid conflicts
     os.environ.setdefault("MEDIA_STORAGE_ROOT", "./test_media_storage")
     os.environ["SOPHIA_API_TOKEN"] = test_token
 

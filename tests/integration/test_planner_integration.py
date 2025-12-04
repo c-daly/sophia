@@ -25,7 +25,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def neo4j_uri():
     """Neo4j connection URI."""
-    return os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    return os.getenv("NEO4J_URI", "bolt://localhost:37687")
 
 
 @pytest.fixture

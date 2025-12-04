@@ -33,9 +33,8 @@ def setup_test_environment():
       - Manual export before running pytest
     """
     # Set defaults only if not already set (allows override by scripts)
-    os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
-    os.environ.setdefault("NEO4J_USER", "neo4j")
-    os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
+    # Note: NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD should be set by CI or test runner
+    # Do not set defaults here - let the neo4j_uri fixtures handle defaults
     os.environ.setdefault("SOPHIA_API_TOKEN", "test-token-12345")
 
     yield
