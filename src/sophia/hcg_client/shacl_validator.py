@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, List, Optional
 from pyshacl import validate
-from rdflib import Graph, Namespace, Literal
+from rdflib import Graph, Namespace, Literal, XSD
 from rdflib.namespace import RDF, RDFS, SH
 
 
@@ -120,9 +120,9 @@ class SHACLValidator:
         g.add((confidence_prop, RDF.type, SH.PropertyShape))
         g.add((confidence_prop, SH.path, ex.confidence))
         g.add((confidence_prop, SH.minCount, Literal(1)))
-        g.add((confidence_prop, SH.datatype, RDFS.Literal))
-        g.add((confidence_prop, SH.minInclusive, Literal(0.0)))
-        g.add((confidence_prop, SH.maxInclusive, Literal(1.0)))
+        g.add((confidence_prop, SH.datatype, XSD.double))
+        g.add((confidence_prop, SH.minInclusive, Literal(0.0, datatype=XSD.double)))
+        g.add((confidence_prop, SH.maxInclusive, Literal(1.0, datatype=XSD.double)))
 
         # Proposed Plan Step shape
         plan_step_shape = ex.ProposedPlanStepShape
@@ -239,7 +239,15 @@ class SHACLValidator:
 
         if "properties" in node_data:
             for key, value in node_data["properties"].items():
-                g.add((node_uri, ex[key], Literal(str(value))))
+                # Preserve numeric types for SHACL validation
+                if isinstance(value, float):
+                    g.add((node_uri, ex[key], Literal(value, datatype=XSD.double)))
+                elif isinstance(value, int):
+                    g.add((node_uri, ex[key], Literal(value, datatype=XSD.integer)))
+                elif isinstance(value, bool):
+                    g.add((node_uri, ex[key], Literal(value, datatype=XSD.boolean)))
+                else:
+                    g.add((node_uri, ex[key], Literal(str(value))))
 
         return g
 

@@ -18,6 +18,10 @@ pytestmark = pytest.mark.unit
 def client(monkeypatch: pytest.MonkeyPatch) -> HCGClient:
     """Instantiate HCGClient with a mocked Neo4j driver."""
 
+    # Clear environment variables to isolate unit tests
+    monkeypatch.delenv("MILVUS_HOST", raising=False)
+    monkeypatch.delenv("MILVUS_PORT", raising=False)
+
     mock_driver = MagicMock()
     mock_driver.verify_connectivity.return_value = True
 
