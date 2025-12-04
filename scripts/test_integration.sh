@@ -13,14 +13,17 @@ NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-37474}"
 NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-37687}"
 MILVUS_PORT="${MILVUS_PORT:-39530}"
 MILVUS_METRICS_PORT="${MILVUS_METRICS_PORT:-39091}"
+SOPHIA_PORT="${SOPHIA_PORT:-38001}"
 
 NEO4J_CONTAINER="${NEO4J_CONTAINER:-sophia-test-neo4j}"
 MILVUS_CONTAINER="${MILVUS_CONTAINER:-sophia-test-milvus}"
+SOPHIA_CONTAINER="${SOPHIA_CONTAINER:-sophia-test-api}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
 NEO4J_PASSWORD="${NEO4J_PASSWORD:-neo4jtest}"
+SOPHIA_API_TOKEN="${SOPHIA_API_TOKEN:-test-token-for-sophia}"
 
-export NEO4J_HTTP_PORT NEO4J_BOLT_PORT MILVUS_PORT MILVUS_METRICS_PORT
-export NEO4J_CONTAINER MILVUS_CONTAINER NEO4J_USER NEO4J_PASSWORD
+export NEO4J_HTTP_PORT NEO4J_BOLT_PORT MILVUS_PORT MILVUS_METRICS_PORT SOPHIA_PORT
+export NEO4J_CONTAINER MILVUS_CONTAINER SOPHIA_CONTAINER NEO4J_USER NEO4J_PASSWORD SOPHIA_API_TOKEN
 
 # Colors for output
 RED='\033[0;31m'
@@ -49,6 +52,7 @@ function print_usage() {
     echo "Port Configuration (Sophia uses offset ports):"
     echo "  Neo4j:  ${NEO4J_BOLT_PORT} (bolt), ${NEO4J_HTTP_PORT} (http)"
     echo "  Milvus: ${MILVUS_PORT} (grpc), ${MILVUS_METRICS_PORT} (health)"
+    echo "  Sophia: ${SOPHIA_PORT} (API)"
     echo ""
     echo "Examples:"
     echo "  $0                  # Run full test (start, seed, test)"
@@ -64,6 +68,7 @@ function stop_containers_on_ports() {
         "${NEO4J_BOLT_PORT}"
         "${MILVUS_PORT}"
         "${MILVUS_METRICS_PORT}"
+        "${SOPHIA_PORT}"
     )
     for port in "${ports[@]}"; do
         local container=$(docker ps --format '{{.ID}}' --filter "publish=${port}" 2>/dev/null)
@@ -118,6 +123,23 @@ function start_services() {
     if [ $attempt -gt $max_attempts ]; then
         echo -e "${RED}✗ Not ready (timeout)${NC}"
     fi
+    
+    # Check Sophia API
+    echo -n "Sophia API: "
+    max_attempts=60
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        if curl -s -f "http://localhost:${SOPHIA_PORT}/health" > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Ready${NC}"
+            break
+        fi
+        echo -n "."
+        sleep 2
+        ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+        echo -e "${RED}✗ Not ready (timeout)${NC}"
+    fi
 }
 
 function stop_services() {
@@ -146,6 +168,13 @@ function check_status() {
     
     echo -n "Milvus (localhost:${MILVUS_PORT}): "
     if curl -s -f "http://localhost:${MILVUS_METRICS_PORT}/healthz" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Healthy${NC}"
+    else
+        echo -e "${RED}✗ Unhealthy${NC}"
+    fi
+    
+    echo -n "Sophia API (localhost:${SOPHIA_PORT}): "
+    if curl -s -f "http://localhost:${SOPHIA_PORT}/health" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Healthy${NC}"
     else
         echo -e "${RED}✗ Unhealthy${NC}"
@@ -193,9 +222,12 @@ function run_tests() {
     export NEO4J_USER NEO4J_PASSWORD
     export MILVUS_HOST="localhost"
     export MILVUS_PORT
+    export SOPHIA_URL="http://localhost:${SOPHIA_PORT}"
+    export SOPHIA_API_TOKEN
     
     echo -e "${YELLOW}NEO4J_URI=${NEO4J_URI}${NC}"
     echo -e "${YELLOW}MILVUS_HOST=localhost:${MILVUS_PORT}${NC}"
+    echo -e "${YELLOW}SOPHIA_URL=${SOPHIA_URL}${NC}"
 
     set +e
     poetry run pytest tests/integration/ -v --tb=short
