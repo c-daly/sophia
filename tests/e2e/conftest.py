@@ -147,3 +147,8 @@ def unique_id() -> str:
 def test_timestamp() -> str:
     """ISO timestamp for test data."""
     return datetime.now(timezone.utc).isoformat()
+
+
+# Note: Media cleanup would go here once a DELETE /media/samples/{id} endpoint exists.
+# For now, media_storage/ is in .gitignore and can be cleaned manually or via:
+#   rm -rf media_storage/*

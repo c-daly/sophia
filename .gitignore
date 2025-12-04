@@ -56,6 +56,10 @@ dmypy.json
 data/
 !tests/data/
 
+# Media storage (runtime uploads)
+media_storage/
+test_media_storage/
+
 # Logs
 *.log
 logs/
