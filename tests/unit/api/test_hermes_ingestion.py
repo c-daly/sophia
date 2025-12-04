@@ -1,4 +1,8 @@
-"""Tests for Hermes proposal ingestion endpoint."""
+"""Unit tests for Hermes proposal ingestion endpoint.
+
+These tests use mocks to verify endpoint behavior in isolation.
+For tests with real Neo4j, see tests/integration/test_hermes_ingestion_integration.py
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +12,7 @@ from datetime import datetime, timezone
 from sophia.api.app import create_app
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
