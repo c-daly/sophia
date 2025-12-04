@@ -1085,6 +1085,21 @@ def create_app() -> FastAPI:
             )
 
         try:
+            # Validate that the plan exists in Neo4j
+            if _hcg_client:
+                plan_node = _hcg_client.get_node(request.plan_id)
+                if not plan_node:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Plan not found: {request.plan_id}",
+                    )
+            else:
+                # If HCG client is not available, we can't validate the plan
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="HCG client not available to validate plan",
+                )
+
             execution_id = str(uuid.uuid4())
             results: List[ExecutionResult] = []
 
