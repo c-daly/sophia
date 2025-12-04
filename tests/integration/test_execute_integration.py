@@ -151,7 +151,13 @@ class TestExecuteIntegration:
         assert response.status_code == 201
 
         data = response.json()
-        assert data["overall_status"] in ["success", "partial", "failed", "pending", "simulated"]
+        assert data["overall_status"] in [
+            "success",
+            "partial",
+            "failed",
+            "pending",
+            "simulated",
+        ]
 
     def test_execute_returns_timestamp(self, http_client, auth_headers):
         """Test that /execute returns execution timestamp."""
