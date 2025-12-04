@@ -1,11 +1,61 @@
 # Sophia Test Guide
 
-The `tests/` tree is organized by the parts of the system it protects instead of
-milestones or project phases. Use this guide to find the suite that exercises
-the code you are changing.
+The `tests/` tree is organized into three tiers following the test pyramid:
 
-Most suites can be run with `poetry run pytest <path>`. Long-running tests (for
-example, the prototype integration flow) are called out explicitly.
+| Directory | Purpose | Dependencies | Run Time |
+|-----------|---------|--------------|----------|
+| `tests/unit/` | Fast, isolated tests with mocks | None | ~5s |
+| `tests/integration/` | Real service tests | Neo4j, Milvus | ~30s |
+| `tests/e2e/` | Full workflow tests | Full stack | ~60s |
+
+## Test Organization
+
+### Unit Tests (`tests/unit/`)
+
+Fast tests that verify isolated logic. Mocking external services is appropriate here.
+
+```bash
+poetry run pytest tests/unit/ -v
+```
+
+| Module | What it tests |
+|--------|---------------|
+| `unit/media/` | File validation, endpoint routing (mocked) |
+| `unit/api/` | API endpoint behavior (mocked) |
+| `unit/jepa/` | JEPA runner output format, model construction |
+| `unit/cwm_state/` | CWMState envelope format validation |
+| `unit/error_handling/` | Service failure scenarios (mocked) |
+| `unit/hcg_client/` | HCG client wrapper logic |
+| Other unit dirs | Orchestrator, executor, planner, cwm_a, cwm_g |
+
+### Integration Tests (`tests/integration/`)
+
+Tests that run against real Neo4j and Milvus. **No mocking of these services.**
+
+```bash
+# Start services first
+./scripts/run_integration.sh up
+
+# Run integration tests
+poetry run pytest tests/integration/ -v
+```
+
+| File | What it tests |
+|------|---------------|
+| `test_prototype_integration.py` | Full plan/state API flow |
+| `test_media_ingestion_integration.py` | Media ingest with real Neo4j |
+| `test_hermes_ingestion_integration.py` | Hermes proposal ingest |
+| `test_planner_integration.py` | Planner with real graph |
+| `test_execute_integration.py` | Execution with real state |
+| `test_media_storage.py` | Real file operations |
+
+### E2E Tests (`tests/e2e/`)
+
+Full workflow tests requiring the complete stack.
+
+```bash
+poetry run pytest tests/e2e/ -v
+```
 
 ## CI Testing Behavior
 

@@ -1,4 +1,8 @@
-"""Tests for CWMState unified envelope validation."""
+"""Unit tests for CWMState unified envelope validation.
+
+These tests validate the structure and format of CWMState envelopes
+returned by JEPARunner. No external services needed.
+"""
 
 import pytest
 from datetime import datetime
@@ -8,7 +12,7 @@ from sophia.jepa.runner import JEPARunner
 from sophia.jepa.models import SimulationContext, Entity
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

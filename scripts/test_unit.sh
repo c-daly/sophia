@@ -16,10 +16,13 @@ NC='\033[0m' # No Color
 cd "${REPO_ROOT}"
 
 echo -e "${BLUE}Running Sophia unit tests...${NC}"
+echo -e "${YELLOW}These tests run without external services (Neo4j, Milvus)${NC}"
+echo ""
 
-# Run unit tests (exclude integration and e2e)
-poetry run pytest tests/ \
-    -m "not integration" \
-    --ignore=tests/integration/ \
-    --ignore=tests/e2e/ \
-    -v --tb=short "$@"
+# Run unit tests only - these don't require any services
+poetry run pytest tests/unit/ -v --tb=short "$@"
+
+echo ""
+echo -e "${GREEN}Unit tests complete.${NC}"
+echo -e "To run integration tests: ${BLUE}./scripts/test_integration.sh${NC}"
+echo -e "To run all tests:         ${BLUE}./scripts/test_all.sh${NC}"
