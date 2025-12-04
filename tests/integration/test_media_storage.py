@@ -10,14 +10,16 @@ For API endpoint tests with mocks (unit tests), see tests/unit/media/test_endpoi
 import io
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, AsyncMock
-from PIL import Image
+from starlette.datastructures import UploadFile
 
 from sophia.storage.media_storage import MediaStorageService
 from sophia.models.media_models import MediaType
 
 
 pytestmark = pytest.mark.integration
+
+# Path to test fixtures
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 
 # Fixtures
@@ -38,51 +40,69 @@ def media_storage_service(temp_storage_dir):
 
 
 @pytest.fixture
-def sample_image_file():
-    """Create sample image file in memory."""
-    img = Image.new("RGB", (800, 600), color="red")
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG")
-    buffer.seek(0)
-    return buffer
+def test_image_path():
+    """Path to real test image fixture."""
+    path = FIXTURES_DIR / "test_image.jpg"
+    assert path.exists(), f"Test fixture not found: {path}"
+    return path
 
 
 @pytest.fixture
-def mock_upload_file(sample_image_file):
-    """Create mock UploadFile for storage tests."""
-    upload_file = Mock()
-    upload_file.filename = "test_image.jpg"
-    upload_file.read = AsyncMock(return_value=sample_image_file.read())
-    return upload_file
+def real_upload_file(test_image_path):
+    """Create a real UploadFile from test fixture.
+
+    This uses the actual file from tests/fixtures/ for realistic testing.
+    The file is opened, used, and cleaned up after the test.
+    """
+    with open(test_image_path, "rb") as f:
+        content = f.read()
+
+    # Create UploadFile with real file content
+    file_obj = io.BytesIO(content)
+    upload = UploadFile(filename="test_image.jpg", file=file_obj)
+    yield upload
+    # Cleanup: close the file object
+    file_obj.close()
 
 
 # File Storage Tests
 
 
 @pytest.mark.asyncio
-async def test_store_file(media_storage_service, mock_upload_file):
-    """Test file storage to disk."""
+async def test_store_file(media_storage_service, real_upload_file, temp_storage_dir):
+    """Test file storage to disk with real file upload.
+
+    Uses a real test image from fixtures, stores it, and verifies:
+    - File is stored with correct extension
+    - File size matches original
+    - File exists on disk
+    - File is cleaned up after test (via tmp_path)
+    """
     sample_id, file_path, file_size = await media_storage_service.store_file(
-        mock_upload_file, MediaType.IMAGE
+        real_upload_file, MediaType.IMAGE
     )
 
     assert sample_id is not None
+    assert sample_id.startswith("ms_")  # media storage prefix
     assert "image" in file_path
     assert file_path.endswith(".jpg")
     assert file_size > 0
+    assert file_size == 8230  # exact size of our test fixture
     assert Path(file_path).exists()
 
+    # Verify the stored file is a valid image
+    from PIL import Image
 
-def test_extract_image_metadata(
-    media_storage_service, sample_image_file, temp_storage_dir
-):
-    """Test metadata extraction from image."""
-    # Save test image
-    image_path = temp_storage_dir / "test_image.jpg"
-    with open(image_path, "wb") as f:
-        f.write(sample_image_file.read())
+    with Image.open(file_path) as img:
+        assert img.size == (800, 600)
+        assert img.format == "JPEG"
 
-    metadata = media_storage_service.extract_metadata(str(image_path), MediaType.IMAGE)
+
+def test_extract_image_metadata(media_storage_service, test_image_path):
+    """Test metadata extraction from real image fixture."""
+    metadata = media_storage_service.extract_metadata(
+        str(test_image_path), MediaType.IMAGE
+    )
 
     assert metadata.width == 800
     assert metadata.height == 600
