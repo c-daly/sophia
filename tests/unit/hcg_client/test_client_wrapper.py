@@ -107,6 +107,12 @@ def test_health_check_uses_session(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """health_check should report Neo4j health and Milvus health (True when not configured)."""
+    # Ensure no Milvus env vars interfere with test
+    monkeypatch.delenv("MILVUS_HOST", raising=False)
+    monkeypatch.delenv("MILVUS_PORT", raising=False)
+    # Clear milvus config on client
+    monkeypatch.setattr(client, "_milvus_host", None)
+    monkeypatch.setattr(client, "_milvus_port", None)
 
     @contextmanager
     def fake_session() -> Iterator[MagicMock]:

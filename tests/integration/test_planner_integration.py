@@ -268,7 +268,7 @@ class TestPlannerWithState:
         # First, get the current state
         state_response = client.get("/state", headers=auth_headers)
         assert state_response.status_code == 200
-        initial_state = state_response.json()
+        _initial_state = state_response.json()
 
         # Generate a plan
         plan_response = client.post(
@@ -292,7 +292,7 @@ class TestPlannerWithState:
     def test_plan_after_state_update(self, client, auth_headers):
         """Test that planner adapts to updated state."""
         # Update state to indicate red_block is already grasped
-        update_response = client.post(
+        _update_response = client.post(
             "/state",
             json={
                 "state": {
@@ -303,7 +303,7 @@ class TestPlannerWithState:
             headers=auth_headers,
         )
         # May succeed or fail validation - either is acceptable
-        
+
         # Generate plan for same goal
         plan_response = client.post(
             "/plan",

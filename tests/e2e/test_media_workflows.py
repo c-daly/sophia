@@ -98,7 +98,9 @@ def sample_video():
 class TestMediaUploadWorkflow:
     """E2E tests for media upload workflow."""
 
-    def test_image_upload_complete_workflow(self, client, auth_headers, sample_image, hcg_client):
+    def test_image_upload_complete_workflow(
+        self, client, auth_headers, sample_image, hcg_client
+    ):
         """Test complete image upload → process → verify workflow."""
         # Step 1: Upload image
         upload_response = client.post(
@@ -110,16 +112,16 @@ class TestMediaUploadWorkflow:
         assert upload_response.status_code == 201
         result = upload_response.json()
         sample_id = result["sample_id"]
-        
+
         # Step 2: Verify metadata was extracted
         assert "metadata" in result
         assert result["media_type"] == "image"
-        
+
         # Step 3: Verify persisted to Neo4j
         media_node = hcg_client.get_node(sample_id)
         assert media_node is not None
         assert media_node["type"] == "media_sample"
-        
+
         # Step 4: Retrieve via API
         get_response = client.get(
             f"/media/samples/{sample_id}",
@@ -142,9 +144,12 @@ class TestMediaUploadWorkflow:
         )
         assert upload_response.status_code == 201
         result = upload_response.json()
-        
+
         # Verify question was recorded
-        assert result.get("question") == "Will the ball clear the obstacle?" or "embeddings" in result
+        assert (
+            result.get("question") == "Will the ball clear the obstacle?"
+            or "embeddings" in result
+        )
 
     def test_media_list_pagination(self, client, auth_headers, sample_image):
         """Test media listing with pagination."""
@@ -157,7 +162,7 @@ class TestMediaUploadWorkflow:
                 data={"media_type": "image"},
                 headers=auth_headers,
             )
-        
+
         # List with pagination
         list_response = client.get(
             "/media/samples?limit=2&offset=0",
@@ -166,7 +171,7 @@ class TestMediaUploadWorkflow:
         assert list_response.status_code == 200
         page1 = list_response.json()
         assert len(page1["samples"]) <= 2
-        
+
         # Get next page
         list_response2 = client.get(
             "/media/samples?limit=2&offset=2",
@@ -184,7 +189,7 @@ class TestMediaUploadWorkflow:
             data={"media_type": "image"},
             headers=auth_headers,
         )
-        
+
         # Filter by image type
         list_response = client.get(
             "/media/samples?media_type=image",
@@ -192,7 +197,7 @@ class TestMediaUploadWorkflow:
         )
         assert list_response.status_code == 200
         results = list_response.json()
-        
+
         # All results should be images
         for sample in results.get("samples", []):
             assert sample["media_type"] == "image"
@@ -201,7 +206,9 @@ class TestMediaUploadWorkflow:
 class TestMediaToSimulationWorkflow:
     """E2E tests for media → simulation pipeline."""
 
-    def test_upload_then_simulate_with_reference(self, client, auth_headers, sample_image):
+    def test_upload_then_simulate_with_reference(
+        self, client, auth_headers, sample_image
+    ):
         """Test uploading media then using it in simulation."""
         # Step 1: Upload media
         sample_image.seek(0)
@@ -216,7 +223,7 @@ class TestMediaToSimulationWorkflow:
         )
         assert upload_response.status_code == 201
         sample_id = upload_response.json()["sample_id"]
-        
+
         # Step 2: Run simulation referencing the media
         simulate_response = client.post(
             "/simulate",
@@ -236,14 +243,14 @@ class TestMediaToSimulationWorkflow:
         )
         assert simulate_response.status_code == 201
         simulation = simulate_response.json()
-        
+
         # Simulation should use embeddings from media
         assert len(simulation["imagined_states"]) == 5
 
     def test_batch_media_processing(self, client, auth_headers, sample_image):
         """Test processing multiple media files for simulation."""
         sample_ids = []
-        
+
         # Upload multiple frames
         for i in range(3):
             sample_image.seek(0)
@@ -255,9 +262,9 @@ class TestMediaToSimulationWorkflow:
             )
             if response.status_code == 201:
                 sample_ids.append(response.json()["sample_id"])
-        
+
         assert len(sample_ids) >= 1, "At least one upload should succeed"
-        
+
         # Use first sample in simulation
         simulate_response = client.post(
             "/simulate",
@@ -277,14 +284,14 @@ class TestMediaErrorHandling:
     def test_invalid_media_type_rejected(self, client, auth_headers):
         """Test that invalid media types are rejected."""
         fake_file = io.BytesIO(b"not a real image")
-        
+
         response = client.post(
             "/ingest/media",
             files={"file": ("test.xyz", fake_file, "application/octet-stream")},
             data={"media_type": "image"},
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 400
 
     def test_missing_file_rejected(self, client, auth_headers):
@@ -294,7 +301,7 @@ class TestMediaErrorHandling:
             data={"media_type": "image"},
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 422
 
     def test_get_nonexistent_sample(self, client, auth_headers):
@@ -303,7 +310,7 @@ class TestMediaErrorHandling:
             "/media/samples/nonexistent_sample_xyz",
             headers=auth_headers,
         )
-        
+
         assert response.status_code == 404
 
     def test_upload_requires_auth(self, client, sample_image):
@@ -314,6 +321,6 @@ class TestMediaErrorHandling:
             files={"file": ("test.jpg", sample_image, "image/jpeg")},
             data={"media_type": "image"},
         )
-        
+
         # Should require auth (403) or the endpoint may not require auth (201)
         assert response.status_code in [201, 403]

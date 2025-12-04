@@ -81,7 +81,7 @@ class TestGoalToPlanToExecuteWorkflow:
 
     def test_pick_and_place_complete_workflow(self, client, auth_headers, hcg_client):
         """Test complete pick-and-place workflow from goal to execution.
-        
+
         Workflow:
         1. Verify initial state (red_block on table)
         2. Submit goal (red_block in bin)
@@ -93,10 +93,10 @@ class TestGoalToPlanToExecuteWorkflow:
         state_response = client.get("/state", headers=auth_headers)
         assert state_response.status_code == 200
         initial_state = state_response.json()["state"]
-        
+
         # Verify red_block starts on table
         assert "red_block" in initial_state or initial_state == {}
-        
+
         # Step 2: Submit planning goal
         plan_response = client.post(
             "/plan",
@@ -112,13 +112,17 @@ class TestGoalToPlanToExecuteWorkflow:
         plan = plan_response.json()
         plan_id = plan["plan_id"]
         steps = plan["steps"]
-        
+
         # Step 3: Verify plan structure
-        assert len(steps) == 4, f"Expected 4 steps (MOVE→GRASP→MOVE→RELEASE), got {len(steps)}"
+        assert (
+            len(steps) == 4
+        ), f"Expected 4 steps (MOVE→GRASP→MOVE→RELEASE), got {len(steps)}"
         expected_actions = ["MOVE", "GRASP", "MOVE", "RELEASE"]
         actual_actions = [step.get("action_type") for step in steps]
-        assert actual_actions == expected_actions, f"Expected {expected_actions}, got {actual_actions}"
-        
+        assert (
+            actual_actions == expected_actions
+        ), f"Expected {expected_actions}, got {actual_actions}"
+
         # Step 4: Execute plan
         execute_response = client.post(
             "/execute",
@@ -128,19 +132,19 @@ class TestGoalToPlanToExecuteWorkflow:
         assert execute_response.status_code == 201
         execution = execute_response.json()
         assert execution["overall_status"] == "success"
-        
+
         # Step 5: Verify final state
         final_state_response = client.get("/state", headers=auth_headers)
         assert final_state_response.status_code == 200
         final_state = final_state_response.json()["state"]
-        
+
         # Red block should now be in bin
         if "red_block" in final_state:
             assert final_state["red_block"]["location"] == "bin"
 
     def test_plan_simulate_then_execute(self, client, auth_headers):
         """Test workflow: plan → simulate → refine → execute.
-        
+
         Uses imagination/simulation to preview plan outcomes
         before actual execution.
         """
@@ -157,7 +161,7 @@ class TestGoalToPlanToExecuteWorkflow:
         )
         assert plan_response.status_code == 201
         plan = plan_response.json()
-        
+
         # Step 2: Simulate plan execution
         simulate_response = client.post(
             "/simulate",
@@ -180,11 +184,11 @@ class TestGoalToPlanToExecuteWorkflow:
         )
         assert simulate_response.status_code == 201
         simulation = simulate_response.json()
-        
+
         # Verify simulation predicts successful outcome
         assert simulation["overall_confidence"] > 0.5
         assert len(simulation["imagined_states"]) > 0
-        
+
         # Step 3: Execute plan (now confident from simulation)
         execute_response = client.post(
             "/execute",
@@ -208,7 +212,7 @@ class TestGoalToPlanToExecuteWorkflow:
         )
         assert plan_response.status_code == 201
         plan_id = plan_response.json()["plan_id"]
-        
+
         # Dry run first
         dry_run_response = client.post(
             "/execute",
@@ -218,7 +222,7 @@ class TestGoalToPlanToExecuteWorkflow:
         assert dry_run_response.status_code == 201
         dry_result = dry_run_response.json()
         assert dry_result["overall_status"] == "simulated"
-        
+
         # Now execute for real
         execute_response = client.post(
             "/execute",
@@ -243,23 +247,23 @@ class TestStateLifecycleWorkflow:
                 "weight": 1.5,
             }
         }
-        
+
         write_response = client.post(
             "/state",
             json={"state": new_state},
             headers=auth_headers,
         )
         assert write_response.status_code == 200
-        
+
         # Read state back via API
         read_response = client.get("/state", headers=auth_headers)
         assert read_response.status_code == 200
         api_state = read_response.json()["state"]
-        
+
         # Verify via direct Neo4j query
         neo4j_state = hcg_client.get_node("current_state")
         assert neo4j_state is not None
-        
+
         # States should match
         if "test_object" in api_state:
             assert api_state["test_object"]["location"] == "shelf_a"
@@ -269,20 +273,16 @@ class TestStateLifecycleWorkflow:
         # Update state
         update_response = client.post(
             "/state",
-            json={
-                "state": {
-                    "envelope_test_object": {"status": "created"}
-                }
-            },
+            json={"state": {"envelope_test_object": {"status": "created"}}},
             headers=auth_headers,
         )
         assert update_response.status_code == 200
-        
+
         # Query CWM history
         cwm_response = client.get("/state/cwm", headers=auth_headers)
         assert cwm_response.status_code == 200
         cwm_data = cwm_response.json()
-        
+
         # Should have at least one state envelope
         assert cwm_data["total"] > 0 or len(cwm_data["states"]) > 0
 
@@ -311,14 +311,14 @@ class TestSimulationWorkflow:
         assert simulate_response.status_code == 201
         simulation = simulate_response.json()
         simulation_id = simulation["simulation_id"]
-        
+
         # Verify imagined states were created
         assert len(simulation["imagined_states"]) == 5
-        
+
         # Query Neo4j for persisted simulation
-        sim_node = hcg_client.get_node(simulation_id)
+        _sim_node = hcg_client.get_node(simulation_id)
         # Simulation may or may not be persisted as a node depending on implementation
-        
+
         # Verify imagined states have decreasing confidence
         confidences = [s["confidence"] for s in simulation["imagined_states"]]
         for i in range(len(confidences) - 1):
@@ -343,7 +343,7 @@ class TestSimulationWorkflow:
             },
             headers=auth_headers,
         )
-        
+
         # Should succeed (sample may not exist, but request is valid)
         assert simulate_response.status_code in [201, 404]
 
@@ -373,17 +373,17 @@ class TestCrossServiceWorkflow:
                 }
             ],
         }
-        
+
         ingest_response = client.post(
             "/ingest/hermes_proposal",
             json=proposal,
         )
         assert ingest_response.status_code == 201
         result = ingest_response.json()
-        
+
         # Verify proposal was stored
         assert "proposal_node_id" in result
-        
+
         # Verify in Neo4j
         proposal_node = hcg_client.get_node(result["proposal_node_id"])
         assert proposal_node is not None
@@ -392,7 +392,7 @@ class TestCrossServiceWorkflow:
     def test_concurrent_operations(self, client, auth_headers):
         """Test concurrent planning and simulation don't interfere."""
         import concurrent.futures
-        
+
         def run_plan():
             return client.post(
                 "/plan",
@@ -404,7 +404,7 @@ class TestCrossServiceWorkflow:
                 },
                 headers=auth_headers,
             )
-        
+
         def run_simulate():
             return client.post(
                 "/simulate",
@@ -414,19 +414,19 @@ class TestCrossServiceWorkflow:
                 },
                 headers=auth_headers,
             )
-        
+
         # Run concurrently
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             plan_future = executor.submit(run_plan)
             sim_future = executor.submit(run_simulate)
-            
+
             plan_result = plan_future.result()
             sim_result = sim_future.result()
-        
+
         # Both should succeed or fail gracefully (no crashes)
         assert plan_result.status_code in [200, 201, 503]
         assert sim_result.status_code in [200, 201, 503]
-        
+
         # If both succeeded, verify they have different IDs
         if plan_result.status_code == 201 and sim_result.status_code == 201:
             plan_id = plan_result.json().get("plan_id")
@@ -442,7 +442,7 @@ class TestErrorRecoveryWorkflow:
         # Health check should always work
         response = client.get("/health")
         assert response.status_code == 200
-        
+
         data = response.json()
         assert "status" in data
         assert "components" in data
@@ -455,10 +455,10 @@ class TestErrorRecoveryWorkflow:
             json={"plan_id": "non_existent_plan_id_12345"},
             headers=auth_headers,
         )
-        
+
         # Should fail gracefully, not crash
         assert response.status_code in [400, 404, 500]
-        
+
         # System should still be responsive
         health_response = client.get("/health")
         assert health_response.status_code == 200

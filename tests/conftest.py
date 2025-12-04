@@ -11,7 +11,9 @@ import pytest
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "unit: Unit tests (no external services)")
-    config.addinivalue_line("markers", "integration: Integration tests (requires Neo4j/Milvus)")
+    config.addinivalue_line(
+        "markers", "integration: Integration tests (requires Neo4j/Milvus)"
+    )
     config.addinivalue_line("markers", "e2e: End-to-end tests (full stack)")
     config.addinivalue_line("markers", "slow: Slow tests (skipped by default)")
 
@@ -19,12 +21,12 @@ def pytest_configure(config):
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Set up consistent environment variables for all tests.
-    
+
     Tests assume infrastructure (Neo4j, Milvus) is already running and seeded.
     Use scripts/run_integration.sh for automated setup, or manually:
       docker compose -f docker-compose.test.yml up -d
       python scripts/seed_test_data.py
-    
+
     Environment variables can be set by:
       - scripts/run_integration.sh (sets NEO4J_URI, etc.)
       - tests/e2e/stack/sophia/.env.test
@@ -35,7 +37,7 @@ def setup_test_environment():
     os.environ.setdefault("NEO4J_USER", "neo4j")
     os.environ.setdefault("NEO4J_PASSWORD", "neo4jtest")
     os.environ.setdefault("SOPHIA_API_TOKEN", "test-token-12345")
-    
+
     yield
 
 
