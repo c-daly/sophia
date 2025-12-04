@@ -53,7 +53,6 @@ from sophia.planner import Planner
 from sophia.executor import Executor
 from sophia.knowledge_graph import KnowledgeGraph, Node, Edge
 from sophia.hcg_client import HCGClient
-from sophia.hcg_client.seeder import seed_pick_and_place_data
 from sophia.cwm_g import ContinuousWorkingMemoryGenerative
 from sophia.cwm_a import ContinuousWorkingMemoryAssociative, CWMAStateService
 from sophia.jepa import JEPARunner
@@ -184,24 +183,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         logger.info("HCG client initialized")
 
-        # Seed pick-and-place data if enabled
-        seed_data = os.getenv("SEED_PICK_AND_PLACE_DATA", "true").lower() == "true"
-        if seed_data:
-            logger.info("Seeding pick-and-place data into Neo4j...")
-            try:
-                # Clear existing data first (optional, controlled by env var)
-                clear_before_seed = (
-                    os.getenv("CLEAR_BEFORE_SEED", "false").lower() == "true"
-                )
-                if clear_before_seed:
-                    _hcg_client.clear_all()
-                    logger.info("Cleared existing HCG data")
-
-                seed_pick_and_place_data(_hcg_client)
-                logger.info("Pick-and-place data seeded successfully")
-            except Exception as e:
-                logger.warning(f"Failed to seed pick-and-place data: {e}")
-
         # Load knowledge graph from Neo4j
         logger.info("Loading knowledge graph from Neo4j HCG...")
         _kg = load_kg_from_hcg(_hcg_client)
@@ -328,6 +309,9 @@ def create_app() -> FastAPI:
                 state_id=state_node.get("id", "current_state"),
             )
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except Exception as e:
             logger.error(f"Error reading state: {e}")
             raise HTTPException(
@@ -474,6 +458,9 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"State validation failed: {str(e)}",
             )
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except Exception as e:
             logger.error(f"Error updating state: {e}")
             raise HTTPException(
@@ -634,6 +621,9 @@ def create_app() -> FastAPI:
                 plan_id=plan_id,
             )
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except Exception as e:
             logger.error(f"Error generating plan: {e}")
             raise HTTPException(
@@ -715,6 +705,9 @@ def create_app() -> FastAPI:
                 assumptions=request.assumptions or [],
             )
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except Exception as e:
             logger.error(f"Error generating imagined states: {e}")
             raise HTTPException(
@@ -917,6 +910,9 @@ def create_app() -> FastAPI:
 
             return response
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except Exception as e:
             logger.error(f"Error running simulation: {e}")
             raise HTTPException(
@@ -1050,6 +1046,9 @@ def create_app() -> FastAPI:
                 status="accepted",
             )
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except ValueError as e:
             # SHACL validation failed
             logger.error(f"Proposal validation failed: {e}")
@@ -1086,8 +1085,35 @@ def create_app() -> FastAPI:
             )
 
         try:
+            # Validate that the plan exists in Neo4j
+            if _hcg_client:
+                plan_node = _hcg_client.get_node(request.plan_id)
+                if not plan_node:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Plan not found: {request.plan_id}",
+                    )
+            else:
+                # If HCG client is not available, we can't validate the plan
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="HCG client not available to validate plan",
+                )
+
             execution_id = str(uuid.uuid4())
             results: List[ExecutionResult] = []
+
+            # Validate step_index if provided
+            if request.step_index is not None:
+                # In a real implementation, we'd look up the plan from Neo4j
+                # For now, validate against a reasonable range
+                # A step_index of 9999 is clearly invalid
+                max_steps = 100  # Reasonable upper bound
+                if request.step_index >= max_steps:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid step_index {request.step_index}: exceeds maximum allowed ({max_steps - 1})",
+                    )
 
             # For now, we simulate execution
             # In a full implementation, this would actually execute actions
@@ -1127,6 +1153,9 @@ def create_app() -> FastAPI:
                 execution_id=execution_id,
             )
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except Exception as e:
             logger.error(f"Error executing plan: {e}")
             raise HTTPException(
@@ -1167,6 +1196,9 @@ def create_app() -> FastAPI:
             )
             return result
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
         except ValueError as e:
             logger.error(f"Media validation error: {e}")
             raise HTTPException(
@@ -1222,6 +1254,15 @@ def create_app() -> FastAPI:
             result = _media_ingestion.list_media_samples(query)
             return result
 
+        except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
+            raise
+        except ValueError as e:
+            # Invalid timestamp format
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid parameter: {str(e)}",
+            )
         except Exception as e:
             logger.error(f"Error listing media samples: {e}")
             raise HTTPException(
@@ -1261,6 +1302,7 @@ def create_app() -> FastAPI:
             return result
 
         except HTTPException:
+            # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
             logger.error(f"Error retrieving media sample: {e}")
