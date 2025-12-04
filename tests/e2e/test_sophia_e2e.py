@@ -17,8 +17,6 @@ Reference: sophia#57 (Testing Audit)
 
 import pytest
 import httpx
-import uuid
-from datetime import datetime, timezone
 
 
 pytestmark = pytest.mark.e2e
@@ -47,7 +45,7 @@ class TestInfrastructureHealth:
         """Neo4j should accept Cypher queries via HTTP API."""
         # Use the transaction endpoint
         resp = httpx.post(
-            f"http://localhost:37474/db/neo4j/tx/commit",
+            "http://localhost:37474/db/neo4j/tx/commit",
             json={
                 "statements": [
                     {"statement": "RETURN 1 as test"}
@@ -536,7 +534,7 @@ class TestCompleteWorkflow:
             timeout=10,
         )
         assert resp.status_code == 201, "Proposal ingestion should succeed"
-        proposal_data = resp.json()
+        resp.json()  # Consume response
         
         # Step 2: Read current state
         resp = httpx.get(

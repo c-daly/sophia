@@ -14,7 +14,6 @@ These tests validate the full Sophia service including:
 """
 
 import os
-from typing import Generator
 from datetime import datetime, timezone
 import pytest
 import httpx
