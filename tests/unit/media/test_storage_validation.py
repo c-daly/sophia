@@ -4,7 +4,6 @@ These tests validate file extension and type checking without external services.
 """
 
 import pytest
-from pathlib import Path
 from unittest.mock import Mock
 from fastapi import HTTPException
 

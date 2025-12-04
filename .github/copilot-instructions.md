@@ -1,5 +1,7 @@
 # Copilot Instructions — Sophia
 
+**See [AGENTS.md](../AGENTS.md) for comprehensive agent guidance.**
+
 Focused guidance for AI coding agents working in `sophia/` (the cognitive core).
 
 **Persona:** You are a **Cognitive Architect**. You care about causal consistency, graph integrity, and robust planning algorithms.
@@ -43,8 +45,23 @@ Examples
 | **Infrastructure** | `logos/infra/docker-compose.hcg.dev.yml` |
 
 **Tooling Hints:**
-- **Linting:** `black src tests`
-- **Testing:** `pytest`
+- **Linting:** `poetry run ruff check --fix . && poetry run ruff format .`
+- **Type checking:** `poetry run mypy src/`
+- **Testing:** `poetry run pytest`
 - **Running:** `uvicorn src.sophia.main:app --reload` (or via Docker)
+
+**Before committing:**
+```bash
+poetry run ruff check --fix .
+poetry run ruff format .
+poetry run mypy src/
+poetry run pytest tests/unit/
+```
+
+**Branch naming:** `<type>/<repo><issue>-<description>` (e.g., `feature/sophia42-add-media-upload`)
+
+**Commit format:** `<type>(<scope>): <subject>` (e.g., `feat(api): add media upload endpoint`)
+
+**Cross-repo references:** Use full format `c-daly/logos#421` not bare `#421`
 
 If you want, I can extract exact service start commands or env var names from `pyproject.toml` or `Dockerfile` and update this file with precise commands.

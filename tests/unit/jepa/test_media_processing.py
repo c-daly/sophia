@@ -5,7 +5,6 @@ without external services.
 """
 
 import pytest
-from io import BytesIO
 
 from sophia.jepa.runner import JEPARunner
 from sophia.api.models import SimulateRequest, SimulateResponse

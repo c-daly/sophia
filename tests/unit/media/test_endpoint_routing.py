@@ -10,11 +10,10 @@ import io
 import os
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import patch, AsyncMock
 from PIL import Image
 from fastapi.testclient import TestClient
 
-from sophia.storage.media_storage import MediaStorageService
 from sophia.models.media_models import (
     MediaType,
     MediaIngestResponse,
