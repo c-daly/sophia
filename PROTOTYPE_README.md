@@ -47,7 +47,7 @@ The prototype implements:
 - **Standard CI** runs on every PR/push, covering lint, unit tests, and non-integration API suites.
 - **Integration Tests** live in `.github/workflows/prototype-integration.yml` and run nightly, on demand (`workflow_dispatch`), and when integration-related files change on `main`. The workflow executes `scripts/run_integration_stack.sh`, which uses the standardized stack from `tests/e2e/stack/sophia/`.
 - The stack uses non-conflicting ports (37xxx/39xxx range) to allow concurrent testing with other repos.
-- Neo4j runs with `neo4j/neo4jtest` credentials. Stack configuration lives in `tests/e2e/stack/sophia/.env.test`.
+- Neo4j runs with `neo4j/neo4jtest` credentials. Stack configuration lives in `docker-compose.test.sophia.yml`.
 
 ## Quick Start
 

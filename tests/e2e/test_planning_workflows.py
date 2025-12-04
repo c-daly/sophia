@@ -3,14 +3,13 @@
 These tests validate full user scenarios from goal definition
 through plan execution to final state verification.
 
-Requires: Full stack (Neo4j, Milvus, Sophia API running)
+Requires: Full stack running via docker-compose.test.yml
 """
 
-import os
+import concurrent.futures
 import pytest
-from fastapi.testclient import TestClient
+import httpx
 
-from sophia.api.app import create_app
 from sophia.hcg_client import HCGClient
 
 
@@ -18,68 +17,23 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.fixture(scope="module")
-def neo4j_uri():
-    """Neo4j connection URI."""
-    return os.getenv("NEO4J_URI", "bolt://localhost:37687")
-
-
-@pytest.fixture(scope="module")
-def neo4j_user():
-    """Neo4j username."""
-    return os.getenv("NEO4J_USER", "neo4j")
-
-
-@pytest.fixture(scope="module")
-def neo4j_password():
-    """Neo4j password."""
-    return os.getenv("NEO4J_PASSWORD", "neo4jtest")
-
-
-@pytest.fixture(scope="module")
-def hcg_client(neo4j_uri, neo4j_user, neo4j_password):
+def hcg_client(neo4j_config):
     """Create HCG client for direct database verification."""
     client = HCGClient(
-        neo4j_uri=neo4j_uri,
-        neo4j_username=neo4j_user,
-        neo4j_password=neo4j_password,
+        neo4j_uri=neo4j_config["uri"],
+        neo4j_username=neo4j_config["user"],
+        neo4j_password=neo4j_config["password"],
     )
     yield client
     client.close()
 
 
-@pytest.fixture(scope="module")
-def api_token():
-    """API authentication token."""
-    return "test-e2e-token"
-
-
-@pytest.fixture(scope="module")
-def app(api_token, neo4j_uri, neo4j_user, neo4j_password):
-    """Create test application."""
-    os.environ["SOPHIA_API_TOKEN"] = api_token
-    os.environ["NEO4J_URI"] = neo4j_uri
-    os.environ["NEO4J_USER"] = neo4j_user
-    os.environ["NEO4J_PASSWORD"] = neo4j_password
-    return create_app()
-
-
-@pytest.fixture(scope="module")
-def client(app):
-    """Create test client."""
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-@pytest.fixture
-def auth_headers(api_token):
-    """Authentication headers."""
-    return {"Authorization": f"Bearer {api_token}"}
-
-
 class TestGoalToPlanToExecuteWorkflow:
     """E2E tests for complete goal → plan → execute → verify workflow."""
 
-    def test_pick_and_place_complete_workflow(self, client, auth_headers, hcg_client):
+    def test_pick_and_place_complete_workflow(
+        self, sophia_url, auth_headers, hcg_client
+    ):
         """Test complete pick-and-place workflow from goal to execution.
 
         Workflow:
@@ -90,16 +44,20 @@ class TestGoalToPlanToExecuteWorkflow:
         5. Verify final state (red_block in bin)
         """
         # Step 1: Verify initial state
-        state_response = client.get("/state", headers=auth_headers)
+        state_response = httpx.get(
+            f"{sophia_url}/state",
+            headers=auth_headers,
+            timeout=10,
+        )
         assert state_response.status_code == 200
         initial_state = state_response.json()["state"]
 
-        # Verify red_block starts on table
-        assert "red_block" in initial_state or initial_state == {}
+        # State may contain data from previous tests - that's okay for e2e
+        assert isinstance(initial_state, dict)
 
         # Step 2: Submit planning goal
-        plan_response = client.post(
-            "/plan",
+        plan_response = httpx.post(
+            f"{sophia_url}/plan",
             json={
                 "goal": {
                     "description": "red block in bin",
@@ -107,6 +65,7 @@ class TestGoalToPlanToExecuteWorkflow:
                 }
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert plan_response.status_code == 201
         plan = plan_response.json()
@@ -118,17 +77,22 @@ class TestGoalToPlanToExecuteWorkflow:
         assert isinstance(steps, list), f"Expected list of steps, got {type(steps)}"
 
         # Step 4: Execute plan
-        execute_response = client.post(
-            "/execute",
+        execute_response = httpx.post(
+            f"{sophia_url}/execute",
             json={"plan_id": plan_id},
             headers=auth_headers,
+            timeout=10,
         )
         assert execute_response.status_code == 201
         execution = execute_response.json()
         assert execution["overall_status"] == "success"
 
         # Step 5: Verify final state
-        final_state_response = client.get("/state", headers=auth_headers)
+        final_state_response = httpx.get(
+            f"{sophia_url}/state",
+            headers=auth_headers,
+            timeout=10,
+        )
         assert final_state_response.status_code == 200
         final_state = final_state_response.json()["state"]
 
@@ -136,15 +100,15 @@ class TestGoalToPlanToExecuteWorkflow:
         if "red_block" in final_state:
             assert final_state["red_block"]["location"] == "bin"
 
-    def test_plan_simulate_then_execute(self, client, auth_headers):
+    def test_plan_simulate_then_execute(self, sophia_url, auth_headers):
         """Test workflow: plan → simulate → refine → execute.
 
         Uses imagination/simulation to preview plan outcomes
         before actual execution.
         """
         # Step 1: Generate plan
-        plan_response = client.post(
-            "/plan",
+        plan_response = httpx.post(
+            f"{sophia_url}/plan",
             json={
                 "goal": {
                     "description": "red block in bin",
@@ -152,14 +116,15 @@ class TestGoalToPlanToExecuteWorkflow:
                 }
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert plan_response.status_code == 201
         plan = plan_response.json()
 
         # Step 2: Simulate plan execution
         steps = plan["plan"]  # API returns 'plan' not 'steps'
-        simulate_response = client.post(
-            "/simulate",
+        simulate_response = httpx.post(
+            f"{sophia_url}/simulate",
             json={
                 "entities": [
                     {
@@ -176,6 +141,7 @@ class TestGoalToPlanToExecuteWorkflow:
                 "k_steps": max(len(steps), 1),  # At least 1 step for simulation
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert simulate_response.status_code == 201
         simulation = simulate_response.json()
@@ -185,18 +151,19 @@ class TestGoalToPlanToExecuteWorkflow:
         assert len(simulation["imagined_states"]) > 0
 
         # Step 3: Execute plan (now confident from simulation)
-        execute_response = client.post(
-            "/execute",
+        execute_response = httpx.post(
+            f"{sophia_url}/execute",
             json={"plan_id": plan["plan_id"]},
             headers=auth_headers,
+            timeout=10,
         )
         assert execute_response.status_code == 201
 
-    def test_dry_run_then_execute(self, client, auth_headers):
+    def test_dry_run_then_execute(self, sophia_url, auth_headers):
         """Test dry run followed by actual execution."""
         # Generate plan
-        plan_response = client.post(
-            "/plan",
+        plan_response = httpx.post(
+            f"{sophia_url}/plan",
             json={
                 "goal": {
                     "description": "red block in bin",
@@ -204,15 +171,17 @@ class TestGoalToPlanToExecuteWorkflow:
                 }
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert plan_response.status_code == 201
         plan_id = plan_response.json()["plan_id"]
 
         # Dry run first
-        dry_run_response = client.post(
-            "/execute",
+        dry_run_response = httpx.post(
+            f"{sophia_url}/execute",
             json={"plan_id": plan_id, "dry_run": True},
             headers=auth_headers,
+            timeout=10,
         )
         assert dry_run_response.status_code == 201
         dry_result = dry_run_response.json()
@@ -220,10 +189,11 @@ class TestGoalToPlanToExecuteWorkflow:
         assert dry_result["overall_status"] in ["simulated", "success", "partial"]
 
         # Now execute for real
-        execute_response = client.post(
-            "/execute",
+        execute_response = httpx.post(
+            f"{sophia_url}/execute",
             json={"plan_id": plan_id, "dry_run": False},
             headers=auth_headers,
+            timeout=10,
         )
         assert execute_response.status_code == 201
         result = execute_response.json()
@@ -233,7 +203,7 @@ class TestGoalToPlanToExecuteWorkflow:
 class TestStateLifecycleWorkflow:
     """E2E tests for state management lifecycle."""
 
-    def test_state_write_read_roundtrip(self, client, auth_headers, hcg_client):
+    def test_state_write_read_roundtrip(self, sophia_url, auth_headers, hcg_client):
         """Test complete state write → read → verify cycle."""
         # Write state
         new_state = {
@@ -244,15 +214,20 @@ class TestStateLifecycleWorkflow:
             }
         }
 
-        write_response = client.post(
-            "/state",
+        write_response = httpx.post(
+            f"{sophia_url}/state",
             json={"state": new_state},
             headers=auth_headers,
+            timeout=10,
         )
         assert write_response.status_code == 200
 
         # Read state back via API
-        read_response = client.get("/state", headers=auth_headers)
+        read_response = httpx.get(
+            f"{sophia_url}/state",
+            headers=auth_headers,
+            timeout=10,
+        )
         assert read_response.status_code == 200
         api_state = read_response.json()["state"]
 
@@ -264,18 +239,23 @@ class TestStateLifecycleWorkflow:
         if "test_object" in api_state:
             assert api_state["test_object"]["location"] == "shelf_a"
 
-    def test_state_update_triggers_cwm_envelope(self, client, auth_headers):
+    def test_state_update_triggers_cwm_envelope(self, sophia_url, auth_headers):
         """Test that state updates create CWM state envelopes."""
         # Update state
-        update_response = client.post(
-            "/state",
+        update_response = httpx.post(
+            f"{sophia_url}/state",
             json={"state": {"envelope_test_object": {"status": "created"}}},
             headers=auth_headers,
+            timeout=10,
         )
         assert update_response.status_code == 200
 
         # Query CWM history
-        cwm_response = client.get("/state/cwm", headers=auth_headers)
+        cwm_response = httpx.get(
+            f"{sophia_url}/state/cwm",
+            headers=auth_headers,
+            timeout=10,
+        )
         assert cwm_response.status_code == 200
         cwm_data = cwm_response.json()
 
@@ -286,11 +266,11 @@ class TestStateLifecycleWorkflow:
 class TestSimulationWorkflow:
     """E2E tests for simulation workflows."""
 
-    def test_simulate_persist_query_cycle(self, client, auth_headers, hcg_client):
+    def test_simulate_persist_query_cycle(self, sophia_url, auth_headers, hcg_client):
         """Test simulation → persistence → query cycle."""
         # Run simulation
-        simulate_response = client.post(
-            "/simulate",
+        simulate_response = httpx.post(
+            f"{sophia_url}/simulate",
             json={
                 "entities": [
                     {
@@ -303,6 +283,7 @@ class TestSimulationWorkflow:
                 "k_steps": 5,
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert simulate_response.status_code == 201
         simulation = simulate_response.json()
@@ -320,12 +301,12 @@ class TestSimulationWorkflow:
         for i in range(len(confidences) - 1):
             assert confidences[i] >= confidences[i + 1], "Confidence should decay"
 
-    def test_simulation_with_media_sample(self, client, auth_headers):
+    def test_simulation_with_media_sample(self, sophia_url, auth_headers):
         """Test simulation referencing a media sample for context."""
         # First ingest a media sample (if endpoint available)
         # For now, test with media_sample_id reference
-        simulate_response = client.post(
-            "/simulate",
+        simulate_response = httpx.post(
+            f"{sophia_url}/simulate",
             json={
                 "entities": [
                     {
@@ -338,6 +319,7 @@ class TestSimulationWorkflow:
                 "k_steps": 3,
             },
             headers=auth_headers,
+            timeout=10,
         )
 
         # Should succeed (sample may not exist, but request is valid)
@@ -347,7 +329,7 @@ class TestSimulationWorkflow:
 class TestCrossServiceWorkflow:
     """E2E tests for cross-service interactions."""
 
-    def test_hermes_proposal_to_execution(self, client, auth_headers, hcg_client):
+    def test_hermes_proposal_to_execution(self, sophia_url, auth_headers, hcg_client):
         """Test Hermes proposal ingestion followed by execution."""
         # Ingest a proposal from Hermes - must match HermesProposalRequest model
         proposal = {
@@ -373,9 +355,10 @@ class TestCrossServiceWorkflow:
             ],
         }
 
-        ingest_response = client.post(
-            "/ingest/hermes_proposal",
+        ingest_response = httpx.post(
+            f"{sophia_url}/ingest/hermes_proposal",
             json=proposal,
+            timeout=10,
         )
         assert ingest_response.status_code == 201
         result = ingest_response.json()
@@ -388,13 +371,12 @@ class TestCrossServiceWorkflow:
         assert proposal_node is not None
         assert proposal_node["properties"].get("source_service") == "hermes"
 
-    def test_concurrent_operations(self, client, auth_headers):
+    def test_concurrent_operations(self, sophia_url, auth_headers):
         """Test concurrent planning and simulation don't interfere."""
-        import concurrent.futures
 
         def run_plan():
-            return client.post(
-                "/plan",
+            return httpx.post(
+                f"{sophia_url}/plan",
                 json={
                     "goal": {
                         "description": "test concurrent plan",
@@ -402,16 +384,18 @@ class TestCrossServiceWorkflow:
                     }
                 },
                 headers=auth_headers,
+                timeout=10,
             )
 
         def run_simulate():
-            return client.post(
-                "/simulate",
+            return httpx.post(
+                f"{sophia_url}/simulate",
                 json={
                     "entities": [{"id": "obj", "type": "object"}],
                     "k_steps": 3,
                 },
                 headers=auth_headers,
+                timeout=10,
             )
 
         # Run concurrently
@@ -436,10 +420,10 @@ class TestCrossServiceWorkflow:
 class TestErrorRecoveryWorkflow:
     """E2E tests for error handling and recovery."""
 
-    def test_graceful_degradation_without_neo4j(self, client, auth_headers):
+    def test_graceful_degradation_without_neo4j(self, sophia_url):
         """Test that health endpoint reports degraded status appropriately."""
         # Health check should always work
-        response = client.get("/health")
+        response = httpx.get(f"{sophia_url}/health", timeout=10)
         assert response.status_code == 200
 
         data = response.json()
@@ -447,17 +431,18 @@ class TestErrorRecoveryWorkflow:
         assert "components" in data
         # Status may be "healthy" or "degraded" depending on Neo4j
 
-    def test_invalid_plan_execution_recovery(self, client, auth_headers):
+    def test_invalid_plan_execution_recovery(self, sophia_url, auth_headers):
         """Test recovery from attempting to execute non-existent plan."""
-        response = client.post(
-            "/execute",
+        response = httpx.post(
+            f"{sophia_url}/execute",
             json={"plan_id": "non_existent_plan_id_12345"},
             headers=auth_headers,
+            timeout=10,
         )
 
         # Should fail gracefully, not crash
         assert response.status_code in [400, 404, 500]
 
         # System should still be responsive
-        health_response = client.get("/health")
+        health_response = httpx.get(f"{sophia_url}/health", timeout=10)
         assert health_response.status_code == 200

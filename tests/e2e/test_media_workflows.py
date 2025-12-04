@@ -3,16 +3,14 @@
 These tests validate complete media lifecycle from upload
 through processing to retrieval and deletion.
 
-Requires: Full stack (Neo4j, Milvus, Sophia API with media storage)
+Requires: Full stack running via docker-compose.test.yml
 """
 
 import io
-import os
 import pytest
-from fastapi.testclient import TestClient
+import httpx
 from PIL import Image
 
-from sophia.api.app import create_app
 from sophia.hcg_client import HCGClient
 
 
@@ -20,62 +18,15 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.fixture(scope="module")
-def neo4j_uri():
-    """Neo4j connection URI."""
-    return os.getenv("NEO4J_URI", "bolt://localhost:37687")
-
-
-@pytest.fixture(scope="module")
-def neo4j_user():
-    """Neo4j username."""
-    return os.getenv("NEO4J_USER", "neo4j")
-
-
-@pytest.fixture(scope="module")
-def neo4j_password():
-    """Neo4j password."""
-    return os.getenv("NEO4J_PASSWORD", "neo4jtest")
-
-
-@pytest.fixture(scope="module")
-def hcg_client(neo4j_uri, neo4j_user, neo4j_password):
+def hcg_client(neo4j_config):
     """Create HCG client for direct database verification."""
     client = HCGClient(
-        neo4j_uri=neo4j_uri,
-        neo4j_username=neo4j_user,
-        neo4j_password=neo4j_password,
+        neo4j_uri=neo4j_config["uri"],
+        neo4j_username=neo4j_config["user"],
+        neo4j_password=neo4j_config["password"],
     )
     yield client
     client.close()
-
-
-@pytest.fixture(scope="module")
-def api_token():
-    """API authentication token."""
-    return "test-media-e2e-token"
-
-
-@pytest.fixture(scope="module")
-def app(api_token, neo4j_uri, neo4j_user, neo4j_password):
-    """Create test application."""
-    os.environ["SOPHIA_API_TOKEN"] = api_token
-    os.environ["NEO4J_URI"] = neo4j_uri
-    os.environ["NEO4J_USER"] = neo4j_user
-    os.environ["NEO4J_PASSWORD"] = neo4j_password
-    return create_app()
-
-
-@pytest.fixture(scope="module")
-def client(app):
-    """Create test client."""
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-@pytest.fixture
-def auth_headers(api_token):
-    """Authentication headers."""
-    return {"Authorization": f"Bearer {api_token}"}
 
 
 @pytest.fixture
@@ -99,15 +50,16 @@ class TestMediaUploadWorkflow:
     """E2E tests for media upload workflow."""
 
     def test_image_upload_complete_workflow(
-        self, client, auth_headers, sample_image, hcg_client
+        self, sophia_url, auth_headers, sample_image, hcg_client
     ):
         """Test complete image upload → process → verify workflow."""
         # Step 1: Upload image
-        upload_response = client.post(
-            "/ingest/media",
+        upload_response = httpx.post(
+            f"{sophia_url}/ingest/media",
             files={"file": ("test_image.jpg", sample_image, "image/jpeg")},
             data={"media_type": "image"},
             headers=auth_headers,
+            timeout=30,
         )
         assert upload_response.status_code == 201
         result = upload_response.json()
@@ -123,24 +75,26 @@ class TestMediaUploadWorkflow:
         assert media_node["type"] == "media_sample"
 
         # Step 4: Retrieve via API
-        get_response = client.get(
-            f"/media/samples/{sample_id}",
+        get_response = httpx.get(
+            f"{sophia_url}/media/samples/{sample_id}",
             headers=auth_headers,
+            timeout=10,
         )
         assert get_response.status_code == 200
         retrieved = get_response.json()
         assert retrieved["sample_id"] == sample_id
 
-    def test_image_with_question_workflow(self, client, auth_headers, sample_image):
+    def test_image_with_question_workflow(self, sophia_url, auth_headers, sample_image):
         """Test image upload with JEPA question processing."""
-        upload_response = client.post(
-            "/ingest/media",
+        upload_response = httpx.post(
+            f"{sophia_url}/ingest/media",
             files={"file": ("physics_test.jpg", sample_image, "image/jpeg")},
             data={
                 "media_type": "image",
                 "question": "Will the ball clear the obstacle?",
             },
             headers=auth_headers,
+            timeout=30,
         )
         assert upload_response.status_code == 201
         result = upload_response.json()
@@ -149,49 +103,54 @@ class TestMediaUploadWorkflow:
         # The question is stored with the media sample but may not be in the response
         assert "sample_id" in result
 
-    def test_media_list_pagination(self, client, auth_headers, sample_image):
+    def test_media_list_pagination(self, sophia_url, auth_headers, sample_image):
         """Test media listing with pagination."""
         # Upload multiple images
         for i in range(3):
             sample_image.seek(0)
-            client.post(
-                "/ingest/media",
+            httpx.post(
+                f"{sophia_url}/ingest/media",
                 files={"file": (f"test_{i}.jpg", sample_image, "image/jpeg")},
                 data={"media_type": "image"},
                 headers=auth_headers,
+                timeout=30,
             )
 
         # List with pagination
-        list_response = client.get(
-            "/media/samples?limit=2&offset=0",
+        list_response = httpx.get(
+            f"{sophia_url}/media/samples?limit=2&offset=0",
             headers=auth_headers,
+            timeout=10,
         )
         assert list_response.status_code == 200
         page1 = list_response.json()
         assert len(page1["samples"]) <= 2
 
         # Get next page
-        list_response2 = client.get(
-            "/media/samples?limit=2&offset=2",
+        list_response2 = httpx.get(
+            f"{sophia_url}/media/samples?limit=2&offset=2",
             headers=auth_headers,
+            timeout=10,
         )
         assert list_response2.status_code == 200
 
-    def test_media_filter_by_type(self, client, auth_headers, sample_image):
+    def test_media_filter_by_type(self, sophia_url, auth_headers, sample_image):
         """Test filtering media by type."""
         # Upload an image
         sample_image.seek(0)
-        client.post(
-            "/ingest/media",
+        httpx.post(
+            f"{sophia_url}/ingest/media",
             files={"file": ("filter_test.jpg", sample_image, "image/jpeg")},
             data={"media_type": "image"},
             headers=auth_headers,
+            timeout=30,
         )
 
         # Filter by image type
-        list_response = client.get(
-            "/media/samples?media_type=image",
+        list_response = httpx.get(
+            f"{sophia_url}/media/samples?media_type=image",
             headers=auth_headers,
+            timeout=10,
         )
         assert list_response.status_code == 200
         results = list_response.json()
@@ -205,26 +164,27 @@ class TestMediaToSimulationWorkflow:
     """E2E tests for media → simulation pipeline."""
 
     def test_upload_then_simulate_with_reference(
-        self, client, auth_headers, sample_image
+        self, sophia_url, auth_headers, sample_image
     ):
         """Test uploading media then using it in simulation."""
         # Step 1: Upload media
         sample_image.seek(0)
-        upload_response = client.post(
-            "/ingest/media",
+        upload_response = httpx.post(
+            f"{sophia_url}/ingest/media",
             files={"file": ("sim_input.jpg", sample_image, "image/jpeg")},
             data={
                 "media_type": "image",
                 "question": "What happens when the ball is released?",
             },
             headers=auth_headers,
+            timeout=30,
         )
         assert upload_response.status_code == 201
         sample_id = upload_response.json()["sample_id"]
 
         # Step 2: Run simulation referencing the media
-        simulate_response = client.post(
-            "/simulate",
+        simulate_response = httpx.post(
+            f"{sophia_url}/simulate",
             json={
                 "entities": [
                     {
@@ -238,6 +198,7 @@ class TestMediaToSimulationWorkflow:
                 "k_steps": 5,
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert simulate_response.status_code == 201
         simulation = simulate_response.json()
@@ -245,18 +206,19 @@ class TestMediaToSimulationWorkflow:
         # Simulation should use embeddings from media
         assert len(simulation["imagined_states"]) == 5
 
-    def test_batch_media_processing(self, client, auth_headers, sample_image):
+    def test_batch_media_processing(self, sophia_url, auth_headers, sample_image):
         """Test processing multiple media files for simulation."""
         sample_ids = []
 
         # Upload multiple frames
         for i in range(3):
             sample_image.seek(0)
-            response = client.post(
-                "/ingest/media",
+            response = httpx.post(
+                f"{sophia_url}/ingest/media",
                 files={"file": (f"frame_{i}.jpg", sample_image, "image/jpeg")},
                 data={"media_type": "image"},
                 headers=auth_headers,
+                timeout=30,
             )
             if response.status_code == 201:
                 sample_ids.append(response.json()["sample_id"])
@@ -264,14 +226,15 @@ class TestMediaToSimulationWorkflow:
         assert len(sample_ids) >= 1, "At least one upload should succeed"
 
         # Use first sample in simulation
-        simulate_response = client.post(
-            "/simulate",
+        simulate_response = httpx.post(
+            f"{sophia_url}/simulate",
             json={
                 "entities": [{"id": "obj", "type": "object"}],
                 "media_sample_id": sample_ids[0],
                 "k_steps": 3,
             },
             headers=auth_headers,
+            timeout=10,
         )
         assert simulate_response.status_code in [201, 503]
 
@@ -279,45 +242,49 @@ class TestMediaToSimulationWorkflow:
 class TestMediaErrorHandling:
     """E2E tests for media error handling."""
 
-    def test_invalid_media_type_rejected(self, client, auth_headers):
+    def test_invalid_media_type_rejected(self, sophia_url, auth_headers):
         """Test that invalid media types are rejected."""
         fake_file = io.BytesIO(b"not a real image")
 
-        response = client.post(
-            "/ingest/media",
+        response = httpx.post(
+            f"{sophia_url}/ingest/media",
             files={"file": ("test.xyz", fake_file, "application/octet-stream")},
             data={"media_type": "image"},
             headers=auth_headers,
+            timeout=10,
         )
 
         assert response.status_code == 400
 
-    def test_missing_file_rejected(self, client, auth_headers):
+    def test_missing_file_rejected(self, sophia_url, auth_headers):
         """Test that missing file is rejected."""
-        response = client.post(
-            "/ingest/media",
+        response = httpx.post(
+            f"{sophia_url}/ingest/media",
             data={"media_type": "image"},
             headers=auth_headers,
+            timeout=10,
         )
 
         assert response.status_code == 422
 
-    def test_get_nonexistent_sample(self, client, auth_headers):
+    def test_get_nonexistent_sample(self, sophia_url, auth_headers):
         """Test getting non-existent sample returns 404."""
-        response = client.get(
-            "/media/samples/nonexistent_sample_xyz",
+        response = httpx.get(
+            f"{sophia_url}/media/samples/nonexistent_sample_xyz",
             headers=auth_headers,
+            timeout=10,
         )
 
         assert response.status_code == 404
 
-    def test_upload_requires_auth(self, client, sample_image):
+    def test_upload_requires_auth(self, sophia_url, sample_image):
         """Test that upload requires authentication."""
         sample_image.seek(0)
-        response = client.post(
-            "/ingest/media",
+        response = httpx.post(
+            f"{sophia_url}/ingest/media",
             files={"file": ("test.jpg", sample_image, "image/jpeg")},
             data={"media_type": "image"},
+            timeout=10,
         )
 
         # Should require auth (403) or the endpoint may not require auth (201)

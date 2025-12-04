@@ -41,7 +41,9 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4jtest")
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 
 # Test auth token (for endpoints requiring authentication)
-TEST_AUTH_TOKEN = os.getenv("SOPHIA_TEST_TOKEN", "test-token-for-sophia")
+# Default matches docker-compose.test.yml (used by CI)
+# For local dev, set SOPHIA_API_TOKEN env var to match your running stack
+TEST_AUTH_TOKEN = os.getenv("SOPHIA_API_TOKEN", "test-token-for-sophia")
 
 
 @pytest.fixture(scope="session")
@@ -146,3 +148,8 @@ def unique_id() -> str:
 def test_timestamp() -> str:
     """ISO timestamp for test data."""
     return datetime.now(timezone.utc).isoformat()
+
+
+# Note: Media cleanup would go here once a DELETE /media/samples/{id} endpoint exists.
+# For now, media_storage/ is in .gitignore and can be cleaned manually or via:
+#   rm -rf media_storage/*

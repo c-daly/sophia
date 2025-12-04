@@ -2,11 +2,30 @@
 
 The `tests/` tree is organized into three tiers following the test pyramid:
 
-| Directory | Purpose | Dependencies | Run Time |
-|-----------|---------|--------------|----------|
-| `tests/unit/` | Fast, isolated tests with mocks | None | ~5s |
-| `tests/integration/` | Real service tests | Neo4j, Milvus | ~30s |
-| `tests/e2e/` | Full workflow tests | Full stack | ~60s |
+| Directory | Marker | Tests | Dependencies | Run Time |
+|-----------|--------|-------|--------------|----------|
+| `tests/unit/` | `@pytest.mark.unit` | 132 | None | ~7s |
+| `tests/integration/` | `@pytest.mark.integration` | 109 | Neo4j, Milvus | ~15s |
+| `tests/e2e/` | `@pytest.mark.e2e` | 41 | Full stack + Sophia API | ~15s |
+
+## Running Tests by Marker
+
+```bash
+# Run only unit tests (fast, no services needed)
+poetry run pytest -m unit
+
+# Run only integration tests (requires Neo4j + Milvus)
+poetry run pytest -m integration
+
+# Run only e2e tests (requires full stack)
+poetry run pytest -m e2e
+
+# Run everything except e2e (for local dev)
+poetry run pytest -m "not e2e"
+
+# Run everything except slow tests
+poetry run pytest -m "not slow"
+```
 
 ## Test Organization
 

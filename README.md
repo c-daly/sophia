@@ -93,7 +93,7 @@ default; use the helper script to run them with Docker:
 ```
 
 The script starts the Neo4j and Milvus services from
-`tests/e2e/stack/sophia/docker-compose.test.yml`, waits for them to become
+`docker-compose.test.yml`, waits for them to become
 healthy, and runs the integration tests with `RUN_SOPHIA_INTEGRATION=1`.
 
 ### Stack Configuration

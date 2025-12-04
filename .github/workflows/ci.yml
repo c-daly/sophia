@@ -33,8 +33,8 @@ jobs:
       poetry_install_args: '--with dev'
       python_lint_paths: 'src tests'
       mypy_targets: 'src'
-      # Start test services (Neo4j, Milvus) for full test coverage
-      docker_compose_file: 'tests/e2e/stack/sophia/docker-compose.test.yml'
+      # Start test services (Neo4j, Milvus, Sophia) using compose overlay
+      docker_compose_file: 'docker-compose.test.yml -f docker-compose.test.sophia.yml'
       docker_compose_wait_script: |
         echo "Waiting for Neo4j..."
         timeout 60 bash -c 'until docker exec sophia-test-neo4j cypher-shell -u neo4j -p neo4jtest "RETURN 1" 2>/dev/null; do sleep 2; done'
@@ -57,8 +57,8 @@ jobs:
         export SOPHIA_API_TOKEN=test-token-for-sophia
         export RUN_SOPHIA_INTEGRATION=1
       # Run ALL tests with services available
-      # --cov-fail-under=40: Enforce 40% minimum coverage
-      pytest_command: 'pytest tests/ -v --cov=sophia --cov-report=term --cov-report=xml --cov-fail-under=40 -r sS'
+      # --cov-fail-under=60: Enforce 60% minimum coverage
+      pytest_command: 'pytest tests/ -v --cov=sophia --cov-report=term --cov-report=xml --cov-fail-under=60 -r sS'
       coverage_python_version: '3.12'
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

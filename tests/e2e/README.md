@@ -1,32 +1,23 @@
 # End-to-End Tests
 
-This directory contains Sophia's end-to-end (e2e) integration tests and their supporting infrastructure.
-
-## Directory Structure
-
-```
-tests/e2e/
-├── README.md           # This file
-└── stack/
-    └── sophia/
-        ├── .env.test           # Environment variables for the stack
-        ├── STACK_VERSION       # Git commit hash of logos that generated these files
-        └── docker-compose.test.yml  # Neo4j + Milvus test stack
-```
+This directory contains Sophia's end-to-end (e2e) integration tests.
 
 ## Stack Configuration
 
-The test stack is **generated from LOGOS** using the `render-test-stacks` command. This ensures consistency across all repos.
+The test stack is configured via compose files at the repository root:
+- `docker-compose.test.yml` - Base infrastructure (Neo4j, Milvus)
+- `docker-compose.test.sophia.yml` - Sophia API service overlay
 
 ### Services
 
 Sophia requires:
 - **Neo4j** (ports 37474/37687) - Knowledge graph storage
 - **Milvus** (ports 39530/39091) - Vector similarity search
+- **Sophia API** (port 38001) - The service under test
 
 ### Port Allocation
 
-Sophia uses the 37xxx/39xxx port range to avoid conflicts:
+Sophia uses the 37xxx/38xxx/39xxx port range to avoid conflicts:
 | Service | Host Port | Container Port |
 |---------|-----------|----------------|
 | Neo4j HTTP | 37474 | 7474 |
@@ -36,41 +27,43 @@ Sophia uses the 37xxx/39xxx port range to avoid conflicts:
 
 ## Running Integration Tests
 
-### Using the Helper Script
+### Using the Helper Scripts
 
 ```bash
-# Run all integration tests
-./scripts/run_integration_stack.sh
+# Start the test stack
+./scripts/start_services.sh
 
-# Run specific tests
-./scripts/run_integration_stack.sh tests/integration/test_specific.py -v
+# Run integration tests
+./scripts/test_integration.sh test
+
+# Run e2e tests
+./scripts/test_e2e.sh
+
+# Stop the stack
+./scripts/stop_services.sh
 ```
-
-The script will:
-1. Start the Neo4j + Milvus stack
-2. Wait for all services to be healthy
-3. Run pytest with the specified arguments
-4. Clean up containers on exit
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SOPHIA_REPO_ROOT` | Override repo root detection | Auto-detected |
-| `HEALTH_TIMEOUT` | Seconds to wait for services | 180 |
-| `COMPOSE_CMD` | Docker compose command | `docker compose` |
+| `SOPHIA_API_TOKEN` | API authentication token | `test-token-for-sophia` |
+| `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:37687` |
+| `NEO4J_USER` | Neo4j username | `neo4j` |
+| `NEO4J_PASSWORD` | Neo4j password | `neo4jtest` |
+| `MILVUS_HOST` | Milvus host | `localhost` |
+| `MILVUS_PORT` | Milvus port | `39530` |
+| `SOPHIA_URL` | Sophia API URL | `http://localhost:38001` |
 
-## Regenerating Stack Files
-
-If you need to update the stack configuration:
+## Running Locally
 
 ```bash
-# From the LOGOS repo
-cd /path/to/logos
-poetry run render-test-stacks --repo sophia
+# Start all services
+docker compose -f docker-compose.test.yml -f docker-compose.test.sophia.yml up -d
 
-# Copy the generated files to sophia
-cp tests/e2e/stack/sophia/* /path/to/sophia/tests/e2e/stack/sophia/
+# Run tests
+poetry run pytest tests/ -v
+
+# Stop services
+docker compose -f docker-compose.test.yml -f docker-compose.test.sophia.yml down
 ```
-
-The `STACK_VERSION` file contains the LOGOS commit hash used to generate the files.
