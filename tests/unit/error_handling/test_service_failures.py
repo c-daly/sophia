@@ -1,4 +1,8 @@
-"""Tests for error handling and edge cases."""
+"""Unit tests for error handling and edge cases.
+
+These tests use mocks to simulate service failures (Neo4j down, Milvus down, etc.)
+which is appropriate for unit testing error paths.
+"""
 
 import pytest
 from unittest.mock import Mock
@@ -7,7 +11,7 @@ from sophia.jepa.runner import JEPARunner
 from sophia.jepa.models import SimulationContext, Entity
 
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
