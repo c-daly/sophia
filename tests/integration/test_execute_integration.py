@@ -40,7 +40,7 @@ class TestExecuteIntegration:
 
         data = response.json()
         assert "execution_id" in data
-        assert "status" in data
+        assert "overall_status" in data
 
     def test_execute_dry_run_does_not_change_state(self, http_client, auth_headers):
         """Test that dry_run=True doesn't actually change state."""
@@ -151,7 +151,7 @@ class TestExecuteIntegration:
         assert response.status_code == 201
 
         data = response.json()
-        assert data["status"] in ["success", "partial", "failed", "pending"]
+        assert data["overall_status"] in ["success", "partial", "failed", "pending", "simulated"]
 
     def test_execute_returns_timestamp(self, http_client, auth_headers):
         """Test that /execute returns execution timestamp."""
@@ -173,7 +173,7 @@ class TestExecuteIntegration:
         assert response.status_code == 201
 
         data = response.json()
-        assert "timestamp" in data or "executed_at" in data
+        assert "created_at" in data
 
     def test_execute_with_invalid_step_index(self, http_client, auth_headers):
         """Test that invalid step_index returns appropriate error."""
