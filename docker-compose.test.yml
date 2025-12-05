@@ -102,8 +102,8 @@ services:
     volumes:
     - sophia_test_milvus:/var/lib/milvus
     ports:
-    - 49530:19530
-    - 49091:9091
+    - 47530:19530
+    - 47091:9091
     healthcheck:
       test:
       - CMD

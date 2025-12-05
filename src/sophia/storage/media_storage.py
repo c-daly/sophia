@@ -92,22 +92,26 @@ class MediaStorageService:
         file_ext = Path(file.filename or "unknown").suffix
         filename = f"{sample_id}{file_ext}"
         file_path = self.storage_root / media_type.value / filename
+        max_size = 100 * 1024 * 1024  # 100MB
+        chunk_size = 1024 * 1024  # 1MB
 
         try:
-            # Write file to disk
-            content = await file.read()
-            file_size = len(content)
-
-            # Check file size after reading (max 100MB)
-            max_size = 100 * 1024 * 1024  # 100MB
-            if file_size > max_size:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"File size {file_size} bytes exceeds maximum allowed size of {max_size} bytes",
-                )
-
+            file_size = 0
             with open(file_path, "wb") as f:
-                f.write(content)
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    next_size = file_size + len(chunk)
+                    if next_size > max_size:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail=(
+                                f"File size exceeds maximum allowed size of {max_size} bytes"
+                            ),
+                        )
+                    f.write(chunk)
+                    file_size = next_size
 
             logger.info(
                 f"Stored {media_type.value} file {filename} "
@@ -116,6 +120,9 @@ class MediaStorageService:
 
             return sample_id, str(file_path), file_size
 
+        except HTTPException:
+            Path(file_path).unlink(missing_ok=True)
+            raise
         except Exception as e:
             logger.error(f"Failed to store file: {e}")
             raise HTTPException(
