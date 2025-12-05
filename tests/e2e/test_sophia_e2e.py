@@ -45,7 +45,7 @@ class TestInfrastructureHealth:
         """Neo4j should accept Cypher queries via HTTP API."""
         # Use the transaction endpoint
         resp = httpx.post(
-            "http://localhost:37474/db/neo4j/tx/commit",
+            "http://localhost:47474/db/neo4j/tx/commit",
             json={"statements": [{"statement": "RETURN 1 as test"}]},
             auth=(neo4j_config["user"], neo4j_config["password"]),
             headers={"Content-Type": "application/json"},

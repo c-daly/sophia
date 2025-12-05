@@ -14,8 +14,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Sophia runs in container on port 38001
-SOPHIA_PORT="${SOPHIA_PORT:-38001}"
+# Sophia runs in container on port 48001
+SOPHIA_PORT="${SOPHIA_PORT:-48001}"
 
 cd "${REPO_ROOT}"
 
@@ -31,11 +31,11 @@ export SOPHIA_URL="http://localhost:${SOPHIA_PORT}"
 
 # Check if test stack is running
 echo -e "${BLUE}Checking test stack...${NC}"
-if ! curl -s -f "http://localhost:37474/" > /dev/null 2>&1; then
+if ! curl -s -f "http://localhost:47474/" > /dev/null 2>&1; then
     echo -e "${RED}Neo4j not running. Start with: ./scripts/start_services.sh${NC}"
     exit 1
 fi
-if ! curl -s -f "http://localhost:39091/healthz" > /dev/null 2>&1; then
+if ! curl -s -f "http://localhost:49091/healthz" > /dev/null 2>&1; then
     echo -e "${RED}Milvus not running. Start with: ./scripts/start_services.sh${NC}"
     exit 1
 fi

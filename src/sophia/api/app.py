@@ -190,6 +190,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             f"Knowledge graph loaded: {len(_kg._nodes)} nodes, {len(_kg._edges)} edges"
         )
 
+        # Seed pick-and-place data if enabled
+        if os.getenv("SEED_PICK_AND_PLACE_DATA", "").lower() == "true":
+            from sophia.hcg_client.seeder import seed_pick_and_place_data
+
+            logger.info("Seeding pick-and-place test data...")
+            try:
+                seed_pick_and_place_data(_hcg_client)
+                # Reload knowledge graph after seeding
+                _kg = load_kg_from_hcg(_hcg_client)
+                logger.info(
+                    f"Knowledge graph reloaded after seeding: {len(_kg._nodes)} nodes"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to seed pick-and-place data: {e}")
+
     except Exception as e:
         logger.warning(f"Failed to initialize HCG client: {e}")
         _hcg_client = None

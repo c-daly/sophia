@@ -61,11 +61,11 @@ function check_services() {
     local neo4j_ok=false
     local milvus_ok=false
     
-    if curl -s "http://localhost:37474/" > /dev/null 2>&1; then
+    if curl -s "http://localhost:47474/" > /dev/null 2>&1; then
         neo4j_ok=true
     fi
     
-    if curl -s "http://localhost:39091/healthz" > /dev/null 2>&1; then
+    if curl -s "http://localhost:49091/healthz" > /dev/null 2>&1; then
         milvus_ok=true
     fi
     
