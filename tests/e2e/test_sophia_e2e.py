@@ -41,11 +41,12 @@ class TestInfrastructureHealth:
         )
         assert resp.status_code == 200, "Milvus healthz should return 200"
 
-    def test_neo4j_accepts_cypher(self, neo4j_config: dict):
+    def test_neo4j_accepts_cypher(self, neo4j_config: dict, infrastructure_ports: dict):
         """Neo4j should accept Cypher queries via HTTP API."""
         # Use the transaction endpoint
+        neo4j_http_port = infrastructure_ports['neo4j_http']
         resp = httpx.post(
-            "http://localhost:47474/db/neo4j/tx/commit",
+            f"http://localhost:{neo4j_http_port}/db/neo4j/tx/commit",
             json={"statements": [{"statement": "RETURN 1 as test"}]},
             auth=(neo4j_config["user"], neo4j_config["password"]),
             headers={"Content-Type": "application/json"},
