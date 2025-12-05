@@ -249,7 +249,7 @@ Sophia follows the LOGOS ecosystem testing standards (see `logos/docs/TESTING_ST
 
 Port allocation (+40000 offset per ecosystem standard):
 - Neo4j: 47474 (HTTP), 47687 (Bolt)
-- Milvus: 59530 (gRPC), 49091 (health)
+- Milvus: 49530 (gRPC), 49091 (health)
 - Sophia API: 48000
 
 ### Quick commands
@@ -487,7 +487,7 @@ Ensure environment variables are set:
 ```bash
 export NEO4J_URI=bolt://localhost:47687
 export MILVUS_HOST=localhost
-export MILVUS_PORT=59530
+export MILVUS_PORT=49530
 ```
 Or just use `./scripts/run_tests.sh` which sets these automatically.
 

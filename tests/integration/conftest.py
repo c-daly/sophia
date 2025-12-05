@@ -18,15 +18,15 @@ import httpx
 pytestmark = pytest.mark.integration
 
 # Service configuration from environment
-# Sophia runs on port 38001 in test stack
-SOPHIA_PORT = os.getenv("SOPHIA_PORT", "38001")
+# Sophia runs on port 48001 in test stack
+SOPHIA_PORT = os.getenv("SOPHIA_PORT", "48001")
 SOPHIA_URL = os.getenv("SOPHIA_URL", f"http://localhost:{SOPHIA_PORT}")
 
-# Infrastructure ports (Sophia uses 37xxx/39xxx offset)
-NEO4J_HTTP_PORT = os.getenv("NEO4J_HTTP_PORT", "37474")
-NEO4J_BOLT_PORT = os.getenv("NEO4J_BOLT_PORT", "37687")
-MILVUS_PORT = os.getenv("MILVUS_PORT", "39530")
-MILVUS_METRICS_PORT = os.getenv("MILVUS_METRICS_PORT", "39091")
+# Infrastructure ports (Sophia uses +40000 offset per LOGOS standard)
+NEO4J_HTTP_PORT = os.getenv("NEO4J_HTTP_PORT", "47474")
+NEO4J_BOLT_PORT = os.getenv("NEO4J_BOLT_PORT", "47687")
+MILVUS_PORT = os.getenv("MILVUS_PORT", "49530")
+MILVUS_METRICS_PORT = os.getenv("MILVUS_METRICS_PORT", "49091")
 
 # Neo4j connection config
 NEO4J_URI = os.getenv("NEO4J_URI", f"bolt://localhost:{NEO4J_BOLT_PORT}")

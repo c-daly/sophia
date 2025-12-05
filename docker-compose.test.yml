@@ -13,8 +13,8 @@ services:
     container_name: sophia-test-neo4j
     image: neo4j:5.14.0
     ports:
-    - 37474:7474
-    - 37687:7687
+    - 47474:7474
+    - 47687:7687
     environment:
     - NEO4J_AUTH=neo4j/neo4jtest
     - NEO4J_PLUGINS=["apoc","n10s"]
@@ -102,8 +102,8 @@ services:
     volumes:
     - sophia_test_milvus:/var/lib/milvus
     ports:
-    - 39530:19530
-    - 39091:9091
+    - 49530:19530
+    - 49091:9091
     healthcheck:
       test:
       - CMD

@@ -24,6 +24,12 @@ NC='\033[0m'
 
 cd "${REPO_ROOT}"
 
+# Port configuration (4xxxx prefix for sophia)
+NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-47474}"
+NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-47687}"
+MILVUS_PORT="${MILVUS_PORT:-49530}"
+MILVUS_METRICS_PORT="${MILVUS_METRICS_PORT:-49091}"
+
 function show_help() {
     echo -e "${CYAN}Sophia Test Runner${NC}"
     echo ""
@@ -61,11 +67,11 @@ function check_services() {
     local neo4j_ok=false
     local milvus_ok=false
     
-    if curl -s "http://localhost:37474/" > /dev/null 2>&1; then
+    if curl -s "http://localhost:${NEO4J_HTTP_PORT}/" > /dev/null 2>&1; then
         neo4j_ok=true
     fi
     
-    if curl -s "http://localhost:39091/healthz" > /dev/null 2>&1; then
+    if curl -s "http://localhost:${MILVUS_METRICS_PORT}/healthz" > /dev/null 2>&1; then
         milvus_ok=true
     fi
     
