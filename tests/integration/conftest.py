@@ -25,7 +25,7 @@ SOPHIA_URL = os.getenv("SOPHIA_URL", f"http://localhost:{SOPHIA_PORT}")
 # Infrastructure ports (Sophia uses +40000 offset per LOGOS standard)
 NEO4J_HTTP_PORT = os.getenv("NEO4J_HTTP_PORT", "47474")
 NEO4J_BOLT_PORT = os.getenv("NEO4J_BOLT_PORT", "47687")
-MILVUS_PORT = os.getenv("MILVUS_PORT", "59530")
+MILVUS_PORT = os.getenv("MILVUS_PORT", "49530")
 MILVUS_METRICS_PORT = os.getenv("MILVUS_METRICS_PORT", "49091")
 
 # Neo4j connection config
