@@ -44,7 +44,7 @@ class TestInfrastructureHealth:
     def test_neo4j_accepts_cypher(self, neo4j_config: dict, infrastructure_ports: dict):
         """Neo4j should accept Cypher queries via HTTP API."""
         # Use the transaction endpoint
-        neo4j_http_port = infrastructure_ports['neo4j_http']
+        neo4j_http_port = infrastructure_ports["neo4j_http"]
         resp = httpx.post(
             f"http://localhost:{neo4j_http_port}/db/neo4j/tx/commit",
             json={"statements": [{"statement": "RETURN 1 as test"}]},
