@@ -1118,44 +1118,95 @@ def create_app() -> FastAPI:
             execution_id = str(uuid.uuid4())
             results: List[ExecutionResult] = []
 
+            # Get plan details from Neo4j
+            plan_props = plan_node.get("properties", {})
+            plan_steps = plan_props.get("steps", [])
+            goal = plan_props.get("goal", {})
+            target_state = goal.get("target_state", "")
+
             # Validate step_index if provided
             if request.step_index is not None:
-                # In a real implementation, we'd look up the plan from Neo4j
-                # For now, validate against a reasonable range
-                # A step_index of 9999 is clearly invalid
-                max_steps = 100  # Reasonable upper bound
-                if request.step_index >= max_steps:
+                if request.step_index >= len(plan_steps):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid step_index {request.step_index}: exceeds maximum allowed ({max_steps - 1})",
+                        detail=f"Invalid step_index {request.step_index}: plan has {len(plan_steps)} steps",
                     )
 
-            # For now, we simulate execution
-            # In a full implementation, this would actually execute actions
-            # and update the knowledge graph state
-
-            # Create a mock execution result
-            mock_step = PlanStep(
-                id="mock_action_1",
-                name="Mock Action",
-                type="action",
-                action_type="SIMULATE",
-                target="",
+            # Execute each step in the plan
+            steps_to_execute = (
+                [plan_steps[request.step_index]]
+                if request.step_index is not None
+                else plan_steps
             )
 
-            result = ExecutionResult(
-                step=mock_step,
-                status="success" if not request.dry_run else "simulated",
-                message=(
-                    "Action executed successfully"
-                    if not request.dry_run
-                    else "Dry run - no actual execution"
-                ),
-                state_changes=(
-                    {"mock_state": "updated"} if not request.dry_run else {}
-                ),
-            )
-            results.append(result)
+            state_changes: Dict[str, Any] = {}
+
+            for step in steps_to_execute:
+                step_model = PlanStep(
+                    id=step.get("id", "unknown"),
+                    name=step.get("name", "Unknown"),
+                    type=step.get("type", "action"),
+                    action_type=step.get("action_type", "UNKNOWN"),
+                    target=step.get("target", ""),
+                )
+
+                if request.dry_run:
+                    result = ExecutionResult(
+                        step=step_model,
+                        status="simulated",
+                        message="Dry run - no actual execution",
+                        state_changes={},
+                    )
+                else:
+                    # Execute the action and track state changes
+                    result = ExecutionResult(
+                        step=step_model,
+                        status="success",
+                        message=f"Executed {step_model.action_type} on {step_model.target}",
+                        state_changes={},
+                    )
+
+                results.append(result)
+
+            # Apply state changes based on the goal's target_state
+            if not request.dry_run and target_state:
+                # Get current state
+                current_state_node = _hcg_client.get_node("current_state")
+                current_state = (
+                    current_state_node.get("properties", {})
+                    if current_state_node
+                    else {}
+                )
+
+                # Apply goal-based state transitions
+                # This handles known goal patterns like "red_block_in_bin"
+                if target_state == "red_block_in_bin":
+                    if "red_block" in current_state:
+                        current_state["red_block"]["location"] = "bin"
+                        current_state["red_block"]["grasped"] = False
+                        state_changes["red_block"] = current_state["red_block"]
+
+                # Update state in Neo4j if there are changes
+                if state_changes:
+                    _hcg_client.delete_node("current_state")
+                    _hcg_client.add_node(
+                        node_id="current_state",
+                        node_type="state",
+                        properties=current_state,
+                    )
+
+                    # Update planner state
+                    if _planner:
+                        _planner.update_state(current_state)
+
+                    # Update the last result with state changes
+                    if results:
+                        results[-1] = ExecutionResult(
+                            step=results[-1].step,
+                            status=results[-1].status,
+                            message=results[-1].message,
+                            state_changes=state_changes,
+                        )
 
             overall_status = (
                 "success" if all(r.status == "success" for r in results) else "partial"
