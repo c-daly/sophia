@@ -204,8 +204,11 @@ print('Clearing existing data...')
 client.clear_all()
 print('Seeding pick-and-place data...')
 seed_pick_and_place_data(client)
-nodes = client.get_all_nodes()
-print(f'Seeded {len(nodes)} nodes')
+# Verify seeding by counting nodes via direct Neo4j query
+with client.driver.session() as session:
+    result = session.run('MATCH (n:Node) RETURN count(n) as count')
+    count = result.single()['count']
+    print(f'Seeded {count} nodes')
 client.close()
 print('Done!')
 "
