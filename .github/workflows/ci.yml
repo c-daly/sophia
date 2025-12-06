@@ -4,14 +4,13 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main, develop ]
   schedule:
-    # Run full integration tests weekly on Sunday at 4 AM UTC
-    - cron: '0 4 * * 0'
+    # Run ML tests nightly at 3 AM UTC
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
-      run_integration:
-        description: 'Run full integration tests with services'
+      run_ml_tests:
+        description: 'Install ML dependencies and run full test suite including GPU tests'
         required: false
         default: false
         type: boolean
@@ -22,6 +21,7 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # Standard CI: Full tests with real services (Neo4j, Milvus)
+  # Skips ML tests that require PyTorch (marked with @pytest.mark.requires_torch)
   # Uses offset ports (47xxx, 49xxx) per LOGOS ecosystem standard (+40000 for sophia)
   # ---------------------------------------------------------------------------
   standard:
@@ -56,9 +56,40 @@ jobs:
         export SOPHIA_URL=http://localhost:48001
         export SOPHIA_API_TOKEN=test-token-for-sophia
         export RUN_SOPHIA_INTEGRATION=1
-      # Run ALL tests with services available
+      # Run tests excluding ML-specific tests (requires_torch marker)
       # --cov-fail-under=60: Enforce 60% minimum coverage
-      pytest_command: 'pytest tests/ -v --cov=sophia --cov-report=term --cov-report=xml --cov-fail-under=60 -r sS'
+      pytest_command: 'pytest tests/ -v --cov=sophia --cov-report=term --cov-report=xml --cov-fail-under=60 -m "not requires_torch" -r sS'
       coverage_python_version: '3.12'
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Nightly ML Tests: Full test suite with PyTorch and ML dependencies
+  # Runs on schedule or manual trigger with run_ml_tests=true
+  # ---------------------------------------------------------------------------
+  ml-tests:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_ml_tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Install dependencies with ML extras
+        run: poetry install --with dev,ml
+      
+      - name: Run ML tests
+        run: |
+          poetry run pytest tests/ -v -m "requires_torch" --tb=short
+        env:
+          JEPA_BACKEND: stub  # Use stub backend for CI (no GPU)
