@@ -10,6 +10,12 @@ Configuration via environment variables:
 - JEPA_DEVICE: Device for inference (default: cuda:0)
 - JEPA_DTYPE: Data type (default: fp16)
 
+OpenTelemetry Metrics:
+- jepa_inference_total: Counter of inference operations
+- jepa_inference_duration_seconds: Histogram of inference latencies
+- jepa_model_load_time_seconds: Gauge for model load time
+- jepa_gpu_memory_bytes: Gauge for GPU memory usage
+
 Usage:
     export JEPA_BACKEND=poc
     export JEPA_WEIGHTS_PATH=/path/to/checkpoint.pth
@@ -30,6 +36,7 @@ from sophia.jepa.models import (
     ImaginedState,
     Entity,
 )
+from sophia.jepa.metrics import get_jepa_metrics, JEPAMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +166,12 @@ class PoCJEPABackend:
         self._load_time_seconds: Optional[float] = None
         self._device: Optional[str] = None
         
-        # Metrics tracking
+        # Metrics tracking (internal)
         self._inference_count = 0
         self._total_inference_time = 0.0
+        
+        # OpenTelemetry metrics
+        self._metrics: JEPAMetrics = get_jepa_metrics("poc")
         
         logger.info(
             f"Initialized PoCJEPABackend: version={model_version}, "
@@ -264,6 +274,17 @@ class PoCJEPABackend:
             
             self._load_time_seconds = time.time() - start_time
             
+            # Record model load metrics
+            self._metrics.record_model_load(
+                load_time_seconds=self._load_time_seconds,
+                embedding_dim=embed_dim,
+            )
+            
+            # Record GPU memory if available
+            if "cuda" in self.device and torch.cuda.is_available():
+                gpu_memory = torch.cuda.memory_allocated(self.device)
+                self._metrics.record_gpu_memory(gpu_memory, self.device)
+            
             logger.info(
                 f"V-JEPA checkpoint loaded in {self._load_time_seconds:.2f}s "
                 f"(device={self.device}, embed_dim={embed_dim})"
@@ -311,6 +332,13 @@ class PoCJEPABackend:
             self._inference_count += 1
             self._total_inference_time += inference_time
             
+            # Record embedding generation metrics
+            self._metrics.record_inference(
+                duration_seconds=inference_time,
+                success=True,
+                operation="embed",
+            )
+            
             logger.debug(
                 f"Generated {embedding_type} embedding in {inference_time*1000:.2f}ms"
             )
@@ -318,6 +346,12 @@ class PoCJEPABackend:
             return embedding
             
         except Exception as e:
+            # Record failed inference
+            self._metrics.record_inference(
+                duration_seconds=time.time() - start_time,
+                success=False,
+                operation="embed",
+            )
             logger.error(f"Embedding generation failed: {e}")
             raise
     
@@ -377,6 +411,19 @@ class PoCJEPABackend:
         inference_time = time.time() - start_time
         self._inference_count += 1
         self._total_inference_time += inference_time
+        
+        # Record simulation metrics
+        self._metrics.record_inference(
+            duration_seconds=inference_time,
+            success=True,
+            operation="simulate",
+        )
+        
+        # Update GPU memory metrics if using CUDA
+        torch = _get_torch()
+        if torch and "cuda" in self.device and torch.cuda.is_available():
+            gpu_memory = torch.cuda.memory_allocated(self.device)
+            self._metrics.record_gpu_memory(gpu_memory, self.device)
         
         logger.info(
             f"Simulation {simulation_id} complete in {inference_time*1000:.2f}ms: "
@@ -586,38 +633,55 @@ class PoCJEPABackend:
         
         start_time = time.time()
         
-        # Generate embeddings
-        visual_embedding = self._generate_embedding(
-            f"{sample_id}_{file_path}", "visual"
-        )
-        physics_embedding = self._generate_embedding(
-            f"{sample_id}_{file_path}", "physics"
-        )
-        
-        inference_time = time.time() - start_time
-        
-        result = {
-            "sample_id": sample_id,
-            "media_type": media_type,
-            "embeddings": {
-                "visual": visual_embedding,
-                "physics": physics_embedding,
-            },
-            "embedding_dim": 768,
-            "model_version": self.model_version,
-            "confidence": 0.85,
-            "backend": "poc",
-            "device": self.device,
-            "inference_time_ms": inference_time * 1000,
-            "metadata": {
-                "file_path": file_path,
-                "question": question,
-                "media_metadata": metadata,
-            },
-        }
-        
-        logger.info(
-            f"Generated embeddings for sample {sample_id} in {inference_time*1000:.2f}ms"
-        )
-        
-        return result
+        try:
+            # Generate embeddings
+            visual_embedding = self._generate_embedding(
+                f"{sample_id}_{file_path}", "visual"
+            )
+            physics_embedding = self._generate_embedding(
+                f"{sample_id}_{file_path}", "physics"
+            )
+            
+            inference_time = time.time() - start_time
+            
+            # Record process_media metrics
+            self._metrics.record_inference(
+                duration_seconds=inference_time,
+                success=True,
+                operation="process_media",
+            )
+            
+            result = {
+                "sample_id": sample_id,
+                "media_type": media_type,
+                "embeddings": {
+                    "visual": visual_embedding,
+                    "physics": physics_embedding,
+                },
+                "embedding_dim": 768,
+                "model_version": self.model_version,
+                "confidence": 0.85,
+                "backend": "poc",
+                "device": self.device,
+                "inference_time_ms": inference_time * 1000,
+                "metadata": {
+                    "file_path": file_path,
+                    "question": question,
+                    "media_metadata": metadata,
+                },
+            }
+            
+            logger.info(
+                f"Generated embeddings for sample {sample_id} in {inference_time*1000:.2f}ms"
+            )
+            
+            return result
+            
+        except Exception as e:
+            # Record failed process_media
+            self._metrics.record_inference(
+                duration_seconds=time.time() - start_time,
+                success=False,
+                operation="process_media",
+            )
+            raise
