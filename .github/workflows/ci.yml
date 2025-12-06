@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main, develop ]
   schedule:
     # Run full integration tests weekly on Sunday at 4 AM UTC
     - cron: '0 4 * * 0'
