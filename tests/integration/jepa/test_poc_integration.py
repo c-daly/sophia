@@ -12,11 +12,7 @@ Run with: pytest tests/integration/jepa/ -v -m integration
 Skip GPU tests: pytest tests/integration/jepa/ -v -m "integration and not gpu"
 """
 
-import os
 import pytest
-import tempfile
-from pathlib import Path
-from typing import Dict, Any
 
 pytestmark = [pytest.mark.integration]
 
@@ -24,7 +20,7 @@ pytestmark = [pytest.mark.integration]
 def _torch_available() -> bool:
     """Check if PyTorch is available."""
     try:
-        import torch
+        import torch  # noqa: F401
         return True
     except ImportError:
         return False
@@ -39,13 +35,15 @@ def _gpu_available() -> bool:
         return False
 
 
-# Skip markers
-requires_torch = pytest.mark.skipif(
+# Skip markers - combine pytest.mark for CI filtering with skipif for runtime
+requires_torch = pytest.mark.requires_torch
+_skip_no_torch = pytest.mark.skipif(
     not _torch_available(),
     reason="PyTorch not available"
 )
 
-requires_gpu = pytest.mark.skipif(
+requires_gpu = pytest.mark.gpu
+_skip_no_gpu = pytest.mark.skipif(
     not _gpu_available(),
     reason="GPU not available"
 )
@@ -83,6 +81,7 @@ def poc_backend(minimal_checkpoint):
 
 
 @requires_torch
+@_skip_no_torch
 class TestPoCJEPABackendIntegration:
     """Integration tests for PoCJEPABackend with real PyTorch."""
 
@@ -191,6 +190,8 @@ class TestPoCJEPABackendIntegration:
 
 @requires_torch
 @requires_gpu
+@_skip_no_torch
+@_skip_no_gpu
 class TestPoCJEPABackendGPU:
     """GPU-specific integration tests."""
 
@@ -206,7 +207,7 @@ class TestPoCJEPABackendGPU:
         
         entities = [Entity(id="obj", type="object")]
         context = SimulationContext(entities=entities)
-        result = backend.simulate(context, k_steps=1)
+        _result = backend.simulate(context, k_steps=1)  # noqa: F841
         
         # Check device in health status
         status = backend.get_health_status()
@@ -219,7 +220,7 @@ class TestPoCJEPABackendGPU:
         from sophia.jepa.backends.poc import PoCJEPABackend
         from sophia.jepa.models import SimulationContext, Entity
         
-        initial_memory = torch.cuda.memory_allocated()
+        _initial_memory = torch.cuda.memory_allocated()  # noqa: F841
         
         backend = PoCJEPABackend(
             weights_path=minimal_checkpoint,
@@ -237,6 +238,7 @@ class TestPoCJEPABackendGPU:
 
 
 @requires_torch
+@_skip_no_torch
 class TestJEPARunnerIntegration:
     """Integration tests for JEPARunner with PoC backend."""
 

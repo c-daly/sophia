@@ -13,14 +13,11 @@ Tests are gated on GPU/weights availability where appropriate.
 import os
 import pytest
 from unittest.mock import patch, MagicMock
-from typing import Dict, Any
 
 from sophia.jepa.models import (
     SimulationContext,
     SimulationResult,
     Entity,
-    SensorReference,
-    TalosMetadata,
 )
 
 pytestmark = pytest.mark.unit
@@ -29,7 +26,7 @@ pytestmark = pytest.mark.unit
 def _torch_available() -> bool:
     """Check if PyTorch is available."""
     try:
-        import torch
+        import torch  # noqa: F401
         return True
     except ImportError:
         return False
@@ -44,13 +41,17 @@ def _gpu_available() -> bool:
         return False
 
 
-# Skip markers for GPU-dependent tests
-requires_torch = pytest.mark.skipif(
+# Skip markers for torch/GPU-dependent tests
+# Use pytest.mark for CI filtering (-m "not requires_torch")
+# Use skipif for runtime skipping when package not available
+requires_torch = pytest.mark.requires_torch
+_skip_no_torch = pytest.mark.skipif(
     not _torch_available(),
     reason="PyTorch not available"
 )
 
-requires_gpu = pytest.mark.skipif(
+requires_gpu = pytest.mark.gpu
+_skip_no_gpu = pytest.mark.skipif(
     not _gpu_available(),
     reason="GPU not available"
 )
@@ -200,6 +201,7 @@ class TestPoCJEPABackendEmbeddingShapes:
     """Test embedding dimensions and key stability."""
 
     @requires_torch
+    @_skip_no_torch
     def test_embedding_dimension_is_768(self):
         """Verify embeddings are 768-dimensional."""
         from sophia.jepa.backends.poc import PoCJEPABackend
@@ -217,6 +219,7 @@ class TestPoCJEPABackendEmbeddingShapes:
         assert all(isinstance(x, float) for x in embedding)
 
     @requires_torch
+    @_skip_no_torch
     def test_embeddings_are_deterministic(self):
         """Verify same input produces same embedding."""
         from sophia.jepa.backends.poc import PoCJEPABackend
@@ -230,6 +233,7 @@ class TestPoCJEPABackendEmbeddingShapes:
         assert embedding1 == embedding2
 
     @requires_torch
+    @_skip_no_torch
     def test_different_types_produce_different_embeddings(self):
         """Verify visual and physics embeddings differ."""
         from sophia.jepa.backends.poc import PoCJEPABackend
@@ -247,6 +251,7 @@ class TestPoCJEPABackendSimulationOutput:
     """Test simulation output structure and contract."""
 
     @requires_torch
+    @_skip_no_torch
     def test_simulation_result_structure(self):
         """Verify SimulationResult has all required fields."""
         from sophia.jepa.backends.poc import PoCJEPABackend
@@ -276,6 +281,7 @@ class TestPoCJEPABackendSimulationOutput:
                 os.unlink(f.name)
 
     @requires_torch
+    @_skip_no_torch
     def test_imagined_states_have_correct_metadata(self):
         """Verify imagined states contain PoC backend metadata."""
         from sophia.jepa.backends.poc import PoCJEPABackend
