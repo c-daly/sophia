@@ -16,6 +16,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   publish:
     uses: c-daly/logos/.github/workflows/reusable-publish.yml@main
