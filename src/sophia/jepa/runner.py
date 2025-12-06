@@ -343,9 +343,25 @@ class JEPARunner:
 
         if backend_choice == "stub":
             return StubJEPABackend(model_version=model_version, confidence_decay=confidence_decay)
+        
+        elif backend_choice == "poc":
+            from sophia.jepa.poc_backend import PoCJEPABackend
+            
+            weights_path = os.getenv("JEPA_WEIGHTS_PATH")
+            device = os.getenv("JEPA_DEVICE", "cpu")
+            dtype = os.getenv("JEPA_DTYPE", "fp32")
+            
+            logger.info(f"Loading PoC V-JEPA backend (device={device}, dtype={dtype})")
+            return PoCJEPABackend(
+                model_version=model_version,
+                confidence_decay=confidence_decay,
+                weights_path=weights_path,
+                device=device,
+                dtype=dtype,
+            )
 
         logger.warning(
-            "JEPA_BACKEND set to a non-stub value, but no real backend is wired. "
+            f"JEPA_BACKEND set to '{backend_choice}', but no matching backend found. "
             "Falling back to stub."
         )
         return StubJEPABackend(model_version=model_version, confidence_decay=confidence_decay)
