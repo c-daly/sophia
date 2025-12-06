@@ -7,24 +7,84 @@ The JEPA (Joint-Embedding Predictive Architecture) runner provides dynamics simu
 - Media sample processing (images, video) for physical world understanding
 - Cross-modal embedding generation for semantic reasoning
 
-This is a CPU-friendly stub implementation designed to be swapped with Meta's real JEPA model or hardware simulators (Talos/Gazebo) in Phase 3.
+The runner supports multiple backends:
+- **Stub backend** (default): CPU-friendly stub for development and CI
+- **PoC backend**: Real V-JEPA model support with GPU acceleration
+
+## Backend Selection
+
+The backend is selected via the `JEPA_BACKEND` environment variable:
+
+| Value | Backend | Description |
+|-------|---------|-------------|
+| `stub` | StubJEPABackend | CPU-friendly stub (default) |
+| `poc` | PoCJEPABackend | PoC with real V-JEPA model |
+| `real` | PoCJEPABackend | Alias for `poc` |
+
+### Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `JEPA_BACKEND` | `stub` | Backend selection |
+| `JEPA_WEIGHTS_PATH` | — | Local path to checkpoint file (required for poc/real) |
+| `JEPA_WEIGHTS_URI` | — | Remote URI for checkpoint download (fallback) |
+| `JEPA_DEVICE` | `cuda:0` | Device for inference |
+| `JEPA_DTYPE` | `fp16` | Data type for inference |
+
+### Using the PoC Backend
+
+```bash
+# Install with ML dependencies
+poetry install --with ml
+
+# Configure and run
+export JEPA_BACKEND=poc
+export JEPA_WEIGHTS_PATH=/path/to/checkpoint.pth
+export JEPA_DEVICE=cuda:0
+
+# Start Sophia service
+poetry run uvicorn sophia.api.app:app --reload
+```
+
+### Health Status
+
+The `/health` endpoint includes JEPA backend status:
+
+```json
+{
+  "components": {
+    "jepa": {
+      "backend": "poc",
+      "model_loaded": true,
+      "gpu_available": true,
+      "device": "cuda:0",
+      "inference_count": 42,
+      "avg_inference_time_ms": 15.3
+    }
+  }
+}
+```
 
 ## Architecture
 
 ### Components
 
 1. **JEPA Runner** (`src/sophia/jepa/runner.py`)
-   - CPU-friendly stub implementation for dynamics simulation and media processing
+   - Pluggable backend architecture with `JEPABackend` protocol
+   - Backend selection via environment variable
    - Performs k-step rollouts with confidence decay
    - Processes media samples to generate visual and physics embeddings
-   - Can be swapped with hardware simulators (Talos/Gazebo) or real JEPA model
 
-2. **Simulation Models** (`src/sophia/jepa/models.py`)
+2. **Backends** (`src/sophia/jepa/backends/`)
+   - `StubJEPABackend`: CPU-friendly stub for tests/CI
+   - `PoCJEPABackend`: PoC with real model, GPU support, metrics
+
+3. **Simulation Models** (`src/sophia/jepa/models.py`)
    - Context schema for simulation requests
    - Entity, sensor, and metadata models
    - Imagined process and state models
 
-3. **API Endpoints**
+4. **API Endpoints**
    - `/simulate` - RESTful endpoint for running simulations
    - `/ingest/media` - Media upload with automatic JEPA processing
    - Results stored in Neo4j HCG with embeddings in Milvus
