@@ -26,7 +26,7 @@ import os
 import time
 import uuid
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
 from sophia.jepa.models import (
@@ -41,11 +41,11 @@ from sophia.jepa.metrics import get_jepa_metrics, JEPAMetrics
 logger = logging.getLogger(__name__)
 
 # Lazy imports for torch - only load when needed
-_torch = None
-_torch_available = None
+_torch: Any = None
+_torch_available: Optional[bool] = None
 
 
-def _get_torch():
+def _get_torch() -> Any:
     """Lazy import torch to avoid startup cost when using stub backend."""
     global _torch, _torch_available
     if _torch_available is None:
@@ -66,7 +66,8 @@ def _check_gpu_available() -> bool:
     torch = _get_torch()
     if torch is None:
         return False
-    return torch.cuda.is_available()
+    result: bool = torch.cuda.is_available()
+    return result
 
 
 def _get_device(requested_device: str) -> str:
@@ -97,7 +98,7 @@ class ProjectionHead:
         self._initialized = False
         self._linear = None
 
-    def _lazy_init(self):
+    def _lazy_init(self) -> None:
         """Lazy initialization of projection weights."""
         if self._initialized:
             return
@@ -107,18 +108,23 @@ class ProjectionHead:
             raise RuntimeError("PyTorch required for projection head")
 
         # Simple linear projection - in production would be learned weights
-        self._linear = torch.nn.Linear(self.input_dim, self.output_dim, bias=False)
-        self._linear.to(self.device)
-        self._linear.eval()
+        linear = torch.nn.Linear(self.input_dim, self.output_dim, bias=False)
+        linear.to(self.device)
+        linear.eval()
+        self._linear = linear
         self._initialized = True
         logger.info(
             f"Projection head initialized: {self.input_dim} -> {self.output_dim}"
         )
 
-    def project(self, embeddings) -> List[float]:
+    def project(self, embeddings: Any) -> List[float]:
         """Project embeddings from model dimension to target dimension."""
         self._lazy_init()
         torch = _get_torch()
+        if torch is None:
+            raise RuntimeError("PyTorch required for projection")
+        if self._linear is None:
+            raise RuntimeError("Projection head not initialized")
 
         with torch.no_grad():
             if not isinstance(embeddings, torch.Tensor):
@@ -128,7 +134,8 @@ class ProjectionHead:
                 embeddings = embeddings.unsqueeze(0)
 
             projected = self._linear(embeddings)
-            return projected.squeeze(0).cpu().tolist()
+            result: List[float] = projected.squeeze(0).cpu().tolist()
+            return result
 
 
 class PoCJEPABackend:
@@ -186,7 +193,8 @@ class PoCJEPABackend:
     def device(self) -> str:
         """Get the actual device being used."""
         if self._device is None:
-            self._device = _get_device(self._requested_device)
+            requested = self._requested_device if self._requested_device else "cpu"
+            self._device = _get_device(requested)
         return self._device
 
     @property
@@ -216,7 +224,7 @@ class PoCJEPABackend:
             ),
         }
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Ensure model is loaded, loading if necessary."""
         if self._model is not None:
             return
@@ -255,19 +263,22 @@ class PoCJEPABackend:
             # Extract model config and weights
             # This is a simplified loader - real implementation would use
             # the actual V-JEPA model architecture
+            model_data: Any
+            embed_dim: int
             if isinstance(checkpoint, dict):
                 if "model" in checkpoint:
-                    self._model = checkpoint["model"]
+                    model_data = checkpoint["model"]
                 elif "state_dict" in checkpoint:
-                    self._model = checkpoint["state_dict"]
+                    model_data = checkpoint["state_dict"]
                 else:
-                    self._model = checkpoint
+                    model_data = checkpoint
 
                 # Get embedding dimension from checkpoint if available
                 embed_dim = checkpoint.get("embed_dim", 768)
             else:
-                self._model = checkpoint
+                model_data = checkpoint
                 embed_dim = 768
+            self._model = model_data
 
             # Initialize projection head
             self._projection_head = ProjectionHead(
@@ -347,7 +358,8 @@ class PoCJEPABackend:
                 f"Generated {embedding_type} embedding in {inference_time*1000:.2f}ms"
             )
 
-            return embedding
+            result: List[float] = list(embedding)
+            return result
 
         except Exception as e:
             # Record failed inference

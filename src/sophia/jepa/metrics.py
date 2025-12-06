@@ -21,16 +21,16 @@ Usage:
 """
 
 import logging
-from typing import Optional
+from typing import Any, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
 # Lazy import opentelemetry metrics to avoid startup cost
 _meter = None
-_metrics_available = None
+_metrics_available: Optional[bool] = None
 
 
-def _get_meter():
+def _get_meter() -> Optional[Any]:
     """Lazy import and get meter for JEPA metrics."""
     global _meter, _metrics_available
     if _metrics_available is None:
@@ -73,7 +73,7 @@ class JEPAMetrics:
         self._model_ready_gauge = None
         self._embedding_dim_gauge = None
 
-    def _ensure_initialized(self):
+    def _ensure_initialized(self) -> None:
         """Lazy initialization of metric instruments."""
         if self._initialized:
             return
@@ -135,7 +135,7 @@ class JEPAMetrics:
         self._initialized = True
         logger.info(f"JEPA metrics initialized for backend: {self.backend_name}")
 
-    def _observe_load_time(self, options):
+    def _observe_load_time(self, options: Any) -> Iterator[Any]:
         """Callback for load time gauge."""
         if self._last_load_time is not None:
             yield metrics.Observation(
@@ -143,7 +143,7 @@ class JEPAMetrics:
                 {"backend": self.backend_name},
             )
 
-    def _observe_gpu_memory(self, options):
+    def _observe_gpu_memory(self, options: Any) -> Iterator[Any]:
         """Callback for GPU memory gauge."""
         if self._last_gpu_memory is not None:
             yield metrics.Observation(
@@ -151,14 +151,14 @@ class JEPAMetrics:
                 {"backend": self.backend_name},
             )
 
-    def _observe_model_ready(self, options):
+    def _observe_model_ready(self, options: Any) -> Iterator[Any]:
         """Callback for model ready gauge."""
         yield metrics.Observation(
             self._last_model_ready,
             {"backend": self.backend_name},
         )
 
-    def _observe_embedding_dim(self, options):
+    def _observe_embedding_dim(self, options: Any) -> Iterator[Any]:
         """Callback for embedding dimension gauge."""
         yield metrics.Observation(
             self._last_embedding_dim,
@@ -170,7 +170,7 @@ class JEPAMetrics:
         duration_seconds: float,
         success: bool = True,
         operation: str = "simulate",
-    ):
+    ) -> None:
         """Record an inference operation.
 
         Args:
@@ -197,7 +197,7 @@ class JEPAMetrics:
             f"success={success}"
         )
 
-    def record_model_load(self, load_time_seconds: float, embedding_dim: int = 768):
+    def record_model_load(self, load_time_seconds: float, embedding_dim: int = 768) -> None:
         """Record model load event.
 
         Args:
@@ -212,7 +212,7 @@ class JEPAMetrics:
             f"Recorded model load: {load_time_seconds:.2f}s, embed_dim={embedding_dim}"
         )
 
-    def record_gpu_memory(self, bytes_used: int, device: str = "cuda:0"):
+    def record_gpu_memory(self, bytes_used: int, device: str = "cuda:0") -> None:
         """Record GPU memory usage.
 
         Args:
@@ -225,7 +225,7 @@ class JEPAMetrics:
             f"Recorded GPU memory: {bytes_used / (1024*1024):.1f}MB on {device}"
         )
 
-    def record_model_unload(self):
+    def record_model_unload(self) -> None:
         """Record model unload event."""
         self._ensure_initialized()
         self._last_model_ready = 0

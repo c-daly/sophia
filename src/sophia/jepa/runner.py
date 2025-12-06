@@ -340,7 +340,8 @@ class JEPARunner:
         Returns backend-specific health information for use in /health endpoint.
         """
         if hasattr(self._backend, "get_health_status"):
-            return self._backend.get_health_status()
+            status: Dict[str, Any] = self._backend.get_health_status()
+            return status
 
         # Fallback for backends without health status
         return {
