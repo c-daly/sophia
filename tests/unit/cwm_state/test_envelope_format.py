@@ -4,9 +4,10 @@ These tests validate the structure and format of CWMState envelopes
 returned by JEPARunner. No external services needed.
 """
 
+import os
 import pytest
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from sophia.jepa.runner import JEPARunner
 from sophia.jepa.models import SimulationContext, Entity
@@ -17,8 +18,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def jepa_runner():
-    """Fixture for JEPA runner."""
-    return JEPARunner(model_version="jepa-stub-v1.0")
+    """Fixture for JEPA runner using stub backend."""
+    # Ensure we use stub backend regardless of environment
+    with patch.dict(os.environ, {"JEPA_BACKEND": "stub"}):
+        return JEPARunner(model_version="jepa-stub-v1.0")
 
 
 @pytest.fixture

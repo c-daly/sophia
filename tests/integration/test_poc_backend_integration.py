@@ -2,6 +2,8 @@
 
 This test validates that the PoC backend works end-to-end with the same
 API contracts as the stub backend.
+
+These tests require PyTorch to be installed.
 """
 
 import os
@@ -13,7 +15,8 @@ from sophia.jepa import JEPARunner
 from sophia.jepa.models import SimulationContext, Entity
 
 
-pytestmark = pytest.mark.integration
+# Mark all tests as requiring PyTorch (excluded from standard CI via -m "not requires_torch")
+pytestmark = [pytest.mark.integration, pytest.mark.requires_torch]
 
 
 @pytest.fixture
