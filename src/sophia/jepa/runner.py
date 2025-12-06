@@ -45,7 +45,9 @@ class JEPABackend(Protocol):
 class StubJEPABackend:
     """Existing CPU-friendly stub implementation."""
 
-    def __init__(self, model_version: str = "jepa-stub-v1.0", confidence_decay: float = 0.05):
+    def __init__(
+        self, model_version: str = "jepa-stub-v1.0", confidence_decay: float = 0.05
+    ):
         self.model_version = model_version
         self.confidence_decay = confidence_decay
         logger.info(f"Initialized JEPA stub backend: {model_version}")
@@ -59,7 +61,9 @@ class StubJEPABackend:
         simulation_id = str(uuid.uuid4())
         assumptions = assumptions or []
 
-        logger.info(f"Starting JEPA simulation {simulation_id} with {k_steps} steps (stub)")
+        logger.info(
+            f"Starting JEPA simulation {simulation_id} with {k_steps} steps (stub)"
+        )
 
         imagined_processes = self._generate_processes(
             context, k_steps, assumptions, simulation_id
@@ -318,7 +322,9 @@ class JEPARunner:
         k_steps: int = 5,
         assumptions: List[str] | None = None,
     ) -> SimulationResult:
-        return self._backend.simulate(context=context, k_steps=k_steps, assumptions=assumptions)
+        return self._backend.simulate(
+            context=context, k_steps=k_steps, assumptions=assumptions
+        )
 
     async def process_media_sample(
         self,
@@ -342,18 +348,27 @@ class JEPARunner:
         backend_choice = os.getenv("JEPA_BACKEND", "stub").lower()
 
         if backend_choice == "stub":
-            return StubJEPABackend(model_version=model_version, confidence_decay=confidence_decay)
-        
+            return StubJEPABackend(
+                model_version=model_version, confidence_decay=confidence_decay
+            )
+
         elif backend_choice == "poc":
             from sophia.jepa.poc_backend import PoCJEPABackend
-            
+
             weights_path = os.getenv("JEPA_WEIGHTS_PATH")
             device = os.getenv("JEPA_DEVICE", "cpu")
             dtype = os.getenv("JEPA_DTYPE", "fp32")
-            
+
+            # Use PoC-specific version if default stub version is being used
+            poc_version = (
+                "v-jepa-poc-v1.0"
+                if model_version == "jepa-stub-v1.0"
+                else model_version
+            )
+
             logger.info(f"Loading PoC V-JEPA backend (device={device}, dtype={dtype})")
             return PoCJEPABackend(
-                model_version=model_version,
+                model_version=poc_version,
                 confidence_decay=confidence_decay,
                 weights_path=weights_path,
                 device=device,
@@ -364,4 +379,6 @@ class JEPARunner:
             f"JEPA_BACKEND set to '{backend_choice}', but no matching backend found. "
             "Falling back to stub."
         )
-        return StubJEPABackend(model_version=model_version, confidence_decay=confidence_decay)
+        return StubJEPABackend(
+            model_version=model_version, confidence_decay=confidence_decay
+        )

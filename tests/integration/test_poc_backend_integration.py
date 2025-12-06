@@ -69,7 +69,7 @@ async def test_poc_media_processing_integration(poc_runner, sample_image):
     assert 0.0 < result["confidence"] <= 1.0
 
     # Validate PoC-specific metadata
-    assert result["model_version"] == "jepa-stub-v1.0"
+    assert result["model_version"] == "v-jepa-poc-v1.0"
     assert result["metadata"]["device"] == "cpu"
 
 
@@ -96,7 +96,7 @@ def test_poc_simulation_integration(poc_runner):
     # Validate all states are marked as imagined
     for state in result.imagined_states:
         assert state.imagined is True
-        assert state.model_version == "jepa-stub-v1.0"
+        assert state.model_version == "v-jepa-poc-v1.0"
 
     # Validate PoC-specific process metadata
     for process in result.imagined_processes:
