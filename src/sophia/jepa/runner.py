@@ -50,7 +50,19 @@ class StubJEPABackend:
     ):
         self.model_version = model_version
         self.confidence_decay = confidence_decay
+        self._inference_count = 0
         logger.info(f"Initialized JEPA stub backend: {model_version}")
+
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get health status for health probes."""
+        return {
+            "backend": "stub",
+            "model_version": self.model_version,
+            "model_loaded": True,  # Stub is always "loaded"
+            "gpu_available": False,
+            "device": "cpu",
+            "inference_count": self._inference_count,
+        }
 
     def simulate(
         self,
@@ -60,6 +72,7 @@ class StubJEPABackend:
     ) -> SimulationResult:
         simulation_id = str(uuid.uuid4())
         assumptions = assumptions or []
+        self._inference_count += 1
 
         logger.info(
             f"Starting JEPA simulation {simulation_id} with {k_steps} steps (stub)"
@@ -316,6 +329,26 @@ class JEPARunner:
             f"Initialized JEPARunner with backend: {self._backend.__class__.__name__}"
         )
 
+    @property
+    def backend_name(self) -> str:
+        """Get the name of the current backend."""
+        return self._backend.__class__.__name__
+
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get health status for health probes.
+
+        Returns backend-specific health information for use in /health endpoint.
+        """
+        if hasattr(self._backend, "get_health_status"):
+            status: Dict[str, Any] = self._backend.get_health_status()
+            return status
+
+        # Fallback for backends without health status
+        return {
+            "backend": self.backend_name,
+            "model_version": self.model_version,
+        }
+
     def simulate(
         self,
         context: SimulationContext,
@@ -345,6 +378,13 @@ class JEPARunner:
     def _select_backend(
         self, model_version: str, confidence_decay: float
     ) -> JEPABackend:
+        """Select backend based on JEPA_BACKEND environment variable.
+
+        Supported values:
+        - 'stub' (default): CPU-friendly stub for tests/CI
+        - 'poc': PoC backend with real V-JEPA model support (requires GPU + weights)
+        - 'real': Alias for 'poc' (future: production-optimized backend)
+        """
         backend_choice = os.getenv("JEPA_BACKEND", "stub").lower()
 
         if backend_choice == "stub":
@@ -352,32 +392,30 @@ class JEPARunner:
                 model_version=model_version, confidence_decay=confidence_decay
             )
 
-        elif backend_choice == "poc":
-            from sophia.jepa.poc_backend import PoCJEPABackend
+        if backend_choice in ("poc", "real"):
+            try:
+                from sophia.jepa.backends.poc import PoCJEPABackend
 
-            weights_path = os.getenv("JEPA_WEIGHTS_PATH")
-            device = os.getenv("JEPA_DEVICE", "cpu")
-            dtype = os.getenv("JEPA_DTYPE", "fp32")
-
-            # Use PoC-specific version if default stub version is being used
-            poc_version = (
-                "v-jepa-poc-v1.0"
-                if model_version == "jepa-stub-v1.0"
-                else model_version
-            )
-
-            logger.info(f"Loading PoC V-JEPA backend (device={device}, dtype={dtype})")
-            return PoCJEPABackend(
-                model_version=poc_version,
-                confidence_decay=confidence_decay,
-                weights_path=weights_path,
-                device=device,
-                dtype=dtype,
-            )
+                return PoCJEPABackend(
+                    model_version=model_version.replace("stub", "poc"),
+                    confidence_decay=confidence_decay,
+                )
+            except ImportError as e:
+                logger.error(
+                    f"Failed to import PoCJEPABackend: {e}. "
+                    "Ensure PyTorch is installed: pip install torch"
+                )
+                raise RuntimeError(
+                    f"JEPA_BACKEND={backend_choice} requires PyTorch. "
+                    "Install with: pip install torch"
+                ) from e
+            except Exception as e:
+                logger.error(f"Failed to initialize PoCJEPABackend: {e}")
+                raise
 
         logger.warning(
-            f"JEPA_BACKEND set to '{backend_choice}', but no matching backend found. "
-            "Falling back to stub."
+            f"Unknown JEPA_BACKEND value '{backend_choice}'. "
+            "Valid options: stub, poc, real. Falling back to stub."
         )
         return StubJEPABackend(
             model_version=model_version, confidence_decay=confidence_decay

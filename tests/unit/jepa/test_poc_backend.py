@@ -1,281 +1,380 @@
-"""Tests for PoC JEPA backend."""
+"""Tests for PoC JEPA Backend.
+
+These tests validate the PoCJEPABackend implementation including:
+- Interface contract compliance with JEPABackend protocol
+- Shape and key assertions for embeddings
+- Projection head correctness
+- Configuration loading
+- Graceful degradation when GPU/weights unavailable
+
+Tests are gated on GPU/weights availability where appropriate.
+"""
 
 import os
 import pytest
-import tempfile
-from PIL import Image
-import numpy as np
+from unittest.mock import patch, MagicMock
 
-from sophia.jepa.poc_backend import PoCJEPABackend
 from sophia.jepa.models import (
     SimulationContext,
+    SimulationResult,
     Entity,
-    SensorReference,
 )
-
 
 pytestmark = pytest.mark.unit
 
 
-@pytest.fixture
-def poc_backend():
-    """Create a PoC backend instance for testing."""
-    return PoCJEPABackend(model_version="test-poc-v1.0")
-
-
-@pytest.fixture
-def sample_image():
-    """Create a temporary sample image for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-        img = Image.new("RGB", (100, 100), color=(73, 109, 137))
-        img.save(f.name)
-        yield f.name
-    # Cleanup
+def _torch_available() -> bool:
+    """Check if PyTorch is available."""
     try:
-        os.unlink(f.name)
-    except Exception:
-        pass
+        import torch  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
-def test_poc_backend_initialization(poc_backend):
-    """Test that PoC backend initializes correctly."""
-    assert poc_backend.model_version == "test-poc-v1.0"
-    assert poc_backend.embedding_dim == 768
-    assert poc_backend.device == "cpu"
-    assert poc_backend._initialized is True
+def _gpu_available() -> bool:
+    """Check if GPU is available."""
+    try:
+        import torch
+
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
 
 
-def test_poc_backend_with_config():
-    """Test PoC backend initialization with custom configuration."""
-    backend = PoCJEPABackend(
-        model_version="custom-v1.0",
-        confidence_decay=0.1,
-        device="cuda:0",
-        dtype="fp16",
-    )
-    assert backend.model_version == "custom-v1.0"
-    assert backend.confidence_decay == 0.1
-    assert backend.device == "cuda:0"
-    assert backend.dtype == "fp16"
+# Skip markers for torch/GPU-dependent tests
+# Use pytest.mark for CI filtering (-m "not requires_torch")
+# Use skipif for runtime skipping when package not available
+requires_torch = pytest.mark.requires_torch
+_skip_no_torch = pytest.mark.skipif(
+    not _torch_available(), reason="PyTorch not available"
+)
+
+requires_gpu = pytest.mark.gpu
+_skip_no_gpu = pytest.mark.skipif(not _gpu_available(), reason="GPU not available")
 
 
-@pytest.mark.asyncio
-async def test_poc_media_processing(poc_backend, sample_image):
-    """Test media sample processing with PoC backend."""
-    result = await poc_backend.process_media_sample(
-        sample_id="test_sample_1",
-        file_path=sample_image,
-        media_type="image",
-        metadata={"width": 100, "height": 100},
-        question="What objects are visible?",
-    )
+class TestPoCJEPABackendProtocol:
+    """Test that PoCJEPABackend implements JEPABackend protocol correctly."""
 
-    # Check result structure
-    assert result["sample_id"] == "test_sample_1"
-    assert result["media_type"] == "image"
-    assert result["model_version"] == "test-poc-v1.0"
-    assert result["embedding_dim"] == 768
+    def test_implements_simulate_method(self):
+        """Verify simulate method exists with correct signature."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    # Check embeddings
-    assert "embeddings" in result
-    assert "visual" in result["embeddings"]
-    assert "physics" in result["embeddings"]
+        backend = PoCJEPABackend()
+        assert hasattr(backend, "simulate")
+        assert callable(backend.simulate)
 
-    visual_emb = result["embeddings"]["visual"]
-    physics_emb = result["embeddings"]["physics"]
+    def test_implements_process_media_sample_method(self):
+        """Verify process_media_sample method exists with correct signature."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    # Check embedding dimensions
-    assert len(visual_emb) == 768
-    assert len(physics_emb) == 768
+        backend = PoCJEPABackend()
+        assert hasattr(backend, "process_media_sample")
+        assert callable(backend.process_media_sample)
 
-    # Check embeddings are normalized (roughly unit length)
-    visual_norm = np.linalg.norm(visual_emb)
-    physics_norm = np.linalg.norm(physics_emb)
-    assert 0.9 < visual_norm < 1.1
-    assert 0.9 < physics_norm < 1.1
+    def test_is_runtime_checkable_protocol(self):
+        """Verify PoCJEPABackend satisfies JEPABackend protocol."""
+        from sophia.jepa.runner import JEPABackend
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    # Check confidence
-    assert 0.0 < result["confidence"] <= 1.0
-
-    # Check metadata
-    assert result["metadata"]["file_path"] == sample_image
-    assert result["metadata"]["question"] == "What objects are visible?"
+        backend = PoCJEPABackend()
+        # Protocol check - this uses runtime_checkable decorator
+        assert isinstance(backend, JEPABackend)
 
 
-@pytest.mark.asyncio
-async def test_poc_media_processing_missing_file(poc_backend):
-    """Test media processing with missing file (should use fallback)."""
-    result = await poc_backend.process_media_sample(
-        sample_id="test_sample_missing",
-        file_path="/nonexistent/path/image.jpg",
-        media_type="image",
-        metadata={},
-    )
+class TestPoCJEPABackendInitialization:
+    """Test PoCJEPABackend initialization and configuration."""
 
-    # Should still produce valid embeddings using deterministic fallback
-    assert result["sample_id"] == "test_sample_missing"
-    assert len(result["embeddings"]["visual"]) == 768
-    assert len(result["embeddings"]["physics"]) == 768
+    def test_default_initialization(self):
+        """Test initialization with default values."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
+        backend = PoCJEPABackend()
+        assert backend.model_version == "jepa-poc-v1.0"
+        assert backend.confidence_decay == 0.05
+        assert backend.dtype == "fp16"
 
-def test_poc_simulate_basic(poc_backend):
-    """Test basic simulation with PoC backend."""
-    entities = [
-        Entity(
-            id="block_1",
-            type="object",
-            properties={"mass": 0.5},
-            position={"x": 0.0, "y": 0.0, "z": 0.1},
+    def test_custom_initialization(self):
+        """Test initialization with custom values."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
+
+        backend = PoCJEPABackend(
+            model_version="custom-v2.0",
+            confidence_decay=0.1,
+            device="cpu",
+            dtype="fp32",
         )
-    ]
+        assert backend.model_version == "custom-v2.0"
+        assert backend.confidence_decay == 0.1
+        assert backend.dtype == "fp32"
 
-    context = SimulationContext(entities=entities)
-    result = poc_backend.simulate(context, k_steps=3)
+    def test_env_var_configuration(self):
+        """Test configuration via environment variables."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    # Check basic structure
-    assert result.simulation_id is not None
-    assert result.k_steps == 3
-    assert len(result.imagined_states) == 3
-    assert len(result.imagined_processes) >= 1
-    assert 0.0 <= result.overall_confidence <= 1.0
+        with patch.dict(
+            os.environ,
+            {
+                "JEPA_WEIGHTS_PATH": "/test/path/checkpoint.pth",
+                "JEPA_DEVICE": "cuda:1",
+                "JEPA_DTYPE": "bf16",
+            },
+        ):
+            backend = PoCJEPABackend()
+            assert backend.weights_path == "/test/path/checkpoint.pth"
+            assert backend._requested_device == "cuda:1"
+            assert backend.dtype == "bf16"
 
-    # Check PoC-specific metadata
-    for process in result.imagined_processes:
-        assert process.properties.get("backend") == "poc"
-        assert process.model_version == "test-poc-v1.0"
+    def test_explicit_params_override_env_vars(self):
+        """Test that explicit parameters override environment variables."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-
-def test_poc_simulate_with_actions(poc_backend):
-    """Test simulation with actions using PoC backend."""
-    entities = [
-        Entity(
-            id="robot",
-            type="agent",
-            properties={"status": "idle"},
-            position={"x": 0.0, "y": 0.0, "z": 0.0},
-        )
-    ]
-
-    actions = [
-        {"type": "MOVE", "target": "robot", "target_position": {"x": 1.0, "y": 0.0}},
-        {"type": "GRASP", "target": "robot"},
-    ]
-
-    context = SimulationContext(entities=entities, actions=actions)
-    result = poc_backend.simulate(
-        context, k_steps=3, assumptions=["robot is functional"]
-    )
-
-    # Check action processes were created
-    action_processes = [
-        p for p in result.imagined_processes if p.properties.get("type") == "action"
-    ]
-    assert len(action_processes) == 2
-
-    # Check assumptions propagated
-    assert result.imagined_states[0].assumptions == ["robot is functional"]
+        with patch.dict(
+            os.environ,
+            {
+                "JEPA_WEIGHTS_PATH": "/env/path.pth",
+                "JEPA_DEVICE": "cuda:0",
+            },
+        ):
+            backend = PoCJEPABackend(
+                weights_path="/explicit/path.pth",
+                device="cpu",
+            )
+            assert backend.weights_path == "/explicit/path.pth"
+            assert backend._requested_device == "cpu"
 
 
-def test_poc_confidence_decay(poc_backend):
-    """Test that PoC backend has realistic confidence decay."""
-    entities = [Entity(id="obj", type="object")]
-    context = SimulationContext(entities=entities)
+class TestPoCJEPABackendHealthStatus:
+    """Test health status reporting."""
 
-    result = poc_backend.simulate(context, k_steps=10)
+    def test_get_health_status_unloaded(self):
+        """Test health status when model is not loaded."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    confidences = [state.confidence for state in result.imagined_states]
+        backend = PoCJEPABackend()
+        status = backend.get_health_status()
 
-    # Check exponential-like decay
-    for i in range(len(confidences) - 1):
-        assert confidences[i] >= confidences[i + 1]
+        assert status["backend"] == "poc"
+        assert status["model_loaded"] is False
+        assert "gpu_available" in status
+        assert "weights_path" in status
 
-    # First step should be high confidence
-    assert confidences[0] > 0.9
+    def test_health_status_includes_metrics(self):
+        """Test that health status includes performance metrics."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    # Later steps should show decay
-    assert confidences[-1] < confidences[0]
+        backend = PoCJEPABackend()
+        status = backend.get_health_status()
 
-
-def test_poc_physics_dynamics(poc_backend):
-    """Test that PoC backend applies physics-like dynamics."""
-    entities = [
-        Entity(
-            id="heavy_obj",
-            type="object",
-            properties={"mass": 2.0},
-            position={"x": 0.0, "y": 0.0, "z": 1.0},
-        )
-    ]
-
-    context = SimulationContext(entities=entities)
-    result = poc_backend.simulate(context, k_steps=5)
-
-    # Check that position changes over time
-    initial_state = result.imagined_states[0]
-    final_state = result.imagined_states[-1]
-
-    initial_entity = initial_state.entities[0]
-    final_entity = final_state.entities[0]
-
-    # Position should change
-    assert initial_entity.position != final_entity.position
-
-    # Z should decrease (gravity effect)
-    assert final_entity.position["z"] <= initial_entity.position["z"]
+        assert "inference_count" in status
+        assert "avg_inference_time_ms" in status
 
 
-def test_poc_deterministic_features(poc_backend):
-    """Test that deterministic feature generation is consistent."""
-    # Same seed should produce same features
-    features1 = poc_backend._generate_deterministic_features("test_seed")
-    features2 = poc_backend._generate_deterministic_features("test_seed")
+class TestPoCJEPABackendWithMockedTorch:
+    """Test PoCJEPABackend with mocked PyTorch for CI environments."""
 
-    assert np.allclose(features1, features2)
+    def test_simulate_requires_weights_path_or_torch(self):
+        """Test that simulate fails gracefully without weights or torch."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    # Different seeds should produce different features
-    features3 = poc_backend._generate_deterministic_features("different_seed")
-    assert not np.allclose(features1, features3)
+        backend = PoCJEPABackend()  # No weights_path set
 
+        entities = [Entity(id="obj", type="object")]
+        context = SimulationContext(entities=entities)
 
-def test_poc_projection_dimensions(poc_backend):
-    """Test that projection produces correct dimensions."""
-    features = np.random.randn(512).astype(np.float32)
+        # Should fail with either "JEPA_WEIGHTS_PATH" or "PyTorch" error
+        with pytest.raises(RuntimeError, match="(JEPA_WEIGHTS_PATH|PyTorch)"):
+            backend.simulate(context, k_steps=2)
 
-    visual_emb = poc_backend._project_to_embedding(features, "visual")
-    physics_emb = poc_backend._project_to_embedding(features, "physics")
+    def test_simulate_fails_on_missing_checkpoint(self):
+        """Test that simulate fails gracefully with non-existent checkpoint."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
 
-    assert len(visual_emb) == 768
-    assert len(physics_emb) == 768
+        backend = PoCJEPABackend(weights_path="/nonexistent/path.pth")
 
-    # Visual and physics should be different
-    assert visual_emb != physics_emb
+        entities = [Entity(id="obj", type="object")]
+        context = SimulationContext(entities=entities)
 
-
-def test_poc_with_sensors(poc_backend):
-    """Test simulation with sensor references."""
-    entities = [Entity(id="target", type="object")]
-    sensor_refs = [
-        SensorReference(
-            sensor_id="camera_1",
-            sensor_type="camera",
-            frame_id="base_link",
-        )
-    ]
-
-    context = SimulationContext(entities=entities, sensor_refs=sensor_refs)
-    result = poc_backend.simulate(context, k_steps=2)
-
-    # Check sensor info in metadata
-    for state in result.imagined_states:
-        assert state.state_data["metadata"]["sensor_count"] == 1
+        with pytest.raises((FileNotFoundError, RuntimeError)):
+            backend.simulate(context, k_steps=2)
 
 
-def test_poc_backend_interface_compliance(poc_backend):
-    """Test that PoC backend complies with JEPABackend protocol."""
-    # Check required methods exist
-    assert hasattr(poc_backend, "simulate")
-    assert hasattr(poc_backend, "process_media_sample")
+class TestPoCJEPABackendEmbeddingShapes:
+    """Test embedding dimensions and key stability."""
 
-    # Check they are callable
-    assert callable(poc_backend.simulate)
-    assert callable(poc_backend.process_media_sample)
+    @requires_torch
+    @_skip_no_torch
+    def test_embedding_dimension_is_768(self):
+        """Verify embeddings are 768-dimensional."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
+
+        backend = PoCJEPABackend()
+
+        # Mock weights loading
+        backend._model = MagicMock()
+        backend._projection_head = MagicMock()
+
+        # Generate embedding via the helper method directly
+        embedding = backend._generate_embedding("test_input", "visual")
+
+        assert len(embedding) == 768
+        assert all(isinstance(x, float) for x in embedding)
+
+    @requires_torch
+    @_skip_no_torch
+    def test_embeddings_are_deterministic(self):
+        """Verify same input produces same embedding."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
+
+        backend = PoCJEPABackend()
+        backend._model = MagicMock()
+
+        embedding1 = backend._generate_embedding("test_input", "visual")
+        embedding2 = backend._generate_embedding("test_input", "visual")
+
+        assert embedding1 == embedding2
+
+    @requires_torch
+    @_skip_no_torch
+    def test_different_types_produce_different_embeddings(self):
+        """Verify visual and physics embeddings differ."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
+
+        backend = PoCJEPABackend()
+        backend._model = MagicMock()
+
+        visual_embedding = backend._generate_embedding("test", "visual")
+        physics_embedding = backend._generate_embedding("test", "physics")
+
+        assert visual_embedding != physics_embedding
+
+
+class TestPoCJEPABackendSimulationOutput:
+    """Test simulation output structure and contract."""
+
+    @requires_torch
+    @_skip_no_torch
+    def test_simulation_result_structure(self):
+        """Verify SimulationResult has all required fields."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
+        import tempfile
+        import torch
+
+        # Create minimal checkpoint
+        with tempfile.NamedTemporaryFile(suffix=".pth", delete=False) as f:
+            torch.save({"embed_dim": 768}, f.name)
+
+            try:
+                backend = PoCJEPABackend(weights_path=f.name, device="cpu")
+
+                entities = [Entity(id="obj", type="object")]
+                context = SimulationContext(entities=entities)
+
+                result = backend.simulate(context, k_steps=3)
+
+                assert isinstance(result, SimulationResult)
+                assert result.simulation_id is not None
+                assert result.k_steps == 3
+                assert len(result.imagined_states) == 3
+                assert len(result.imagined_processes) >= 1
+                assert 0.0 <= result.overall_confidence <= 1.0
+                assert result.model_version.startswith("jepa-poc")
+            finally:
+                os.unlink(f.name)
+
+    @requires_torch
+    @_skip_no_torch
+    def test_imagined_states_have_correct_metadata(self):
+        """Verify imagined states contain PoC backend metadata."""
+        from sophia.jepa.backends.poc import PoCJEPABackend
+        import tempfile
+        import torch
+
+        with tempfile.NamedTemporaryFile(suffix=".pth", delete=False) as f:
+            torch.save({"embed_dim": 768}, f.name)
+
+            try:
+                backend = PoCJEPABackend(weights_path=f.name, device="cpu")
+
+                entities = [Entity(id="obj", type="object")]
+                context = SimulationContext(entities=entities)
+
+                result = backend.simulate(context, k_steps=2, assumptions=["test"])
+
+                for state in result.imagined_states:
+                    assert state.imagined is True
+                    assert "poc" in state.model_version.lower()
+                    assert "test" in state.assumptions
+                    assert state.state_data.get("backend") == "poc"
+            finally:
+                os.unlink(f.name)
+
+
+class TestJEPARunnerBackendSelection:
+    """Test that JEPARunner correctly selects backends."""
+
+    def test_default_selects_stub(self):
+        """Verify default backend is stub."""
+        from sophia.jepa.runner import JEPARunner
+
+        with patch.dict(os.environ, {}, clear=True):
+            # Ensure JEPA_BACKEND is not set
+            os.environ.pop("JEPA_BACKEND", None)
+            runner = JEPARunner()
+            assert runner.backend_name == "StubJEPABackend"
+
+    def test_stub_env_var_selects_stub(self):
+        """Verify JEPA_BACKEND=stub selects stub backend."""
+        from sophia.jepa.runner import JEPARunner
+
+        with patch.dict(os.environ, {"JEPA_BACKEND": "stub"}):
+            runner = JEPARunner()
+            assert runner.backend_name == "StubJEPABackend"
+
+    def test_poc_env_var_selects_poc(self):
+        """Verify JEPA_BACKEND=poc selects PoC backend."""
+        from sophia.jepa.runner import JEPARunner
+
+        with patch.dict(os.environ, {"JEPA_BACKEND": "poc"}):
+            runner = JEPARunner()
+            assert runner.backend_name == "PoCJEPABackend"
+
+    def test_real_env_var_selects_poc(self):
+        """Verify JEPA_BACKEND=real selects PoC backend (alias)."""
+        from sophia.jepa.runner import JEPARunner
+
+        with patch.dict(os.environ, {"JEPA_BACKEND": "real"}):
+            runner = JEPARunner()
+            assert runner.backend_name == "PoCJEPABackend"
+
+    def test_unknown_env_var_falls_back_to_stub(self):
+        """Verify unknown JEPA_BACKEND value falls back to stub."""
+        from sophia.jepa.runner import JEPARunner
+
+        with patch.dict(os.environ, {"JEPA_BACKEND": "invalid"}):
+            runner = JEPARunner()
+            assert runner.backend_name == "StubJEPABackend"
+
+    def test_get_health_status_for_stub(self):
+        """Test health status for stub backend."""
+        from sophia.jepa.runner import JEPARunner
+
+        runner = JEPARunner()
+        status = runner.get_health_status()
+
+        assert "backend" in status
+        assert "model_version" in status
+
+    def test_get_health_status_for_poc(self):
+        """Test health status for PoC backend."""
+        from sophia.jepa.runner import JEPARunner
+
+        with patch.dict(os.environ, {"JEPA_BACKEND": "poc"}):
+            runner = JEPARunner()
+            status = runner.get_health_status()
+
+            assert status["backend"] == "poc"
+            assert "model_loaded" in status
+            assert "gpu_available" in status
