@@ -26,7 +26,7 @@ import os
 import time
 import uuid
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from sophia.jepa.models import (

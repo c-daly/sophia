@@ -197,7 +197,9 @@ class JEPAMetrics:
             f"success={success}"
         )
 
-    def record_model_load(self, load_time_seconds: float, embedding_dim: int = 768) -> None:
+    def record_model_load(
+        self, load_time_seconds: float, embedding_dim: int = 768
+    ) -> None:
         """Record model load event.
 
         Args:
