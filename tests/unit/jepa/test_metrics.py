@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 def _otel_available() -> bool:
     """Check if OpenTelemetry is available."""
     try:
-        from logos_observability import get_meter
+        from logos_observability import get_meter  # noqa: F401
 
         return True
     except ImportError:

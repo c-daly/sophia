@@ -221,7 +221,9 @@ class JEPAMetrics:
         """
         self._ensure_initialized()
         self._last_gpu_memory = bytes_used
-        logger.debug(f"Recorded GPU memory: {bytes_used / (1024*1024):.1f}MB on {device}")
+        logger.debug(
+            f"Recorded GPU memory: {bytes_used / (1024*1024):.1f}MB on {device}"
+        )
 
     def record_model_unload(self):
         """Record model unload event."""
