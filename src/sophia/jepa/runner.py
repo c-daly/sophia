@@ -45,7 +45,9 @@ class JEPABackend(Protocol):
 class StubJEPABackend:
     """Existing CPU-friendly stub implementation."""
 
-    def __init__(self, model_version: str = "jepa-stub-v1.0", confidence_decay: float = 0.05):
+    def __init__(
+        self, model_version: str = "jepa-stub-v1.0", confidence_decay: float = 0.05
+    ):
         self.model_version = model_version
         self.confidence_decay = confidence_decay
         self._inference_count = 0
@@ -72,7 +74,9 @@ class StubJEPABackend:
         assumptions = assumptions or []
         self._inference_count += 1
 
-        logger.info(f"Starting JEPA simulation {simulation_id} with {k_steps} steps (stub)")
+        logger.info(
+            f"Starting JEPA simulation {simulation_id} with {k_steps} steps (stub)"
+        )
 
         imagined_processes = self._generate_processes(
             context, k_steps, assumptions, simulation_id
@@ -332,12 +336,12 @@ class JEPARunner:
 
     def get_health_status(self) -> Dict[str, Any]:
         """Get health status for health probes.
-        
+
         Returns backend-specific health information for use in /health endpoint.
         """
-        if hasattr(self._backend, 'get_health_status'):
+        if hasattr(self._backend, "get_health_status"):
             return self._backend.get_health_status()
-        
+
         # Fallback for backends without health status
         return {
             "backend": self.backend_name,
@@ -350,7 +354,9 @@ class JEPARunner:
         k_steps: int = 5,
         assumptions: List[str] | None = None,
     ) -> SimulationResult:
-        return self._backend.simulate(context=context, k_steps=k_steps, assumptions=assumptions)
+        return self._backend.simulate(
+            context=context, k_steps=k_steps, assumptions=assumptions
+        )
 
     async def process_media_sample(
         self,
@@ -372,7 +378,7 @@ class JEPARunner:
         self, model_version: str, confidence_decay: float
     ) -> JEPABackend:
         """Select backend based on JEPA_BACKEND environment variable.
-        
+
         Supported values:
         - 'stub' (default): CPU-friendly stub for tests/CI
         - 'poc': PoC backend with real V-JEPA model support (requires GPU + weights)
@@ -381,11 +387,14 @@ class JEPARunner:
         backend_choice = os.getenv("JEPA_BACKEND", "stub").lower()
 
         if backend_choice == "stub":
-            return StubJEPABackend(model_version=model_version, confidence_decay=confidence_decay)
+            return StubJEPABackend(
+                model_version=model_version, confidence_decay=confidence_decay
+            )
 
         if backend_choice in ("poc", "real"):
             try:
                 from sophia.jepa.backends.poc import PoCJEPABackend
+
                 return PoCJEPABackend(
                     model_version=model_version.replace("stub", "poc"),
                     confidence_decay=confidence_decay,
@@ -407,4 +416,6 @@ class JEPARunner:
             f"Unknown JEPA_BACKEND value '{backend_choice}'. "
             "Valid options: stub, poc, real. Falling back to stub."
         )
-        return StubJEPABackend(model_version=model_version, confidence_decay=confidence_decay)
+        return StubJEPABackend(
+            model_version=model_version, confidence_decay=confidence_decay
+        )
