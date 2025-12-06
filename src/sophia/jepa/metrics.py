@@ -193,7 +193,7 @@ class JEPAMetrics:
             self._inference_histogram.record(duration_seconds, attributes)
 
         logger.debug(
-            f"Recorded inference: {operation}, {duration_seconds*1000:.2f}ms, "
+            f"Recorded inference: {operation}, {duration_seconds * 1000:.2f}ms, "
             f"success={success}"
         )
 
@@ -224,7 +224,7 @@ class JEPAMetrics:
         self._ensure_initialized()
         self._last_gpu_memory = bytes_used
         logger.debug(
-            f"Recorded GPU memory: {bytes_used / (1024*1024):.1f}MB on {device}"
+            f"Recorded GPU memory: {bytes_used / (1024 * 1024):.1f}MB on {device}"
         )
 
     def record_model_unload(self) -> None:

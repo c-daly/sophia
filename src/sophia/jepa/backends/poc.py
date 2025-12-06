@@ -355,7 +355,7 @@ class PoCJEPABackend:
             )
 
             logger.debug(
-                f"Generated {embedding_type} embedding in {inference_time*1000:.2f}ms"
+                f"Generated {embedding_type} embedding in {inference_time * 1000:.2f}ms"
             )
 
             result: List[float] = list(embedding)
@@ -442,7 +442,7 @@ class PoCJEPABackend:
             self._metrics.record_gpu_memory(gpu_memory, self.device)
 
         logger.info(
-            f"Simulation {simulation_id} complete in {inference_time*1000:.2f}ms: "
+            f"Simulation {simulation_id} complete in {inference_time * 1000:.2f}ms: "
             f"{len(imagined_states)} states, confidence={overall_confidence:.2f}"
         )
 
@@ -688,7 +688,7 @@ class PoCJEPABackend:
             }
 
             logger.info(
-                f"Generated embeddings for sample {sample_id} in {inference_time*1000:.2f}ms"
+                f"Generated embeddings for sample {sample_id} in {inference_time * 1000:.2f}ms"
             )
 
             return result
