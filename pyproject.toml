@@ -35,6 +35,19 @@ pymilvus = ">=2.5.0"
 urllib3 = "^2.5.0"
 logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "main"}
 
+[tool.poetry.extras]
+# ML dependencies with CPU-only PyTorch (default, faster install, no CUDA)
+ml = ["torch", "torchvision"]
+# ML dependencies with GPU support (CUDA) - install torch separately with CUDA
+ml-gpu = ["torchvision"]
+
+[tool.poetry.group.ml]
+optional = true
+
+[tool.poetry.group.ml.dependencies]
+torch = ">=2.0.0,<3.0.0"
+torchvision = ">=0.15.0,<1.0.0"
+
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0.0"
 pytest-cov = ">=4.0.0"
@@ -89,4 +102,5 @@ markers = [
     "integration: marks tests as integration tests requiring live services (deselect with '-m \"not integration\"')",
     "e2e: marks tests as end-to-end tests requiring full stack and Sophia service (deselect with '-m \"not e2e\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu: marks tests requiring GPU and PyTorch (deselect with '-m \"not gpu\"')",
 ]
