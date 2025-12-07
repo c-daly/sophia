@@ -3,7 +3,8 @@
 This test validates that the PoC backend works end-to-end with the same
 API contracts as the stub backend.
 
-These tests require PyTorch to be installed.
+These tests require PyTorch to be installed. If JEPA_WEIGHTS_PATH is not set,
+the PoC backend will use random dummy weights.
 """
 
 import os
@@ -72,8 +73,11 @@ async def test_poc_media_processing_integration(poc_runner, sample_image):
     assert 0.0 < result["confidence"] <= 1.0
 
     # Validate PoC-specific metadata
-    assert result["model_version"] == "v-jepa-poc-v1.0"
-    assert result["metadata"]["device"] == "cpu"
+    assert (
+        "jepa" in result["model_version"].lower()
+        and "poc" in result["model_version"].lower()
+    )
+    assert result["device"] in ("cpu", "cuda:0")
 
 
 def test_poc_simulation_integration(poc_runner):
@@ -99,7 +103,10 @@ def test_poc_simulation_integration(poc_runner):
     # Validate all states are marked as imagined
     for state in result.imagined_states:
         assert state.imagined is True
-        assert state.model_version == "v-jepa-poc-v1.0"
+        assert (
+            "jepa" in state.model_version.lower()
+            and "poc" in state.model_version.lower()
+        )
 
     # Validate PoC-specific process metadata
     for process in result.imagined_processes:

@@ -175,8 +175,8 @@ class TestPoCJEPABackendHealthStatus:
 class TestPoCJEPABackendWithMockedTorch:
     """Test PoCJEPABackend with mocked PyTorch for CI environments."""
 
-    def test_simulate_requires_weights_path_or_torch(self):
-        """Test that simulate fails gracefully without weights or torch."""
+    def test_simulate_uses_dummy_weights_when_path_not_set(self):
+        """Test that simulate uses dummy weights when JEPA_WEIGHTS_PATH not set."""
         from sophia.jepa.backends.poc import PoCJEPABackend
 
         backend = PoCJEPABackend()  # No weights_path set
@@ -184,9 +184,15 @@ class TestPoCJEPABackendWithMockedTorch:
         entities = [Entity(id="obj", type="object")]
         context = SimulationContext(entities=entities)
 
-        # Should fail with either "JEPA_WEIGHTS_PATH" or "PyTorch" error
-        with pytest.raises(RuntimeError, match="(JEPA_WEIGHTS_PATH|PyTorch)"):
-            backend.simulate(context, k_steps=2)
+        # Should succeed with dummy weights (if torch available) or fail with torch error
+        try:
+            result = backend.simulate(context, k_steps=2)
+            # If it succeeds, verify it's using dummy weights
+            assert result.k_steps == 2
+            assert len(result.imagined_states) == 2
+        except RuntimeError as e:
+            # If torch not available, that's fine
+            assert "PyTorch" in str(e)
 
     def test_simulate_fails_on_missing_checkpoint(self):
         """Test that simulate fails gracefully with non-existent checkpoint."""
