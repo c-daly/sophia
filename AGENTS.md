@@ -33,8 +33,25 @@ Key directories:
 ### Dependencies
 - Consumes contracts from `logos/contracts/sophia.openapi.yaml`
 - Uses `logos_hcg` for Hybrid Causal Graph operations
+- Uses `logos_config` for shared configuration (ports, env, settings)
 - Integrates with Neo4j (graph) and Milvus (vectors)
 - Calls Hermes for language/embedding services
+
+### Shared configuration (`logos_config`)
+All LOGOS repos use the `logos_config` package from logos for consistent configuration:
+
+```python
+from logos_config import get_env_value, SOPHIA_PORTS, Neo4jConfig
+
+# Sophia uses port offset +40000
+ports = SOPHIA_PORTS
+print(ports.neo4j_http)  # 47474
+
+# Environment and service config
+neo4j = Neo4jConfig()
+```
+
+See `logos/logos_config/README.md` for full documentation.
 
 ### Key documentation
 - `README.md` – Installation, features, API overview

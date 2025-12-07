@@ -1,23 +1,23 @@
 """Main FastAPI application for Sophia service."""
 
-import os
-import uuid
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, AsyncIterator
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi import (
-    FastAPI,
     Depends,
-    HTTPException,
-    status,
-    UploadFile,
+    FastAPI,
     File,
     Form,
+    HTTPException,
     Query,
+    UploadFile,
+    status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from logos_config import get_env_value
 
 from sophia.api.models import (
     PlanRequest,
@@ -162,13 +162,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize knowledge graph
     _kg = KnowledgeGraph()
 
-    # Initialize HCG client
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password = os.getenv("NEO4J_PASSWORD", "neo4jtest")
-    milvus_host = os.getenv("MILVUS_HOST", "localhost")
+    # Initialize HCG client using logos_config for env resolution
+    neo4j_uri = get_env_value("NEO4J_URI", default="bolt://localhost:7687")
+    neo4j_user = get_env_value("NEO4J_USER", default="neo4j")
+    neo4j_password = get_env_value("NEO4J_PASSWORD", default="neo4jtest")
+    milvus_host = get_env_value("MILVUS_HOST", default="localhost")
     try:
-        milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+        milvus_port = int(get_env_value("MILVUS_PORT", default="19530") or "19530")
     except ValueError:
         logger.warning("Invalid MILVUS_PORT value; falling back to 19530")
         milvus_port = 19530
@@ -191,7 +191,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
         # Seed pick-and-place data if enabled
-        if os.getenv("SEED_PICK_AND_PLACE_DATA", "").lower() == "true":
+        if get_env_value("SEED_PICK_AND_PLACE_DATA", default="").lower() == "true":
             from sophia.hcg_client.seeder import seed_pick_and_place_data
 
             logger.info("Seeding pick-and-place test data...")
@@ -221,7 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _jepa_runner = JEPARunner(model_version="jepa-stub-v1.0")
 
     # Initialize media ingestion services
-    storage_root = os.getenv("MEDIA_STORAGE_ROOT", "./media_storage")
+    storage_root = get_env_value("MEDIA_STORAGE_ROOT", default="./media_storage")
     _media_storage = MediaStorageService(storage_root=storage_root)
     if _hcg_client:  # Type guard for mypy
         _media_ingestion = MediaIngestionService(
@@ -260,7 +260,7 @@ def create_app() -> FastAPI:
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+        allow_origins=(get_env_value("CORS_ORIGINS", default="*") or "*").split(","),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
