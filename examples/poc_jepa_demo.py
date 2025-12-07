@@ -22,7 +22,6 @@ from PIL import Image
 
 from sophia.jepa import JEPARunner
 from sophia.jepa.models import SimulationContext, Entity
-from typing import Dict, Any, List, Optional
 
 
 def create_sample_image() -> str:

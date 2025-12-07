@@ -21,7 +21,7 @@ from sophia import (
     ContinuousWorkingMemoryGenerative,
 )
 from sophia.knowledge_graph import Node, Edge
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 
 def create_world_model() -> KnowledgeGraph:
