@@ -153,11 +153,11 @@ The following variables are used by integration tests and helper scripts:
 | --- | --- | --- |
 | `SOPHIA_REPO_ROOT` | (auto-detected) | Repository root directory |
 | `RUN_SOPHIA_INTEGRATION` | `0` | Set to `1` to enable integration tests |
-| `NEO4J_URI` | `bolt://localhost:37687` | Neo4j connection URI |
+| `NEO4J_URI` | `bolt://localhost:47687` | Neo4j connection URI |
 | `NEO4J_USER` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | `neo4jtest` | Neo4j password |
 | `MILVUS_HOST` | `localhost` | Milvus host |
-| `MILVUS_PORT` | `39530` | Milvus port |
+| `MILVUS_PORT` | `47530` | Milvus port |
 
 These can be set in `.env.test` or exported directly. The helper module
 `sophia.env` provides functions to load and access these values:
