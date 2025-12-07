@@ -25,5 +25,4 @@ jobs:
     uses: c-daly/logos/.github/workflows/reusable-publish.yml@main
     with:
       image_name: sophia
-      path_filters: 'src/**,Dockerfile,pyproject.toml,poetry.lock'
     secrets: inherit
