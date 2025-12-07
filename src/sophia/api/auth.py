@@ -24,7 +24,7 @@ def get_api_token() -> str:
         raise RuntimeError(
             "SOPHIA_API_TOKEN environment variable must be set for authentication"
         )
-    return token
+    return str(token)
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
