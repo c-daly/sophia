@@ -677,8 +677,8 @@ uvicorn = {version = "^0.32.0", extras = ["standard"]}
 [package.source]
 type = "git"
 url = "https://github.com/c-daly/logos.git"
-reference = "chore/logos433-shared-config"
-resolved_reference = "37636a0b9adaf9a923c07dfecb3a2fb056ffb1f8"
+reference = "main"
+resolved_reference = "81e4367a5bae4e405e9cf419462f4b9eaeac5215"
 
 [[package]]
 name = "markupsafe"
@@ -3260,4 +3260,4 @@ ml-gpu = []
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "cee3c08aac500f8bae17f78ba9e0e262b1c36dcb0140d87853114cbd91a53089"
+content-hash = "a6f111cd0dd4548149730b88ac81acfdc7d7b6e913d759d6661fc2e0f6f53f5e"
