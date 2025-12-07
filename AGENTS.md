@@ -263,10 +263,11 @@ Sophia follows the LOGOS ecosystem testing standards (see `logos/docs/TESTING_ST
 | Integration | `tests/integration/` | Neo4j, Milvus | `./scripts/run_tests.sh integration` |
 | E2E | `tests/e2e/` | Neo4j, Milvus, Sophia API | `./scripts/run_tests.sh e2e` |
 
-Port allocation (+40000 offset per ecosystem standard):
+Port allocation (all 47xxx per logos_config.SOPHIA_PORTS):
 - Neo4j: 47474 (HTTP), 47687 (Bolt)
-- Milvus: 49530 (gRPC), 49091 (health)
-- Sophia API: 48000
+- Milvus: 47530 (gRPC), 47091 (health)
+- MinIO: 47900 (API), 47901 (console)
+- Sophia API: 47000
 
 ### Quick commands
 ```bash
@@ -503,7 +504,7 @@ Ensure environment variables are set:
 ```bash
 export NEO4J_URI=bolt://localhost:47687
 export MILVUS_HOST=localhost
-export MILVUS_PORT=49530
+export MILVUS_PORT=47530
 ```
 Or just use `./scripts/run_tests.sh` which sets these automatically.
 

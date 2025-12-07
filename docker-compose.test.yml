@@ -1,3 +1,4 @@
+version: '3.9'
 networks:
   default:
     name: logos-test-network
@@ -82,8 +83,8 @@ services:
       timeout: 20s
       retries: 3
     ports:
-    - 9000:9000
-    - 9001:9001
+    - 47900:9000
+    - 47901:9001
     networks:
     - default
   milvus:
@@ -102,8 +103,8 @@ services:
     volumes:
     - sophia_test_milvus:/var/lib/milvus
     ports:
-    - 49530:19530
-    - 49091:9091
+    - 47530:19530
+    - 47091:9091
     healthcheck:
       test:
       - CMD
