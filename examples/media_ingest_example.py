@@ -10,7 +10,7 @@ This example shows how to:
 import requests
 from PIL import Image
 import io
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
