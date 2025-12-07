@@ -23,6 +23,7 @@ import sys
 import asyncio
 import tempfile
 from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 # Check for torch availability
 try:
@@ -42,7 +43,7 @@ def print_header(title: str) -> None:
     print(f"{'='*60}\n")
 
 
-def print_status(label: str, value, indent: int = 2) -> None:
+def print_status(label: str, value: Any, indent: int = 2) -> None:
     """Print a status line."""
     print(f"{' '*indent}{label}: {value}")
 
@@ -250,7 +251,7 @@ def demo_metrics() -> None:
             print_status(key, value, indent=4)
 
 
-def main():
+def main() -> None:
     """Run the JEPA PoC demo."""
     print("\n" + "=" * 60)
     print("       JEPA PoC Backend Demo")

@@ -21,6 +21,7 @@ from sophia import (
     ContinuousWorkingMemoryGenerative,
 )
 from sophia.knowledge_graph import Node, Edge
+from typing import Dict, Any, List, Optional
 
 
 def create_world_model() -> KnowledgeGraph:
@@ -187,7 +188,7 @@ def demonstrate_planning(kg: KnowledgeGraph) -> None:
     planner = Planner(knowledge_graph=kg)
 
     # Set initial state
-    initial_state = {
+    initial_state: Dict[str, Dict[str, Any]] = {
         "red_block": {"location": "table", "grasped": False},
         "blue_block": {"location": "table", "grasped": False},
         "gripper": {"position": "home", "holding": None},
@@ -235,7 +236,7 @@ def demonstrate_execution_simulation(kg: KnowledgeGraph) -> None:
     executor = Executor()
 
     # Set initial state
-    initial_state = {
+    initial_state: Dict[str, Dict[str, Any]] = {
         "red_block": {"location": "table", "grasped": False},
         "blue_block": {"location": "table", "grasped": False},
         "gripper": {"position": "home", "holding": None},
@@ -254,7 +255,7 @@ def demonstrate_execution_simulation(kg: KnowledgeGraph) -> None:
 
     # Simulate execution (normally would interface with Talos)
     print("\n  Simulating execution:")
-    state = initial_state.copy()
+    state: Dict[str, Any] = initial_state.copy()
 
     for i, step in enumerate(executor.get_queue(), 1):
         action_type = step["action_type"]

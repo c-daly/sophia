@@ -22,6 +22,7 @@ from PIL import Image
 
 from sophia.jepa import JEPARunner
 from sophia.jepa.models import SimulationContext, Entity
+from typing import Dict, Any, List, Optional
 
 
 def create_sample_image() -> str:
@@ -30,6 +31,8 @@ def create_sample_image() -> str:
         # Create a simple colored image
         img = Image.new("RGB", (256, 256))
         pixels = img.load()
+        if pixels is None:
+            raise ValueError("Failed to load image pixels")
 
         # Create a gradient pattern
         for i in range(256):
@@ -40,7 +43,7 @@ def create_sample_image() -> str:
         return f.name
 
 
-async def demo_media_processing(runner: JEPARunner, image_path: str):
+async def demo_media_processing(runner: JEPARunner, image_path: str) -> None:
     """Demonstrate media sample processing."""
     print("\n" + "=" * 70)
     print("DEMO 1: Media Sample Processing")
@@ -80,7 +83,7 @@ async def demo_media_processing(runner: JEPARunner, image_path: str):
     print(f"  Physics: {physics_norm:.3f}")
 
 
-def demo_simulation(runner: JEPARunner):
+def demo_simulation(runner: JEPARunner) -> None:
     """Demonstrate k-step simulation rollout."""
     print("\n" + "=" * 70)
     print("DEMO 2: K-Step Simulation Rollout")
@@ -159,7 +162,7 @@ def demo_simulation(runner: JEPARunner):
                 )
 
 
-def demo_backend_comparison():
+def demo_backend_comparison() -> None:
     """Compare stub vs PoC backend behavior."""
     print("\n" + "=" * 70)
     print("DEMO 3: Backend Comparison")
@@ -209,7 +212,7 @@ def demo_backend_comparison():
         print(f"{i:<10} {stub_conf:.4f}{'':<16} {poc_conf:.4f}")
 
 
-async def main():
+async def main() -> None:
     """Run all demonstrations."""
     print("\n" + "=" * 70)
     print("V-JEPA PoC Backend Demonstration")
