@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from contextlib import suppress
 from collections.abc import Sequence
+from contextlib import suppress
 from typing import Any, Dict, List, Mapping, Optional, cast
 
+from logos_config import get_env_value
 from logos_hcg.client import HCGClient as LogosHCGClient
 
 from sophia.hcg_client.shacl_validator import SHACLValidator
@@ -48,8 +48,8 @@ class HCGClient(LogosHCGClient):
         scripts that still pass Milvus connection data alongside Neo4j creds.
         """
         self._validator = validator or SHACLValidator()
-        self._milvus_host = milvus_host or os.getenv("MILVUS_HOST")
-        port_value = milvus_port or os.getenv("MILVUS_PORT")
+        self._milvus_host = milvus_host or get_env_value("MILVUS_HOST")
+        port_value = milvus_port or get_env_value("MILVUS_PORT")
         try:
             self._milvus_port = int(port_value) if port_value else None
         except (TypeError, ValueError):

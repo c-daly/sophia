@@ -5,10 +5,11 @@ the backend to be swapped for a real V-JEPA implementation via injection or
 environment configuration.
 """
 
-import os
-import uuid
 import logging
-from typing import List, Dict, Any, Protocol, runtime_checkable
+import uuid
+from typing import Any, Dict, List, Protocol, runtime_checkable
+
+from logos_config import get_env_value
 
 from sophia.jepa.models import (
     SimulationContext,
@@ -388,7 +389,7 @@ class JEPARunner:
         - 'poc': PoC backend with real V-JEPA model support (requires GPU + weights)
         - 'real': Alias for 'poc' (future: production-optimized backend)
         """
-        backend_choice = os.getenv("JEPA_BACKEND", "stub").lower()
+        backend_choice = (get_env_value("JEPA_BACKEND", default="stub") or "stub").lower()
 
         if backend_choice == "stub":
             return StubJEPABackend(

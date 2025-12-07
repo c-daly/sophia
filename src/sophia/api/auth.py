@@ -1,9 +1,10 @@
 """Authentication middleware for Sophia API."""
 
-from typing import Optional, Callable
-import os
+from typing import Callable, Optional
+
 from fastapi import HTTPException, Security, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from logos_config import get_env_value
 
 
 security = HTTPBearer()
@@ -18,7 +19,7 @@ def get_api_token() -> str:
     Raises:
         RuntimeError: If SOPHIA_API_TOKEN is not set
     """
-    token = os.getenv("SOPHIA_API_TOKEN")
+    token = get_env_value("SOPHIA_API_TOKEN")
     if not token:
         raise RuntimeError(
             "SOPHIA_API_TOKEN environment variable must be set for authentication"

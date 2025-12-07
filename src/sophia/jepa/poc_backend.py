@@ -13,12 +13,13 @@ This PoC is designed to:
 For production use, replace with actual V-JEPA model loading and inference.
 """
 
-import os
-import uuid
 import logging
-import numpy as np
+import uuid
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+import numpy as np
+from logos_config import get_env_value
 from PIL import Image
 
 from sophia.jepa.models import (
@@ -60,7 +61,7 @@ class PoCJEPABackend:
         self.dtype = dtype
 
         # Configuration from environment or parameters
-        self.weights_path = weights_path or os.getenv("JEPA_WEIGHTS_PATH")
+        self.weights_path = weights_path or get_env_value("JEPA_WEIGHTS_PATH")
         self.embedding_dim = 768  # Target dimension for visual/physics embeddings
 
         # Initialize model state
@@ -120,7 +121,7 @@ class PoCJEPABackend:
         - Returns fixed-size feature vector
         """
         try:
-            if os.path.exists(image_path):
+            if Path(image_path).exists():
                 img = Image.open(image_path).convert("RGB")
                 # Simple feature extraction: resize and flatten statistics
                 img = img.resize((32, 32))  # Small size for PoC

@@ -22,12 +22,13 @@ Usage:
     # Service will use PoCJEPABackend instead of stub
 """
 
-import os
+import logging
 import time
 import uuid
-import logging
-from typing import Any, Dict, List, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from logos_config import get_env_value
 
 from sophia.jepa.models import (
     SimulationContext,
@@ -165,10 +166,10 @@ class PoCJEPABackend:
         self.confidence_decay = confidence_decay
 
         # Configuration from env vars with overrides
-        self.weights_path = weights_path or os.getenv("JEPA_WEIGHTS_PATH")
-        self.weights_uri = os.getenv("JEPA_WEIGHTS_URI")
-        self._requested_device = device or os.getenv("JEPA_DEVICE", "cuda:0")
-        self.dtype = dtype or os.getenv("JEPA_DTYPE", "fp16")
+        self.weights_path = weights_path or get_env_value("JEPA_WEIGHTS_PATH")
+        self.weights_uri = get_env_value("JEPA_WEIGHTS_URI")
+        self._requested_device = device or get_env_value("JEPA_DEVICE", default="cuda:0")
+        self.dtype = dtype or get_env_value("JEPA_DTYPE", default="fp16")
 
         # Lazy-loaded components
         self._model: Optional[Any] = None
