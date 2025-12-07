@@ -10,6 +10,7 @@ This example shows how to:
 import requests
 from PIL import Image
 import io
+from typing import Dict, Any, Optional
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
@@ -25,7 +26,9 @@ def create_sample_image() -> bytes:
     return buffer.getvalue()
 
 
-def ingest_image(image_data: bytes, filename: str, question: str = None):
+def ingest_image(
+    image_data: bytes, filename: str, question: str = None
+) -> Dict[str, Any]:
     """Upload an image to the media ingestion service.
 
     Args:
@@ -40,7 +43,7 @@ def ingest_image(image_data: bytes, filename: str, question: str = None):
 
     files = {"file": (filename, image_data, "image/jpeg")}
 
-    data = {"media_type": "image"}
+    data: Dict[str, str] = {"media_type": "image"}
 
     if question:
         data["question"] = question
@@ -51,7 +54,9 @@ def ingest_image(image_data: bytes, filename: str, question: str = None):
     return response.json()
 
 
-def list_media_samples(media_type: str = None, limit: int = 50, offset: int = 0):
+def list_media_samples(
+    media_type: str = None, limit: int = 50, offset: int = 0
+) -> Dict[str, Any]:
     """List media samples with optional filtering.
 
     Args:
@@ -64,7 +69,7 @@ def list_media_samples(media_type: str = None, limit: int = 50, offset: int = 0)
     """
     url = f"{API_BASE_URL}/media/samples"
 
-    params = {"limit": limit, "offset": offset}
+    params: Dict[str, Any] = {"limit": limit, "offset": offset}
 
     if media_type:
         params["media_type"] = media_type
@@ -75,7 +80,7 @@ def list_media_samples(media_type: str = None, limit: int = 50, offset: int = 0)
     return response.json()
 
 
-def get_media_sample(sample_id: str):
+def get_media_sample(sample_id: str) -> Dict[str, Any]:
     """Retrieve a specific media sample by ID.
 
     Args:
@@ -92,7 +97,7 @@ def get_media_sample(sample_id: str):
     return response.json()
 
 
-def main():
+def main() -> None:
     """Run the media ingestion example workflow."""
     print("=" * 60)
     print("Media Ingestion Example")
