@@ -80,6 +80,8 @@ docker run -d \
   ghcr.io/c-daly/sophia:latest
 ```
 
+> **Note:** The example above uses default Milvus port 19530. For test stacks, Sophia uses port 47530 (the 47xxx prefix) to avoid conflicts with other services.
+
 The container includes all Python dependencies and the Sophia API service. For development and testing, Sophia uses the `logos-foundry` base image which includes all LOGOS shared packages.
 
 ## Integration Tests
@@ -98,10 +100,10 @@ healthy, and runs the integration tests with `RUN_SOPHIA_INTEGRATION=1`.
 
 ### Stack Configuration
 
-The test stack uses non-conflicting ports (37xxx/39xxx range) to allow
+The test stack uses non-conflicting ports (47xxx range) to allow
 multiple repo stacks to run concurrently:
-- Neo4j: 37474 (HTTP), 37687 (Bolt)
-- Milvus: 39530 (gRPC), 39091 (Health)
+- Neo4j: 47474 (HTTP), 47687 (Bolt)
+- Milvus: 47530 (gRPC), 47091 (Health)
 
 Stack files are generated from LOGOS. To regenerate:
 ```bash
