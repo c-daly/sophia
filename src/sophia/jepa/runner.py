@@ -389,7 +389,9 @@ class JEPARunner:
         - 'poc': PoC backend with real V-JEPA model support (requires GPU + weights)
         - 'real': Alias for 'poc' (future: production-optimized backend)
         """
-        backend_choice = (get_env_value("JEPA_BACKEND", default="stub") or "stub").lower()
+        backend_choice = (
+            get_env_value("JEPA_BACKEND", default="stub") or "stub"
+        ).lower()
 
         if backend_choice == "stub":
             return StubJEPABackend(

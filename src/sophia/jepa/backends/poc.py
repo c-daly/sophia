@@ -168,7 +168,9 @@ class PoCJEPABackend:
         # Configuration from env vars with overrides
         self.weights_path = weights_path or get_env_value("JEPA_WEIGHTS_PATH")
         self.weights_uri = get_env_value("JEPA_WEIGHTS_URI")
-        self._requested_device = device or get_env_value("JEPA_DEVICE", default="cuda:0")
+        self._requested_device = device or get_env_value(
+            "JEPA_DEVICE", default="cuda:0"
+        )
         self.dtype = dtype or get_env_value("JEPA_DTYPE", default="fp16")
 
         # Lazy-loaded components
