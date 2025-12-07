@@ -27,6 +27,7 @@ from pathlib import Path
 # Check for torch availability
 try:
     import torch
+
     TORCH_AVAILABLE = True
     GPU_AVAILABLE = torch.cuda.is_available()
 except ImportError:
@@ -49,17 +50,20 @@ def print_status(label: str, value, indent: int = 2) -> None:
 def demo_environment() -> None:
     """Show environment and configuration."""
     print_header("Environment")
-    
+
     print_status("Python", sys.version.split()[0])
     print_status("PyTorch available", TORCH_AVAILABLE)
-    
+
     if TORCH_AVAILABLE:
         print_status("PyTorch version", torch.__version__)
         print_status("CUDA available", GPU_AVAILABLE)
         if GPU_AVAILABLE:
             print_status("GPU device", torch.cuda.get_device_name(0))
-            print_status("GPU memory", f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-    
+            print_status(
+                "GPU memory",
+                f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB",
+            )
+
     print()
     print_status("JEPA_BACKEND", os.getenv("JEPA_BACKEND", "stub (default)"))
     print_status("JEPA_WEIGHTS_PATH", os.getenv("JEPA_WEIGHTS_PATH", "not set"))
@@ -70,15 +74,15 @@ def demo_environment() -> None:
 def demo_backend_initialization() -> None:
     """Demonstrate backend initialization."""
     print_header("Backend Initialization")
-    
+
     from sophia.jepa.runner import JEPARunner
-    
+
     runner = JEPARunner()
-    
+
     print_status("Runner created", "✓")
     print_status("Backend", runner.backend_name)
     print_status("Model version", runner.model_version)
-    
+
     # Get health status
     status = runner.get_health_status()
     print()
@@ -90,12 +94,12 @@ def demo_backend_initialization() -> None:
 def demo_simulation() -> None:
     """Demonstrate simulation with k-step rollouts."""
     print_header("Simulation Demo")
-    
+
     from sophia.jepa.runner import JEPARunner
     from sophia.jepa.models import SimulationContext, Entity, SensorReference
-    
+
     runner = JEPARunner()
-    
+
     # Create simulation context
     entities = [
         Entity(
@@ -110,7 +114,7 @@ def demo_simulation() -> None:
             properties={"status": "idle", "gripper": "open"},
         ),
     ]
-    
+
     sensor_refs = [
         SensorReference(
             sensor_id="camera_1",
@@ -118,28 +122,32 @@ def demo_simulation() -> None:
             frame_id="base_link",
         ),
     ]
-    
+
     actions = [
         {"type": "MOVE", "target": "red_block"},
         {"type": "GRASP", "target": "red_block"},
-        {"type": "MOVE", "target": "bin", "target_position": {"x": 1.0, "y": 0.0, "z": 0.5}},
+        {
+            "type": "MOVE",
+            "target": "bin",
+            "target_position": {"x": 1.0, "y": 0.0, "z": 0.5},
+        },
     ]
-    
+
     context = SimulationContext(
         entities=entities,
         sensor_refs=sensor_refs,
         actions=actions,
     )
-    
+
     print_status("Entities", len(entities))
     print_status("Sensors", len(sensor_refs))
     print_status("Actions", len(actions))
     print()
-    
+
     # Run simulation
     print("  Running 5-step simulation...")
     result = runner.simulate(context, k_steps=5, assumptions=["robot is operational"])
-    
+
     print()
     print_status("Simulation ID", result.simulation_id[:8] + "...")
     print_status("K-steps", result.k_steps)
@@ -147,7 +155,7 @@ def demo_simulation() -> None:
     print_status("Overall confidence", f"{result.overall_confidence:.2%}")
     print_status("Imagined states", len(result.imagined_states))
     print_status("Imagined processes", len(result.imagined_processes))
-    
+
     print()
     print("  State Rollout:")
     for state in result.imagined_states:
@@ -157,16 +165,16 @@ def demo_simulation() -> None:
 async def demo_media_processing() -> None:
     """Demonstrate media sample processing."""
     print_header("Media Processing Demo")
-    
+
     from sophia.jepa.runner import JEPARunner
     from PIL import Image
-    
+
     runner = JEPARunner()
-    
+
     # Create a test image
     with tempfile.TemporaryDirectory() as tmpdir:
         img_path = Path(tmpdir) / "test_image.jpg"
-        
+
         # Create a simple test image
         img = Image.new("RGB", (224, 224), color="blue")
         # Add some features
@@ -174,11 +182,11 @@ async def demo_media_processing() -> None:
             for j in range(50, 150):
                 img.putpixel((i, j), (255, 0, 0))  # Red square
         img.save(img_path)
-        
+
         print_status("Test image created", str(img_path))
         print_status("Image size", "224x224")
         print()
-        
+
         # Process media sample
         print("  Processing media sample...")
         result = await runner.process_media_sample(
@@ -188,43 +196,51 @@ async def demo_media_processing() -> None:
             metadata={"source": "demo", "format": "JPEG"},
             question="What objects are visible?",
         )
-        
+
         print()
         print_status("Sample ID", result["sample_id"])
         print_status("Media type", result["media_type"])
         print_status("Model version", result["model_version"])
         print_status("Confidence", f"{result['confidence']:.2%}")
         print_status("Backend", result.get("backend", "stub"))
-        
+
         print()
         print("  Embeddings:")
         visual_emb = result["embeddings"]["visual"]
         physics_emb = result["embeddings"]["physics"]
         print_status("Visual embedding dim", len(visual_emb), indent=4)
         print_status("Physics embedding dim", len(physics_emb), indent=4)
-        print_status("Visual embedding norm", f"{sum(x**2 for x in visual_emb)**0.5:.4f}", indent=4)
-        print_status("Physics embedding norm", f"{sum(x**2 for x in physics_emb)**0.5:.4f}", indent=4)
+        print_status(
+            "Visual embedding norm",
+            f"{sum(x**2 for x in visual_emb)**0.5:.4f}",
+            indent=4,
+        )
+        print_status(
+            "Physics embedding norm",
+            f"{sum(x**2 for x in physics_emb)**0.5:.4f}",
+            indent=4,
+        )
 
 
 def demo_metrics() -> None:
     """Demonstrate metrics and health status after inference."""
     print_header("Metrics After Inference")
-    
+
     from sophia.jepa.runner import JEPARunner
     from sophia.jepa.models import SimulationContext, Entity
-    
+
     runner = JEPARunner()
-    
+
     # Run a few simulations
     entities = [Entity(id="obj", type="object")]
     context = SimulationContext(entities=entities)
-    
+
     print("  Running 3 simulations to accumulate metrics...")
     for i in range(3):
         runner.simulate(context, k_steps=2)
-    
+
     status = runner.get_health_status()
-    
+
     print()
     print("  Updated Health Status:")
     for key, value in status.items():
@@ -236,21 +252,21 @@ def demo_metrics() -> None:
 
 def main():
     """Run the JEPA PoC demo."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("       JEPA PoC Backend Demo")
-    print("="*60)
-    
+    print("=" * 60)
+
     try:
         demo_environment()
         demo_backend_initialization()
         demo_simulation()
         asyncio.run(demo_media_processing())
         demo_metrics()
-        
+
         print_header("Demo Complete")
         print("  All demos completed successfully! ✓")
         print()
-        
+
     except Exception as e:
         print(f"\n  Error: {e}")
         print("\n  If using PoC backend, ensure:")

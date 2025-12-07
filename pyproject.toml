@@ -33,7 +33,8 @@ pillow = ">=10.0.0"
 python-dateutil = ">=2.8.2"
 pymilvus = ">=2.5.0"
 urllib3 = "^2.5.0"
-logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "main"}
+# TODO: Change back to branch = "main" after logos#433 is merged
+logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "chore/logos433-shared-config"}
 
 [tool.poetry.extras]
 # ML dependencies with CPU-only PyTorch (default, faster install, no CUDA)

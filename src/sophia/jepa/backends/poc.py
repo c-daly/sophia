@@ -171,7 +171,7 @@ class PoCJEPABackend:
         self.dtype = dtype or os.getenv("JEPA_DTYPE", "fp16")
 
         # Lazy-loaded components
-        self._model = None
+        self._model: Optional[Any] = None
         self._projection_head: Optional[ProjectionHead] = None
         self._load_time_seconds: Optional[float] = None
         self._device: Optional[str] = None
@@ -224,6 +224,43 @@ class PoCJEPABackend:
             ),
         }
 
+    def _init_dummy_model(self, torch: Any) -> None:
+        """Initialize with random dummy weights for testing without checkpoint.
+
+        This allows the PoC backend to run the full pipeline with randomly
+        initialized weights, useful for integration testing and development.
+        """
+        start_time = time.time()
+        embed_dim = 768
+
+        # Create a simple random "model" that will produce consistent but
+        # random embeddings based on input hash
+        self._model = {
+            "dummy": True,
+            "embed_dim": embed_dim,
+            "seed_weights": torch.randn(embed_dim, device=self.device),
+        }
+
+        # Initialize projection head (identity for dummy model)
+        self._projection_head = ProjectionHead(
+            input_dim=embed_dim,
+            output_dim=768,
+            device=self.device,
+        )
+
+        self._load_time_seconds = time.time() - start_time
+
+        # Record model load metrics
+        self._metrics.record_model_load(
+            load_time_seconds=self._load_time_seconds,
+            embedding_dim=embed_dim,
+        )
+
+        logger.info(
+            f"Dummy V-JEPA model initialized in {self._load_time_seconds:.2f}s "
+            f"(device={self.device}, embed_dim={embed_dim})"
+        )
+
     def _ensure_loaded(self) -> None:
         """Ensure model is loaded, loading if necessary."""
         if self._model is not None:
@@ -236,11 +273,14 @@ class PoCJEPABackend:
                 "Install with: pip install torch"
             )
 
+        # If no weights path, use random dummy weights for testing
         if not self.weights_path:
-            raise RuntimeError(
-                "JEPA_WEIGHTS_PATH not set. Please provide path to checkpoint: "
-                "export JEPA_WEIGHTS_PATH=/path/to/checkpoint.pth"
+            logger.warning(
+                "JEPA_WEIGHTS_PATH not set - using random dummy weights. "
+                "Set JEPA_WEIGHTS_PATH for production use."
             )
+            self._init_dummy_model(torch)
+            return
 
         weights_file = Path(self.weights_path)
         if not weights_file.exists():

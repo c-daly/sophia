@@ -38,7 +38,6 @@ Key directories:
 
 ### Key documentation
 - `README.md` – Installation, features, API overview
-- `CONTRIBUTING.md` – PR process and coding standards
 - `SOPHIA_TEST_GUIDE.md` – Testing infrastructure details
 - `.github/copilot-instructions.md` – Detailed development guidance
 

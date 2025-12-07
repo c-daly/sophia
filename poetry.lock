@@ -663,7 +663,7 @@ name = "logos-foundry"
 version = "0.1.0"
 description = "LOGOS Foundry - Canonical source of truth for Project LOGOS specifications, ontology, and infrastructure"
 optional = false
-python-versions = "^3.10"
+python-versions = "^3.11"
 groups = ["main"]
 files = []
 develop = false
@@ -671,13 +671,14 @@ develop = false
 [package.dependencies]
 fastapi = "^0.115.0"
 pydantic = "^2.0.0"
+pydantic-settings = "^2.0.0"
 uvicorn = {version = "^0.32.0", extras = ["standard"]}
 
 [package.source]
 type = "git"
 url = "https://github.com/c-daly/logos.git"
-reference = "main"
-resolved_reference = "efafa9c5721fc1608f1a826359f31c30799165df"
+reference = "chore/logos433-shared-config"
+resolved_reference = "37636a0b9adaf9a923c07dfecb3a2fb056ffb1f8"
 
 [[package]]
 name = "markupsafe"
@@ -1970,6 +1971,30 @@ files = [
 typing-extensions = ">=4.14.1"
 
 [[package]]
+name = "pydantic-settings"
+version = "2.12.0"
+description = "Settings management using Pydantic"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "pydantic_settings-2.12.0-py3-none-any.whl", hash = "sha256:fddb9fd99a5b18da837b29710391e945b1e30c135477f484084ee513adb93809"},
+    {file = "pydantic_settings-2.12.0.tar.gz", hash = "sha256:005538ef951e3c2a68e1c08b292b5f2e71490def8589d4221b95dab00dafcfd0"},
+]
+
+[package.dependencies]
+pydantic = ">=2.7.0"
+python-dotenv = ">=0.21.0"
+typing-inspection = ">=0.4.0"
+
+[package.extras]
+aws-secrets-manager = ["boto3 (>=1.35.0)", "boto3-stubs[secretsmanager]"]
+azure-key-vault = ["azure-identity (>=1.16.0)", "azure-keyvault-secrets (>=4.8.0)"]
+gcp-secret-manager = ["google-cloud-secret-manager (>=2.23.1)"]
+toml = ["tomli (>=2.0.1)"]
+yaml = ["pyyaml (>=6.0.1)"]
+
+[[package]]
 name = "pygments"
 version = "2.19.2"
 description = "Pygments is a syntax highlighting package written in Python."
@@ -3235,4 +3260,4 @@ ml-gpu = []
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "a6f111cd0dd4548149730b88ac81acfdc7d7b6e913d759d6661fc2e0f6f53f5e"
+content-hash = "cee3c08aac500f8bae17f78ba9e0e262b1c36dcb0140d87853114cbd91a53089"

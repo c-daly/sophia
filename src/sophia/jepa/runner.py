@@ -296,6 +296,9 @@ class StubJEPABackend:
             "embedding_dim": embedding_dim,
             "model_version": self.model_version,
             "confidence": 0.85,
+            "backend": "stub",
+            "device": "cpu",
+            "inference_time_ms": 0.1,  # Stub is instant
             "metadata": {
                 "file_path": file_path,
                 "question": question,
