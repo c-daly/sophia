@@ -65,10 +65,10 @@ Uses port 47xxx range (Neo4j 47474/47687, Milvus 47530).
 
 ## Documentation
 
-- [LOGOS Getting Started](https://github.com/c-daly/logos/blob/main/docs/GETTING_STARTED.md)
-- [Architecture Overview](https://github.com/c-daly/logos/blob/main/docs/ARCHITECTURE.md)
-- [Testing Guide](https://github.com/c-daly/logos/blob/main/docs/TESTING.md)
-- [SDK Guide](https://github.com/c-daly/logos/blob/main/docs/SDK_GUIDE.md)
+- [LOGOS Getting Started](https://github.com/c-daly/logos/blob/main/docs/guides/GETTING_STARTED.md)
+- [Architecture Overview](https://github.com/c-daly/logos/blob/main/docs/architecture/ARCHITECTURE.md)
+- [Testing Guide](https://github.com/c-daly/logos/blob/main/docs/guides/TESTING.md)
+- [SDK Guide](https://github.com/c-daly/logos/blob/main/docs/sdk/SDK_GUIDE.md)
 
 ## License
 
