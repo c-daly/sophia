@@ -5,8 +5,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-COMPOSE_FILE="${REPO_ROOT}/docker-compose.test.yml"
-COMPOSE_SOPHIA="${REPO_ROOT}/docker-compose.test.sophia.yml"
+COMPOSE_FILE="${REPO_ROOT}/containers/docker-compose.test.yml"
+COMPOSE_SOPHIA="${REPO_ROOT}/containers/docker-compose.test.sophia.yml"
 
 # Colors for output
 GREEN='\033[0;32m'

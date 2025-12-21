@@ -34,7 +34,7 @@ jobs:
       python_lint_paths: 'src tests'
       mypy_targets: 'src'
       # Start test services (Neo4j, Milvus, Sophia) using compose overlay
-      docker_compose_file: 'docker-compose.test.yml -f docker-compose.test.sophia.yml'
+      docker_compose_file: 'containers/docker-compose.test.yml -f containers/docker-compose.test.sophia.yml'
       docker_compose_wait_script: |
         # Port values from logos_config.SOPHIA_PORTS (hardcoded here since Python isn't available yet)
         echo "Waiting for Neo4j..."
