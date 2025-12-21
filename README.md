@@ -32,6 +32,8 @@ docker run -p 8000:8000 \
   ghcr.io/c-daly/sophia:latest
 ```
 
+For ML-enabled builds, use `ghcr.io/c-daly/sophia:ml-latest` (or set `SOPHIA_IMAGE_TAG=ml-latest` in compose files that reference Sophia).
+
 > **Note:** The example above uses default Milvus port 19530. For test stacks, Sophia uses port 47530 (the 47xxx prefix) to avoid conflicts with other services.
 
 The container includes all Python dependencies and the Sophia API service. For development and testing, Sophia uses the `logos-foundry` base image which includes all LOGOS shared packages.
