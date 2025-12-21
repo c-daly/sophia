@@ -1,5 +1,5 @@
-# Overlay for docker-compose.test.yml that adds the Sophia API service
-# Usage: docker compose -f docker-compose.test.yml -f docker-compose.test.sophia.yml up
+# Overlay for containers/docker-compose.test.yml that adds the Sophia API service
+# Usage: docker compose -f containers/docker-compose.test.yml -f containers/docker-compose.test.sophia.yml up
 #
 # This allows running the full test stack locally with the same config as CI.
 
@@ -10,7 +10,7 @@ services:
   sophia:
     container_name: sophia-test-api
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     ports:
       - "47000:8000"

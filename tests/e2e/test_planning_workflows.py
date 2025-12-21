@@ -3,7 +3,7 @@
 These tests validate full user scenarios from goal definition
 through plan execution to final state verification.
 
-Requires: Full stack running via docker-compose.test.yml
+Requires: Full stack running via containers/docker-compose.test.yml
 """
 
 import concurrent.futures

@@ -5,8 +5,8 @@ This directory contains Sophia's end-to-end (e2e) integration tests.
 ## Stack Configuration
 
 The test stack is configured via compose files at the repository root:
-- `docker-compose.test.yml` - Base infrastructure (Neo4j, Milvus)
-- `docker-compose.test.sophia.yml` - Sophia API service overlay
+- `containers/docker-compose.test.yml` - Base infrastructure (Neo4j, Milvus)
+- `containers/docker-compose.test.sophia.yml` - Sophia API service overlay
 
 ### Services
 
@@ -59,11 +59,11 @@ Sophia uses the 47xxx port range to avoid conflicts:
 
 ```bash
 # Start all services
-docker compose -f docker-compose.test.yml -f docker-compose.test.sophia.yml up -d
+docker compose -f containers/docker-compose.test.yml -f containers/docker-compose.test.sophia.yml up -d
 
 # Run tests
 poetry run pytest tests/ -v
 
 # Stop services
-docker compose -f docker-compose.test.yml -f docker-compose.test.sophia.yml down
+docker compose -f containers/docker-compose.test.yml -f containers/docker-compose.test.sophia.yml down
 ```

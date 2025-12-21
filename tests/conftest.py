@@ -24,12 +24,12 @@ def setup_test_environment():
 
     Tests assume infrastructure (Neo4j, Milvus) is already running and seeded.
     Use scripts/run_integration.sh for automated setup, or manually:
-      docker compose -f docker-compose.test.yml up -d
+      docker compose -f containers/docker-compose.test.yml up -d
       python scripts/seed_test_data.py
 
     Environment variables can be set by:
       - scripts/run_integration.sh (sets NEO4J_URI, etc.)
-      - docker-compose.test.sophia.yml
+      - containers/docker-compose.test.sophia.yml
       - Manual export before running pytest
     """
     # Set defaults only if not already set (allows override by scripts)

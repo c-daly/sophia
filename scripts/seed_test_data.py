@@ -92,7 +92,7 @@ def seed_data(uri: str, user: str, password: str) -> bool:
 
 
 def main() -> None:
-    # Configuration from env vars (matching docker-compose.test.yml)
+    # Configuration from env vars (matching containers/docker-compose.test.yml)
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "neo4jtest")

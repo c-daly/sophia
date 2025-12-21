@@ -36,7 +36,7 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4jtest")
 # Milvus connection config
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 
-# Test auth token (matches docker-compose.test.sophia.yml)
+# Test auth token (matches containers/docker-compose.test.sophia.yml)
 TEST_AUTH_TOKEN = os.getenv("SOPHIA_API_TOKEN", "test-token-for-sophia")
 
 

@@ -3,7 +3,7 @@
 These tests validate complete media lifecycle from upload
 through processing to retrieval and deletion.
 
-Requires: Full stack running via docker-compose.test.yml
+Requires: Full stack running via containers/docker-compose.test.yml
 """
 
 import io
