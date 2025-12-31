@@ -610,10 +610,18 @@ def create_app() -> FastAPI:
             if types:
                 type_list = cast(list[CWMType], [t.strip() for t in types.split(",")])
 
-            # Parse timestamp filter
+            # Parse timestamp filter with RFC3339 support
             parsed_timestamp = None
             if after_timestamp:
-                parsed_timestamp = datetime.fromisoformat(after_timestamp)
+                try:
+                    # Handle RFC3339 "Z" suffix
+                    ts = after_timestamp.replace("Z", "+00:00")
+                    parsed_timestamp = datetime.fromisoformat(ts)
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Invalid timestamp format: {after_timestamp}. Expected ISO 8601.",
+                    ) from e
 
             # Query Neo4j
             cwm_states = _cwm_persistence.find_states(
