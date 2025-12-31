@@ -335,11 +335,11 @@ class TestHealthEndpoint:
         resp = httpx.get(f"{sophia_url}/health", timeout=10)
 
         data = resp.json()
-        assert "components" in data
-        # When stack is running, both should be true
-        components = data["components"]
-        assert "neo4j" in components
-        assert "milvus" in components
+        assert "dependencies" in data
+        # When stack is running, both should be healthy
+        dependencies = data["dependencies"]
+        assert "neo4j" in dependencies
+        assert "milvus" in dependencies
 
 
 class TestPlanningWorkflow:

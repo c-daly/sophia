@@ -10,7 +10,7 @@ import io
 import os
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, Mock
 from PIL import Image
 from fastapi.testclient import TestClient
 
@@ -46,10 +46,13 @@ def api_token():
 
 @pytest.fixture
 def test_app(api_token, temp_storage_dir):
-    """Create test FastAPI application."""
+    """Create test FastAPI application with mocked HCG client."""
     os.environ["SOPHIA_API_TOKEN"] = api_token
     os.environ["MEDIA_STORAGE_ROOT"] = str(temp_storage_dir)
-    return create_app()
+    with patch("sophia.api.app._hcg_client") as mock_hcg:
+        mock_hcg.add_node = Mock()
+        mock_hcg.add_edge = Mock()
+        yield create_app()
 
 
 @pytest.fixture

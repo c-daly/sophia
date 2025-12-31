@@ -428,7 +428,7 @@ class TestErrorRecoveryWorkflow:
 
         data = response.json()
         assert "status" in data
-        assert "components" in data
+        assert "dependencies" in data
         # Status may be "healthy" or "degraded" depending on Neo4j
 
     def test_invalid_plan_execution_recovery(self, sophia_url, auth_headers):

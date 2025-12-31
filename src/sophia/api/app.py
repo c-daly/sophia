@@ -17,7 +17,8 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from logos_config import get_env_value
+from logos_config import Neo4jConfig, MilvusConfig, get_env_value
+from logos_config.health import HealthResponse as LogosHealthResponse, DependencyStatus
 
 from sophia.api.models import (
     PlanRequest,
@@ -29,7 +30,6 @@ from sophia.api.models import (
     ExecuteRequest,
     ExecuteResponse,
     ExecutionResult,
-    HealthResponse,
     StateResponse,
     StateUpdateRequest,
     StateUpdateResponse,
@@ -64,6 +64,7 @@ from sophia.jepa.models import (
 )
 from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
+from sophia.cwm import CWMPersistence
 
 
 logger = logging.getLogger(__name__)
@@ -149,12 +150,13 @@ _kg: Optional[KnowledgeGraph] = None
 _jepa_runner: Optional[JEPARunner] = None
 _media_storage: Optional[MediaStorageService] = None
 _media_ingestion: Optional[MediaIngestionService] = None
+_cwm_persistence: Optional[CWMPersistence] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -162,24 +164,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize knowledge graph
     _kg = KnowledgeGraph()
 
-    # Initialize HCG client using logos_config for env resolution
-    neo4j_uri = get_env_value("NEO4J_URI", default="bolt://localhost:7687")
-    neo4j_user = get_env_value("NEO4J_USER", default="neo4j")
-    neo4j_password = get_env_value("NEO4J_PASSWORD", default="neo4jtest")
-    milvus_host = get_env_value("MILVUS_HOST", default="localhost")
-    try:
-        milvus_port = int(get_env_value("MILVUS_PORT", default="19530") or "19530")
-    except ValueError:
-        logger.warning("Invalid MILVUS_PORT value; falling back to 19530")
-        milvus_port = 19530
+    # Initialize HCG client - let env vars (NEO4J_*, MILVUS_*) take precedence
+    # In containers, these are set via docker-compose environment section
+    neo4j_config = Neo4jConfig()
+    milvus_config = MilvusConfig()
 
     try:
         _hcg_client = HCGClient(
-            neo4j_uri=neo4j_uri,
-            neo4j_username=neo4j_user,
-            neo4j_password=neo4j_password,
-            milvus_host=milvus_host,
-            milvus_port=milvus_port,
+            neo4j_uri=neo4j_config.uri,
+            neo4j_username=neo4j_config.user,
+            neo4j_password=neo4j_config.password,
+            milvus_host=milvus_config.host,
+            milvus_port=milvus_config.port,
         )
         logger.info("HCG client initialized")
 
@@ -219,6 +215,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _cwm_a = ContinuousWorkingMemoryAssociative()
     _cwm_a_state = CWMAStateService(source="sophia_api")
     _jepa_runner = JEPARunner(model_version="jepa-stub-v1.0")
+
+    # Initialize CWM persistence (requires HCG client)
+    if _hcg_client:
+        _cwm_persistence = CWMPersistence(
+            neo4j_driver=_hcg_client.driver,
+            database=_hcg_client.database,
+        )
+        logger.info("CWM persistence service initialized")
 
     # Initialize media ingestion services
     storage_root = get_env_value("MEDIA_STORAGE_ROOT", default="./media_storage")
@@ -267,22 +271,37 @@ def create_app() -> FastAPI:
     )
 
     # Health check endpoint (no auth required)
-    @app.get("/health", response_model=HealthResponse, tags=["health"])
-    async def health_check() -> HealthResponse:
-        """Health check endpoint."""
-        components = {}
+    @app.get("/health", response_model=LogosHealthResponse, tags=["health"])
+    async def health_check() -> LogosHealthResponse:
+        """Health check endpoint using standardized logos_config schema."""
+        dependencies = {}
 
         if _hcg_client:
-            components.update(_hcg_client.health_check())
+            hcg_health = _hcg_client.health_check()
+            dependencies["neo4j"] = DependencyStatus(
+                status="healthy" if hcg_health.get("neo4j") else "unavailable",
+                connected=hcg_health.get("neo4j", False),
+            )
+            dependencies["milvus"] = DependencyStatus(
+                status="healthy" if hcg_health.get("milvus") else "unavailable",
+                connected=hcg_health.get("milvus", False),
+            )
         else:
-            components = {"neo4j": False, "milvus": False}
+            dependencies["neo4j"] = DependencyStatus(
+                status="unavailable", connected=False
+            )
+            dependencies["milvus"] = DependencyStatus(
+                status="unavailable", connected=False
+            )
 
-        overall_status = "healthy" if all(components.values()) else "degraded"
+        all_healthy = all(d.status == "healthy" for d in dependencies.values())
+        overall_status = "healthy" if all_healthy else "degraded"
 
-        return HealthResponse(
+        return LogosHealthResponse(
             status=overall_status,
-            components=components,
+            service="sophia",
             version="0.1.0",
+            dependencies=dependencies,
         )
 
     # State endpoint (GET) - Read current state from Neo4j
@@ -540,6 +559,104 @@ def create_app() -> FastAPI:
             total=len(states),
             model_type=model_type,
         )
+
+    # CWM persistence endpoint - reads from Neo4j
+    @app.get(
+        "/cwm",
+        response_model=CWMStateListResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["cwm"],
+    )
+    async def get_cwm_persisted(
+        types: Optional[str] = Query(
+            default=None,
+            description="Comma-separated CWM types to filter (cwm_a, cwm_g, cwm_e)",
+        ),
+        after_timestamp: Optional[str] = Query(
+            default=None,
+            description="Only return states after this ISO timestamp",
+        ),
+        limit: int = Query(
+            default=20,
+            ge=1,
+            le=100,
+            description="Maximum number of states to return",
+        ),
+    ) -> CWMStateListResponse:
+        """Get persisted CWM states from Neo4j.
+
+        Returns CWMState envelopes persisted to Neo4j via the CWMPersistence
+        service. This endpoint is intended for Hermes to query historical
+        cognitive states for context.
+
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            from typing import cast
+            from sophia.cwm.persistence import CWMType
+
+            # Parse types filter
+            type_list: list[CWMType] | None = None
+            if types:
+                type_list = cast(list[CWMType], [t.strip() for t in types.split(",")])
+
+            # Parse timestamp filter with RFC3339 support
+            parsed_timestamp = None
+            if after_timestamp:
+                try:
+                    # Handle RFC3339 "Z" suffix
+                    ts = after_timestamp.replace("Z", "+00:00")
+                    parsed_timestamp = datetime.fromisoformat(ts)
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"Invalid timestamp format: {after_timestamp}. Expected ISO 8601.",
+                    ) from e
+
+            # Query Neo4j
+            cwm_states = _cwm_persistence.find_states(
+                types=type_list,
+                after_timestamp=parsed_timestamp,
+                limit=limit,
+            )
+
+            # Convert to response format
+            response_states = []
+            for s in cwm_states:
+                response_states.append(
+                    CWMStateResponse(
+                        state_id=s.state_id,
+                        model_type=s.model_type,
+                        source=s.source,
+                        timestamp=s.timestamp.isoformat() if s.timestamp else "",
+                        confidence=s.confidence,
+                        status=s.status,
+                        links=s.links.model_dump() if s.links else {},
+                        tags=s.tags or [],
+                        data=s.data.model_dump() if s.data else {},
+                    )
+                )
+
+            return CWMStateListResponse(
+                states=response_states,
+                total=len(response_states),
+                model_type=types,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving persisted CWM states: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to retrieve CWM states: {str(e)}",
+            )
 
     # Plan endpoint
     @app.post(

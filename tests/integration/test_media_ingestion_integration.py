@@ -89,8 +89,8 @@ class TestMediaIngestionIntegration:
         assert response.status_code == 200
 
         data = response.json()
-        assert "components" in data
-        assert "neo4j" in data["components"]
+        assert "dependencies" in data
+        assert "neo4j" in data["dependencies"]
 
     def test_ingest_media_creates_neo4j_node(
         self, http_client, auth_headers, sample_image

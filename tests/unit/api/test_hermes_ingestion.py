@@ -17,8 +17,11 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def app():
-    """Create test application."""
-    return create_app()
+    """Create test application with mocked HCG client."""
+    with patch("sophia.api.app._hcg_client") as mock_hcg:
+        mock_hcg.add_node = Mock()
+        mock_hcg.add_edge = Mock()
+        yield create_app()
 
 
 @pytest.fixture
