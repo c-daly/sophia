@@ -17,7 +17,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from logos_config import Neo4jConfig, MilvusConfig, SOPHIA_PORTS, get_env_value
+from logos_config import Neo4jConfig, MilvusConfig, get_env_value
 from logos_config.health import HealthResponse as LogosHealthResponse, DependencyStatus
 
 from sophia.api.models import (
@@ -164,14 +164,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize knowledge graph
     _kg = KnowledgeGraph()
 
-    # Initialize HCG client using logos_config settings
-    neo4j_config = Neo4jConfig(
-        bolt_port=SOPHIA_PORTS.neo4j_bolt,
-        http_port=SOPHIA_PORTS.neo4j_http,
-    )
-    milvus_config = MilvusConfig(
-        port=SOPHIA_PORTS.milvus_grpc,
-    )
+    # Initialize HCG client - let env vars (NEO4J_*, MILVUS_*) take precedence
+    # In containers, these are set via docker-compose environment section
+    neo4j_config = Neo4jConfig()
+    milvus_config = MilvusConfig()
 
     try:
         _hcg_client = HCGClient(
