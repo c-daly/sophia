@@ -219,8 +219,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize CWM persistence (requires HCG client)
     if _hcg_client:
         _cwm_persistence = CWMPersistence(
-            neo4j_driver=_hcg_client._neo4j._driver,
-            database=_hcg_client._neo4j._database,
+            neo4j_driver=_hcg_client.driver,
+            database=_hcg_client.database,
         )
         logger.info("CWM persistence service initialized")
 
