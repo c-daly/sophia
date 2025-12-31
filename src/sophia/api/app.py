@@ -291,8 +291,12 @@ def create_app() -> FastAPI:
                 connected=hcg_health.get("milvus", False),
             )
         else:
-            dependencies["neo4j"] = DependencyStatus(status="unavailable", connected=False)
-            dependencies["milvus"] = DependencyStatus(status="unavailable", connected=False)
+            dependencies["neo4j"] = DependencyStatus(
+                status="unavailable", connected=False
+            )
+            dependencies["milvus"] = DependencyStatus(
+                status="unavailable", connected=False
+            )
 
         all_healthy = all(d.status == "healthy" for d in dependencies.values())
         overall_status = "healthy" if all_healthy else "degraded"
@@ -604,9 +608,7 @@ def create_app() -> FastAPI:
             # Parse types filter
             type_list: list[CWMType] | None = None
             if types:
-                type_list = cast(
-                    list[CWMType], [t.strip() for t in types.split(",")]
-                )
+                type_list = cast(list[CWMType], [t.strip() for t in types.split(",")])
 
             # Parse timestamp filter
             parsed_timestamp = None

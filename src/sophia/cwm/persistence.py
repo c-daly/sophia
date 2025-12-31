@@ -197,7 +197,9 @@ class CWMPersistence:
                     violations=payload_dict.get("violations", []),
                     validation=ValidationResult(
                         passed=payload_dict.get("validation", {}).get("passed", True),
-                        violations=payload_dict.get("validation", {}).get("violations", []),
+                        violations=payload_dict.get("validation", {}).get(
+                            "violations", []
+                        ),
                     ),
                 ),
             )
