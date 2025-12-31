@@ -28,7 +28,7 @@ class TestPrototypeIntegration:
         assert response.status_code == 200
 
         data = response.json()
-        assert data["components"]["neo4j"] is True
+        assert data["dependencies"]["neo4j"]["connected"] is True
 
     def test_get_initial_state_from_neo4j(self, http_client, auth_headers):
         """Test retrieving initial state from Neo4j."""
