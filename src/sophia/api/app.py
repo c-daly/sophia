@@ -1,5 +1,6 @@
 """Main FastAPI application for Sophia service."""
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -68,6 +69,14 @@ from sophia.jepa.models import (
 from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
 from sophia.cwm import CWMPersistence
+from sophia.feedback import (
+    FeedbackConfig,
+    FeedbackDispatcher,
+    FeedbackPayload,
+    FeedbackQueue,
+    FeedbackWorker,
+    StepResult,
+)
 
 # Configure structured logging for sophia
 logger = setup_logging("sophia")
@@ -172,15 +181,57 @@ _jepa_runner: Optional[JEPARunner] = None
 _media_storage: Optional[MediaStorageService] = None
 _media_ingestion: Optional[MediaIngestionService] = None
 _cwm_persistence: Optional[CWMPersistence] = None
+_feedback_dispatcher: Optional[FeedbackDispatcher] = None
+_feedback_worker: Optional[FeedbackWorker] = None
+_feedback_worker_task: Optional[Any] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
+    global \
+        _planner, \
+        _executor, \
+        _hcg_client, \
+        _cwm_g, \
+        _cwm_a, \
+        _cwm_a_state, \
+        _kg, \
+        _jepa_runner, \
+        _media_storage, \
+        _media_ingestion, \
+        _cwm_persistence, \
+        _feedback_dispatcher, \
+        _feedback_worker, \
+        _feedback_worker_task
 
     # Startup
     logger.info("Starting Sophia API service...")
+
+    # Initialize feedback system (non-critical, graceful degradation)
+    feedback_config = FeedbackConfig()
+    if feedback_config.enabled:
+        try:
+            from redis.exceptions import ConnectionError as RedisConnectionError
+
+            feedback_queue = FeedbackQueue(feedback_config.redis_url)
+            # Test connection
+            feedback_queue.pending_count()
+            _feedback_dispatcher = FeedbackDispatcher(feedback_queue, enabled=True)
+            _feedback_worker = FeedbackWorker(
+                queue=feedback_queue,
+                hermes_url=feedback_config.hermes_url,
+                timeout=feedback_config.worker_timeout,
+            )
+            # Start worker as background task
+            _feedback_worker_task = asyncio.create_task(_feedback_worker.start())
+            logger.info("Feedback emission system initialized")
+        except (RedisConnectionError, Exception) as e:
+            logger.warning(f"Redis unavailable, feedback disabled: {e}")
+            _feedback_dispatcher = FeedbackDispatcher(None, enabled=False)
+    else:
+        logger.info("Feedback emission disabled by configuration")
+        _feedback_dispatcher = FeedbackDispatcher(None, enabled=False)
 
     # Initialize knowledge graph
     _kg = KnowledgeGraph()
@@ -264,6 +315,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Shutdown
     logger.info("Shutting down Sophia API service...")
+
+    # Stop feedback worker
+    if _feedback_worker:
+        _feedback_worker.stop()
+    if _feedback_worker_task:
+        _feedback_worker_task.cancel()
+        try:
+            await _feedback_worker_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Feedback worker stopped")
+
     if _hcg_client:
         _hcg_client.close()
     logger.info("Sophia API service shut down")
@@ -463,12 +526,16 @@ def create_app() -> FastAPI:
                                 before=(
                                     before_val
                                     if isinstance(before_val, dict)
-                                    else {"value": before_val} if before_val else None
+                                    else {"value": before_val}
+                                    if before_val
+                                    else None
                                 ),
                                 after=(
                                     after_val
                                     if isinstance(after_val, dict)
-                                    else {"value": after_val} if after_val else None
+                                    else {"value": after_val}
+                                    if after_val
+                                    else None
                                 ),
                                 changed_properties=(
                                     changed_props if changed_props else None
@@ -772,6 +839,22 @@ def create_app() -> FastAPI:
                         )
                 except Exception as e:
                     logger.warning(f"Could not link plan to goal: {e}")
+
+            # Emit feedback to Hermes
+            if _feedback_dispatcher:
+                try:
+                    step_summary = "→".join(s.action_type for s in plan_step_models)
+                    _feedback_dispatcher.emit(
+                        FeedbackPayload(
+                            correlation_id=request.correlation_id,
+                            plan_id=plan_id,
+                            feedback_type="plan",
+                            outcome="created",
+                            reason=f"Generated {len(plan_step_models)}-step plan: {step_summary}",
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to emit plan feedback: {e}")
 
             return PlanResponse(
                 plan=plan_step_models,
@@ -1129,6 +1212,20 @@ def create_app() -> FastAPI:
         # TODO: Pass to Sophia's cognitive processing
         # For now, just acknowledge receipt
 
+        # Emit feedback to Hermes
+        if _feedback_dispatcher:
+            try:
+                _feedback_dispatcher.emit(
+                    FeedbackPayload(
+                        correlation_id=request.correlation_id,
+                        feedback_type="observation",
+                        outcome="accepted",
+                        reason=f"Received proposal {request.proposal_id} from {request.source_service}",
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Failed to emit proposal feedback: {e}")
+
         return HermesProposalResponse(
             proposal_id=request.proposal_id,
             stored_node_ids=[],  # No nodes created - proposals are logged, not stored
@@ -1269,6 +1366,34 @@ def create_app() -> FastAPI:
             overall_status = (
                 "success" if all(r.status == "success" for r in results) else "partial"
             )
+
+            # Emit feedback to Hermes
+            if _feedback_dispatcher:
+                try:
+                    step_results = [
+                        StepResult(
+                            step_index=i,
+                            action=r.step.action_type,
+                            outcome="success" if r.status == "success" else "failure",
+                            error=r.message if r.status != "success" else None,
+                        )
+                        for i, r in enumerate(results)
+                    ]
+                    feedback_outcome = (
+                        "success" if overall_status == "success" else "partial"
+                    )
+                    _feedback_dispatcher.emit(
+                        FeedbackPayload(
+                            plan_id=request.plan_id,
+                            execution_id=execution_id,
+                            feedback_type="execution",
+                            outcome=feedback_outcome,
+                            reason=f"Executed {len(results)} steps: {overall_status}",
+                            step_results=step_results,
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to emit execution feedback: {e}")
 
             return ExecuteResponse(
                 plan_id=request.plan_id,

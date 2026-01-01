@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 class PlanRequest(BaseModel):
     """Request model for the /plan endpoint."""
 
+    correlation_id: Optional[str] = Field(
+        default=None,
+        description="Correlation ID for request tracing and feedback",
+    )
     goal: Dict[str, Any] = Field(
         ...,
         description="Goal specification as structured dict",
@@ -341,6 +345,10 @@ class HermesProposalRequest(BaseModel):
     """Request model for Hermes LLM proposal ingestion."""
 
     proposal_id: str = Field(..., description="Unique identifier for this proposal")
+    correlation_id: Optional[str] = Field(
+        default=None,
+        description="Correlation ID for request tracing and feedback",
+    )
     source_service: str = Field(
         default="hermes", description="Source service (typically 'hermes')"
     )
