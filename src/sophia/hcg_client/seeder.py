@@ -7,6 +7,15 @@ from sophia.hcg_client.client import HCGClient
 
 logger = logging.getLogger(__name__)
 
+# Ancestor chains for pick-and-place types (per design spec)
+ANCESTORS = {
+    "location": ["spatial_entity", "entity"],
+    "object": ["physical_entity", "entity"],
+    "action": ["process", "entity"],
+    "goal": ["intention", "entity"],
+    "state": ["cognition"],
+}
+
 
 def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     """Seed Neo4j with pick-and-place scenario data.
@@ -20,107 +29,122 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
 
     # Create spatial entities (locations)
     hcg_client.add_node(
-        node_id="table",
+        uuid="table",
+        name="Table",
         node_type="location",
-        properties={"name": "Table", "location_type": "surface"},
+        ancestors=ANCESTORS["location"],
+        is_type_definition=False,
+        properties={"location_type": "surface"},
     )
     hcg_client.add_node(
-        node_id="bin",
+        uuid="bin",
+        name="Bin",
         node_type="location",
-        properties={"name": "Bin", "location_type": "container"},
+        ancestors=ANCESTORS["location"],
+        is_type_definition=False,
+        properties={"location_type": "container"},
     )
 
     # Create objects
     hcg_client.add_node(
-        node_id="red_block",
+        uuid="red_block",
+        name="Red Block",
         node_type="object",
-        properties={"name": "Red Block", "color": "red", "object_type": "block"},
+        ancestors=ANCESTORS["object"],
+        is_type_definition=False,
+        properties={"color": "red", "object_type": "block"},
     )
     hcg_client.add_node(
-        node_id="blue_block",
+        uuid="blue_block",
+        name="Blue Block",
         node_type="object",
-        properties={"name": "Blue Block", "color": "blue", "object_type": "block"},
+        ancestors=ANCESTORS["object"],
+        is_type_definition=False,
+        properties={"color": "blue", "object_type": "block"},
     )
 
     # Initial state: blocks on table
     hcg_client.add_edge(
         edge_id="e_red_block_on_table",
-        source_id="red_block",
-        target_id="table",
+        source_uuid="red_block",
+        target_uuid="table",
         relation="located_at",
     )
     hcg_client.add_edge(
         edge_id="e_blue_block_on_table",
-        source_id="blue_block",
-        target_id="table",
+        source_uuid="blue_block",
+        target_uuid="table",
         relation="located_at",
     )
 
     # Create action primitives
     hcg_client.add_node(
-        node_id="move_to_red_block",
+        uuid="move_to_red_block",
+        name="Move to Red Block",
         node_type="action",
-        properties={
-            "name": "Move to Red Block",
-            "action_type": "MOVE",
-            "target": "red_block",
-        },
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "MOVE", "target": "red_block"},
     )
     hcg_client.add_node(
-        node_id="grasp_red_block",
+        uuid="grasp_red_block",
+        name="Grasp Red Block",
         node_type="action",
-        properties={
-            "name": "Grasp Red Block",
-            "action_type": "GRASP",
-            "target": "red_block",
-        },
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "GRASP", "target": "red_block"},
     )
     hcg_client.add_node(
-        node_id="move_to_bin",
+        uuid="move_to_bin",
+        name="Move to Bin",
         node_type="action",
-        properties={"name": "Move to Bin", "action_type": "MOVE", "target": "bin"},
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "MOVE", "target": "bin"},
     )
     hcg_client.add_node(
-        node_id="release_red_block",
+        uuid="release_red_block",
+        name="Release Red Block",
         node_type="action",
-        properties={
-            "name": "Release Red Block",
-            "action_type": "RELEASE",
-            "target": "red_block",
-        },
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "RELEASE", "target": "red_block"},
     )
 
     # Action preconditions and effects (causal chain)
     hcg_client.add_edge(
         edge_id="e_move_enables_grasp",
-        source_id="move_to_red_block",
-        target_id="grasp_red_block",
+        source_uuid="move_to_red_block",
+        target_uuid="grasp_red_block",
         relation="enables",
     )
     hcg_client.add_edge(
         edge_id="e_grasp_enables_move",
-        source_id="grasp_red_block",
-        target_id="move_to_bin",
+        source_uuid="grasp_red_block",
+        target_uuid="move_to_bin",
         relation="enables",
     )
     hcg_client.add_edge(
         edge_id="e_move_enables_release",
-        source_id="move_to_bin",
-        target_id="release_red_block",
+        source_uuid="move_to_bin",
+        target_uuid="release_red_block",
         relation="enables",
     )
     hcg_client.add_edge(
         edge_id="e_release_achieves_bin",
-        source_id="release_red_block",
-        target_id="bin",
+        source_uuid="release_red_block",
+        target_uuid="bin",
         relation="achieves",
         properties={"state": "red_block_in_bin"},
     )
 
     # Goal definition
     hcg_client.add_node(
-        node_id="goal_red_block_in_bin",
+        uuid="goal_red_block_in_bin",
+        name="Goal: Red Block in Bin",
         node_type="goal",
+        ancestors=ANCESTORS["goal"],
+        is_type_definition=False,
         properties={
             "description": "red block in bin",
             "target_state": "red_block_in_bin",
@@ -128,15 +152,18 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     )
     hcg_client.add_edge(
         edge_id="e_goal_requires_release",
-        source_id="goal_red_block_in_bin",
-        target_id="release_red_block",
+        source_uuid="goal_red_block_in_bin",
+        target_uuid="release_red_block",
         relation="requires",
     )
 
     # Create initial state node
     hcg_client.add_node(
-        node_id="current_state",
+        uuid="current_state",
+        name="Current State",
         node_type="state",
+        ancestors=ANCESTORS["state"],
+        is_type_definition=False,
         properties={
             "red_block": {"location": "table", "grasped": False},
             "blue_block": {"location": "table", "grasped": False},

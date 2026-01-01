@@ -3,6 +3,15 @@
 from typing import Dict, Any
 from sophia.knowledge_graph import KnowledgeGraph, Node, Edge
 
+# Ancestor chains for pick-and-place types (per design spec)
+ANCESTORS = {
+    "location": ["spatial_entity", "entity"],
+    "object": ["physical_entity", "entity"],
+    "action": ["process", "entity"],
+    "goal": ["intention", "entity"],
+    "state": ["cognition"],
+}
+
 
 def load_pick_and_place_scenario() -> KnowledgeGraph:
     """Load the pick-and-place test scenario into a knowledge graph.
@@ -17,14 +26,20 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
 
     # Create spatial entities (locations)
     table = Node(
-        id="table",
+        uuid="table",
+        name="Table",
         type="location",
-        properties={"name": "Table", "location_type": "surface"},
+        ancestors=ANCESTORS["location"],
+        is_type_definition=False,
+        properties={"location_type": "surface"},
     )
     bin_node = Node(
-        id="bin",
+        uuid="bin",
+        name="Bin",
         type="location",
-        properties={"name": "Bin", "location_type": "container"},
+        ancestors=ANCESTORS["location"],
+        is_type_definition=False,
+        properties={"location_type": "container"},
     )
 
     kg.add_node(table)
@@ -32,14 +47,20 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
 
     # Create objects
     red_block = Node(
-        id="red_block",
+        uuid="red_block",
+        name="Red Block",
         type="object",
-        properties={"name": "Red Block", "color": "red", "object_type": "block"},
+        ancestors=ANCESTORS["object"],
+        is_type_definition=False,
+        properties={"color": "red", "object_type": "block"},
     )
     blue_block = Node(
-        id="blue_block",
+        uuid="blue_block",
+        name="Blue Block",
         type="object",
-        properties={"name": "Blue Block", "color": "blue", "object_type": "block"},
+        ancestors=ANCESTORS["object"],
+        is_type_definition=False,
+        properties={"color": "blue", "object_type": "block"},
     )
 
     kg.add_node(red_block)
@@ -55,36 +76,36 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
 
     # Create action primitives
     move1 = Node(
-        id="move_to_red_block",
+        uuid="move_to_red_block",
+        name="Move to Red Block",
         type="action",
-        properties={
-            "name": "Move to Red Block",
-            "action_type": "MOVE",
-            "target": "red_block",
-        },
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "MOVE", "target": "red_block"},
     )
     grasp1 = Node(
-        id="grasp_red_block",
+        uuid="grasp_red_block",
+        name="Grasp Red Block",
         type="action",
-        properties={
-            "name": "Grasp Red Block",
-            "action_type": "GRASP",
-            "target": "red_block",
-        },
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "GRASP", "target": "red_block"},
     )
     move2 = Node(
-        id="move_to_bin",
+        uuid="move_to_bin",
+        name="Move to Bin",
         type="action",
-        properties={"name": "Move to Bin", "action_type": "MOVE", "target": "bin"},
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "MOVE", "target": "bin"},
     )
     release1 = Node(
-        id="release_red_block",
+        uuid="release_red_block",
+        name="Release Red Block",
         type="action",
-        properties={
-            "name": "Release Red Block",
-            "action_type": "RELEASE",
-            "target": "red_block",
-        },
+        ancestors=ANCESTORS["action"],
+        is_type_definition=False,
+        properties={"action_type": "RELEASE", "target": "red_block"},
     )
 
     kg.add_node(move1)
@@ -113,8 +134,11 @@ def load_pick_and_place_scenario() -> KnowledgeGraph:
 
     # Goal definition
     goal = Node(
-        id="goal_red_block_in_bin",
+        uuid="goal_red_block_in_bin",
+        name="Goal: Red Block in Bin",
         type="goal",
+        ancestors=ANCESTORS["goal"],
+        is_type_definition=False,
         properties={
             "description": "red block in bin",
             "target_state": "red_block_in_bin",

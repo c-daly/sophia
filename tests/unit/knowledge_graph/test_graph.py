@@ -20,7 +20,7 @@ def test_knowledge_graph_creation() -> None:
 def test_add_node() -> None:
     """Test adding nodes to the graph."""
     kg = KnowledgeGraph()
-    node = Node(id="n1", type="concept")
+    node = Node(uuid="n1", name="Node 1", type="concept")
 
     kg.add_node(node)
 
@@ -31,8 +31,8 @@ def test_add_node() -> None:
 def test_add_edge() -> None:
     """Test adding edges to the graph."""
     kg = KnowledgeGraph()
-    node1 = Node(id="n1", type="concept")
-    node2 = Node(id="n2", type="concept")
+    node1 = Node(uuid="n1", name="Node 1", type="concept")
+    node2 = Node(uuid="n2", name="Node 2", type="concept")
     edge = Edge(id="e1", source="n1", target="n2", relation="relates_to")
 
     kg.add_node(node1)
@@ -46,7 +46,7 @@ def test_add_edge() -> None:
 def test_add_edge_missing_source() -> None:
     """Test that adding edge with missing source raises error."""
     kg = KnowledgeGraph()
-    node = Node(id="n2", type="concept")
+    node = Node(uuid="n2", name="Node 2", type="concept")
     edge = Edge(source="n1", target="n2", relation="relates_to")
 
     kg.add_node(node)
@@ -58,7 +58,7 @@ def test_add_edge_missing_source() -> None:
 def test_add_edge_missing_target() -> None:
     """Test that adding edge with missing target raises error."""
     kg = KnowledgeGraph()
-    node = Node(id="n1", type="concept")
+    node = Node(uuid="n1", name="Node 1", type="concept")
     edge = Edge(source="n1", target="n2", relation="relates_to")
 
     kg.add_node(node)
@@ -70,9 +70,9 @@ def test_add_edge_missing_target() -> None:
 def test_get_neighbors() -> None:
     """Test getting neighbors of a node."""
     kg = KnowledgeGraph()
-    node1 = Node(id="n1", type="concept")
-    node2 = Node(id="n2", type="concept")
-    node3 = Node(id="n3", type="concept")
+    node1 = Node(uuid="n1", name="Node 1", type="concept")
+    node2 = Node(uuid="n2", name="Node 2", type="concept")
+    node3 = Node(uuid="n3", name="Node 3", type="concept")
     edge1 = Edge(source="n1", target="n2", relation="relates_to")
     edge2 = Edge(source="n1", target="n3", relation="relates_to")
 
@@ -92,8 +92,8 @@ def test_get_neighbors() -> None:
 def test_get_edges_from() -> None:
     """Test getting outgoing edges from a node."""
     kg = KnowledgeGraph()
-    node1 = Node(id="n1", type="concept")
-    node2 = Node(id="n2", type="concept")
+    node1 = Node(uuid="n1", name="Node 1", type="concept")
+    node2 = Node(uuid="n2", name="Node 2", type="concept")
     edge = Edge(id="e1", source="n1", target="n2", relation="relates_to")
 
     kg.add_node(node1)
@@ -109,8 +109,8 @@ def test_get_edges_from() -> None:
 def test_remove_node() -> None:
     """Test removing a node from the graph."""
     kg = KnowledgeGraph()
-    node1 = Node(id="n1", type="concept")
-    node2 = Node(id="n2", type="concept")
+    node1 = Node(uuid="n1", name="Node 1", type="concept")
+    node2 = Node(uuid="n2", name="Node 2", type="concept")
     edge = Edge(source="n1", target="n2", relation="relates_to")
 
     kg.add_node(node1)
@@ -133,8 +133,8 @@ def test_remove_nonexistent_node() -> None:
 def test_clear() -> None:
     """Test clearing the graph."""
     kg = KnowledgeGraph()
-    node1 = Node(id="n1", type="concept")
-    node2 = Node(id="n2", type="concept")
+    node1 = Node(uuid="n1", name="Node 1", type="concept")
+    node2 = Node(uuid="n2", name="Node 2", type="concept")
     edge = Edge(source="n1", target="n2", relation="relates_to")
 
     kg.add_node(node1)

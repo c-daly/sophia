@@ -47,14 +47,54 @@ def test_add_node_runs_shacl_validation(
     validator.validate_node.return_value = (True, [])
     monkeypatch.setattr(client, "_validator", validator)
 
-    execute = MagicMock(return_value=[{"id": "node-1"}])
+    execute = MagicMock(return_value=[{"uuid": "node-1"}])
     monkeypatch.setattr(client, "_execute_query", execute)
 
-    result = client.add_node("node-1", "concept", {"name": "Test"})
+    result = client.add_node(
+        uuid="node-1",
+        name="Test Node",
+        node_type="concept",
+        ancestors=["parent", "root"],
+        is_type_definition=False,
+        properties={"custom": "value"},
+    )
 
     assert result == "node-1"
     validator.validate_node.assert_called_once()
     execute.assert_called_once()
+
+
+def test_add_node_raises_on_empty_uuid(client: HCGClient) -> None:
+    """Empty uuid should raise ValueError before validation."""
+    with pytest.raises(ValueError, match="uuid cannot be empty"):
+        client.add_node(
+            uuid="",
+            name="Test",
+            node_type="concept",
+            ancestors=[],
+        )
+
+
+def test_add_node_raises_on_empty_name(client: HCGClient) -> None:
+    """Empty name should raise ValueError before validation."""
+    with pytest.raises(ValueError, match="name cannot be empty"):
+        client.add_node(
+            uuid="test-1",
+            name="",
+            node_type="concept",
+            ancestors=[],
+        )
+
+
+def test_add_node_raises_on_empty_node_type(client: HCGClient) -> None:
+    """Empty node_type should raise ValueError before validation."""
+    with pytest.raises(ValueError, match="node_type cannot be empty"):
+        client.add_node(
+            uuid="test-1",
+            name="Test",
+            node_type="",
+            ancestors=[],
+        )
 
 
 def test_add_node_raises_on_validation_error(
@@ -62,11 +102,37 @@ def test_add_node_raises_on_validation_error(
 ) -> None:
     """Invalid nodes should raise ValueError before Cypher executes."""
     validator = MagicMock()
-    validator.validate_node.return_value = (False, ["missing type"])
+    validator.validate_node.return_value = (False, ["validation error"])
     monkeypatch.setattr(client, "_validator", validator)
 
-    with pytest.raises(ValueError, match="missing type"):
-        client.add_node("bad", "", {})
+    with pytest.raises(ValueError, match="validation error"):
+        client.add_node(
+            uuid="bad",
+            name="Bad Node",
+            node_type="concept",
+            ancestors=[],
+        )
+
+
+def test_add_node_legacy_warns_deprecation(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """add_node_legacy should emit DeprecationWarning."""
+    validator = MagicMock()
+    validator.validate_node.return_value = (True, [])
+    monkeypatch.setattr(client, "_validator", validator)
+
+    execute = MagicMock(return_value=[{"uuid": "legacy-1"}])
+    monkeypatch.setattr(client, "_execute_query", execute)
+
+    with pytest.warns(DeprecationWarning, match="add_node_legacy is deprecated"):
+        result = client.add_node_legacy(
+            node_id="legacy-1",
+            node_type="concept",
+            properties={"name": "Legacy Node"},
+        )
+
+    assert result == "legacy-1"
 
 
 def test_add_edge_uses_validator(

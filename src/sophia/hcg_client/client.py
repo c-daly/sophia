@@ -68,14 +68,42 @@ class HCGClient(LogosHCGClient):
 
     def add_node(
         self,
-        node_id: str,
+        uuid: str,
+        name: str,
         node_type: str,
+        ancestors: List[str],
+        is_type_definition: bool = False,
         properties: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Create or update a node after SHACL validation."""
+        """Create or update a node with logos-standard properties.
+
+        Args:
+            uuid: Unique identifier (e.g., "entity-123", UUID string)
+            name: Human-readable name (e.g., "red_block", "pick_action")
+            node_type: Semantic type (e.g., "object", "action", "location")
+            ancestors: Type inheritance chain (e.g., ["physical_entity", "entity"])
+            is_type_definition: True if this node defines a type, False for instances
+            properties: Additional custom properties
+
+        Returns:
+            The uuid of the created/updated node
+
+        Raises:
+            ValueError: If uuid, name, or node_type is empty, or validation fails
+        """
+        if not uuid:
+            raise ValueError("uuid cannot be empty")
+        if not name:
+            raise ValueError("name cannot be empty")
+        if not node_type:
+            raise ValueError("node_type cannot be empty")
+
         node_data = {
-            "id": node_id,
+            "uuid": uuid,
+            "name": name,
             "type": node_type,
+            "ancestors": ancestors,
+            "is_type_definition": is_type_definition,
             "properties": properties or {},
         }
 
@@ -84,10 +112,13 @@ class HCGClient(LogosHCGClient):
             raise ValueError(f"Node validation failed: {'; '.join(errors)}")
 
         query = """
-        MERGE (n:Node {id: $id})
-        SET n.type = $type
+        MERGE (n:Node {uuid: $uuid})
+        SET n.name = $name,
+            n.type = $type,
+            n.is_type_definition = $is_type_definition,
+            n.ancestors = $ancestors
         SET n += $properties
-        RETURN n.id as id
+        RETURN n.uuid as uuid
         """
         encoded_properties = self._encode_properties(
             cast(Mapping[str, Any], node_data["properties"])
@@ -95,26 +126,70 @@ class HCGClient(LogosHCGClient):
         records = self._execute_query(
             query,
             {
-                "id": node_id,
+                "uuid": uuid,
+                "name": name,
                 "type": node_type,
+                "is_type_definition": is_type_definition,
+                "ancestors": ancestors,
                 "properties": encoded_properties,
             },
         )
-        return str(records[0]["id"]) if records else node_id
+        return str(records[0]["uuid"]) if records else uuid
+
+    def add_node_legacy(
+        self,
+        node_id: str,
+        node_type: str,
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """DEPRECATED: Use add_node() with logos-standard properties.
+
+        This method provides backward compatibility during migration.
+        Maps old signature to new:
+        - node_id → uuid
+        - name = properties.get("name", node_id)
+        - ancestors = []
+        - is_type_definition = False
+
+        Args:
+            node_id: Node identifier (maps to uuid)
+            node_type: Semantic type
+            properties: Additional properties
+
+        Returns:
+            The uuid of the created/updated node
+        """
+        import warnings
+
+        warnings.warn(
+            "add_node_legacy is deprecated, use add_node() with logos-standard properties",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        props = properties or {}
+        name = props.pop("name", node_id)
+        return self.add_node(
+            uuid=node_id,
+            name=name,
+            node_type=node_type,
+            ancestors=[],
+            is_type_definition=False,
+            properties=props,
+        )
 
     def add_edge(
         self,
         edge_id: str,
-        source_id: str,
-        target_id: str,
+        source_uuid: str,
+        target_uuid: str,
         relation: str,
         properties: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Create or update an edge after SHACL validation."""
         edge_data = {
             "id": edge_id,
-            "source": source_id,
-            "target": target_id,
+            "source": source_uuid,
+            "target": target_uuid,
             "relation": relation,
             "properties": properties or {},
         }
@@ -124,8 +199,8 @@ class HCGClient(LogosHCGClient):
             raise ValueError(f"Edge validation failed: {'; '.join(errors)}")
 
         query = """
-        MATCH (source:Node {id: $source_id})
-        MATCH (target:Node {id: $target_id})
+        MATCH (source:Node {uuid: $source_uuid})
+        MATCH (target:Node {uuid: $target_uuid})
         MERGE (source)-[r:RELATION {id: $edge_id}]->(target)
         SET r.relation_type = $relation
         SET r += $properties
@@ -138,31 +213,37 @@ class HCGClient(LogosHCGClient):
             query,
             {
                 "edge_id": edge_id,
-                "source_id": source_id,
-                "target_id": target_id,
+                "source_uuid": source_uuid,
+                "target_uuid": target_uuid,
                 "relation": relation,
                 "properties": encoded_properties,
             },
         )
         return str(records[0]["id"]) if records else edge_id
 
-    def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch a node by ID."""
+    def get_node(self, uuid: str) -> Optional[Dict[str, Any]]:
+        """Fetch a node by uuid."""
         query = """
-        MATCH (n:Node {id: $id})
-        RETURN n.id as id, n.type as type, properties(n) as props
+        MATCH (n:Node {uuid: $uuid})
+        RETURN n.uuid as uuid, n.name as name, n.type as type,
+               n.is_type_definition as is_type_definition,
+               n.ancestors as ancestors, properties(n) as props
         """
-        records = self._execute_read(query, {"id": node_id})
+        records = self._execute_read(query, {"uuid": uuid})
         if not records:
             return None
 
         props = dict(records[0]["props"])
-        props.pop("id", None)
-        props.pop("type", None)
+        # Remove standard properties from props dict
+        for key in ["uuid", "name", "type", "is_type_definition", "ancestors"]:
+            props.pop(key, None)
         props = self._decode_properties(props)
         return {
-            "id": records[0]["id"],
+            "uuid": records[0]["uuid"],
+            "name": records[0]["name"],
             "type": records[0]["type"],
+            "is_type_definition": records[0]["is_type_definition"],
+            "ancestors": records[0]["ancestors"] or [],
             "properties": props,
         }
 
@@ -170,7 +251,7 @@ class HCGClient(LogosHCGClient):
         """Fetch an edge by ID."""
         query = """
         MATCH (source:Node)-[r:RELATION {id: $id}]->(target:Node)
-        RETURN r.id as id, source.id as source, target.id as target,
+        RETURN r.id as id, source.uuid as source, target.uuid as target,
                r.relation_type as relation, properties(r) as props
         """
         records = self._execute_read(query, {"id": edge_id})
@@ -189,37 +270,41 @@ class HCGClient(LogosHCGClient):
             "properties": props,
         }
 
-    def query_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    def query_neighbors(self, uuid: str) -> List[Dict[str, Any]]:
         """Return unique neighbor nodes for the provided node."""
         query = """
-        MATCH (n:Node {id: $id})-[r]-(neighbor:Node)
-        RETURN DISTINCT neighbor.id as id, neighbor.type as type,
-               properties(neighbor) as props
+        MATCH (n:Node {uuid: $uuid})-[r]-(neighbor:Node)
+        RETURN DISTINCT neighbor.uuid as uuid, neighbor.name as name,
+               neighbor.type as type, neighbor.is_type_definition as is_type_definition,
+               neighbor.ancestors as ancestors, properties(neighbor) as props
         """
-        records = self._execute_read(query, {"id": node_id})
+        records = self._execute_read(query, {"uuid": uuid})
         neighbors: List[Dict[str, Any]] = []
         for record in records:
             props = dict(record["props"])
-            props.pop("id", None)
-            props.pop("type", None)
+            for key in ["uuid", "name", "type", "is_type_definition", "ancestors"]:
+                props.pop(key, None)
             props = self._decode_properties(props)
             neighbors.append(
                 {
-                    "id": record["id"],
+                    "uuid": record["uuid"],
+                    "name": record["name"],
                     "type": record["type"],
+                    "is_type_definition": record["is_type_definition"],
+                    "ancestors": record["ancestors"] or [],
                     "properties": props,
                 }
             )
         return neighbors
 
-    def query_edges_from(self, node_id: str) -> List[Dict[str, Any]]:
+    def query_edges_from(self, uuid: str) -> List[Dict[str, Any]]:
         """Return outgoing edges for the provided node."""
         query = """
-        MATCH (source:Node {id: $id})-[r:RELATION]->(target:Node)
-        RETURN r.id as id, source.id as source, target.id as target,
+        MATCH (source:Node {uuid: $uuid})-[r:RELATION]->(target:Node)
+        RETURN r.id as id, source.uuid as source, target.uuid as target,
                r.relation_type as relation, properties(r) as props
         """
-        records = self._execute_read(query, {"id": node_id})
+        records = self._execute_read(query, {"uuid": uuid})
         edges: List[Dict[str, Any]] = []
         for record in records:
             props = dict(record["props"])
@@ -237,14 +322,14 @@ class HCGClient(LogosHCGClient):
             )
         return edges
 
-    def delete_node(self, node_id: str) -> bool:
+    def delete_node(self, uuid: str) -> bool:
         """Delete a node and all relationships."""
         query = """
-        MATCH (n:Node {id: $id})
+        MATCH (n:Node {uuid: $uuid})
         DETACH DELETE n
         RETURN count(n) as deleted
         """
-        records = self._execute_query(query, {"id": node_id})
+        records = self._execute_query(query, {"uuid": uuid})
         deleted = records[0]["deleted"] if records else 0
         return bool(deleted)
 
