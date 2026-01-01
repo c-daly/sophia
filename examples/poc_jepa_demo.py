@@ -146,7 +146,7 @@ def demo_simulation(runner: JEPARunner) -> None:
 
     print(f"\nImagined Processes: {len(result.imagined_processes)}")
     for i, process in enumerate(result.imagined_processes):
-        print(f"  {i+1}. {process.description} (confidence={process.confidence:.3f})")
+        print(f"  {i + 1}. {process.description} (confidence={process.confidence:.3f})")
 
     print("\nImagined States:")
     for state in result.imagined_states:
