@@ -1518,16 +1518,30 @@ def create_app() -> FastAPI:
     # Add /api/v1/ aliases for all routes (except health which stays at root)
     # This allows clients to use versioned endpoints while maintaining backwards compatibility
     for route in list(app.routes):
-        if hasattr(route, "path") and route.path not in ["/health", "/openapi.json", "/docs", "/redoc"]:
+        if hasattr(route, "path") and route.path not in [
+            "/health",
+            "/openapi.json",
+            "/docs",
+            "/redoc",
+        ]:
             # Create versioned route alias
             if hasattr(route, "endpoint"):
                 app.add_api_route(
                     f"/api/v1{route.path}",
                     route.endpoint,
                     methods=route.methods if hasattr(route, "methods") else ["GET"],
-                    response_model=route.response_model if hasattr(route, "response_model") else None,
+                    response_model=(
+                        route.response_model
+                        if hasattr(route, "response_model")
+                        else None
+                    ),
+                    status_code=(
+                        route.status_code if hasattr(route, "status_code") else None
+                    ),
                     tags=route.tags if hasattr(route, "tags") else None,
-                    dependencies=route.dependencies if hasattr(route, "dependencies") else None,
+                    dependencies=(
+                        route.dependencies if hasattr(route, "dependencies") else None
+                    ),
                     include_in_schema=False,  # Don't duplicate in OpenAPI docs
                 )
 
