@@ -1,6 +1,5 @@
 """Main FastAPI application for Sophia service."""
 
-import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -13,12 +12,16 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from logos_config import Neo4jConfig, MilvusConfig, get_env_value
 from logos_config.health import HealthResponse as LogosHealthResponse, DependencyStatus
+from logos_test_utils import setup_logging
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
 from sophia.api.models import (
     PlanRequest,
@@ -66,8 +69,23 @@ from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
 from sophia.cwm import CWMPersistence
 
+# Configure structured logging for sophia
+logger = setup_logging("sophia")
 
-logger = logging.getLogger(__name__)
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Middleware to add request ID to all requests for tracing."""
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        # Store request_id in request state for access in handlers
+        request.state.request_id = request_id
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
@@ -269,6 +287,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Request ID middleware for tracing
+    app.add_middleware(RequestIDMiddleware)
 
     # Health check endpoint (no auth required)
     @app.get("/health", response_model=LogosHealthResponse, tags=["health"])
@@ -1493,6 +1514,36 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to retrieve media sample: {str(e)}",
             )
+
+    # Add /api/v1/ aliases for all routes (except health which stays at root)
+    # This allows clients to use versioned endpoints while maintaining backwards compatibility
+    for route in list(app.routes):
+        if hasattr(route, "path") and route.path not in [
+            "/health",
+            "/openapi.json",
+            "/docs",
+            "/redoc",
+        ]:
+            # Create versioned route alias
+            if hasattr(route, "endpoint"):
+                app.add_api_route(
+                    f"/api/v1{route.path}",
+                    route.endpoint,
+                    methods=route.methods if hasattr(route, "methods") else ["GET"],
+                    response_model=(
+                        route.response_model
+                        if hasattr(route, "response_model")
+                        else None
+                    ),
+                    status_code=(
+                        route.status_code if hasattr(route, "status_code") else None
+                    ),
+                    tags=route.tags if hasattr(route, "tags") else None,
+                    dependencies=(
+                        route.dependencies if hasattr(route, "dependencies") else None
+                    ),
+                    include_in_schema=False,  # Don't duplicate in OpenAPI docs
+                )
 
     return app
 
