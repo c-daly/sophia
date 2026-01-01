@@ -101,18 +101,18 @@ class TestConfidenceDecay:
         result = run_simulation(jepa_runner, simulation_context, k_steps=1)
 
         initial_confidence = result.imagined_states[0].confidence
-        assert 0.7 <= initial_confidence <= 1.0, (
-            f"Initial confidence {initial_confidence} should be high (0.7-1.0)"
-        )
+        assert (
+            0.7 <= initial_confidence <= 1.0
+        ), f"Initial confidence {initial_confidence} should be high (0.7-1.0)"
 
     def test_final_confidence_within_bounds(self, jepa_runner, simulation_context):
         """Test that confidence stays within [0, 1] range."""
         result = run_simulation(jepa_runner, simulation_context, k_steps=10)
 
         for idx, state in enumerate(result.imagined_states):
-            assert 0.0 <= state.confidence <= 1.0, (
-                f"Step {idx} confidence {state.confidence} out of bounds"
-            )
+            assert (
+                0.0 <= state.confidence <= 1.0
+            ), f"Step {idx} confidence {state.confidence} out of bounds"
 
     def test_overall_confidence_matches_average(self, jepa_runner, simulation_context):
         """Test that overall_confidence is average of step confidences."""
