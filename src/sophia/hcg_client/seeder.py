@@ -7,13 +7,27 @@ from sophia.hcg_client.client import HCGClient
 
 logger = logging.getLogger(__name__)
 
-# Ancestor chains for pick-and-place types (per design spec)
+# Ancestor chains for all node types used in sophia
+# Based on logos core ontology hierarchy
 ANCESTORS = {
+    # Core pick-and-place types
     "location": ["spatial_entity", "entity"],
     "object": ["physical_entity", "entity"],
     "action": ["process", "entity"],
     "goal": ["intention", "entity"],
     "state": ["cognition"],
+    # API and planning types
+    "plan": ["process", "entity"],
+    "imagined_state": ["cognition"],
+    "imagined_process": ["process", "entity"],
+    "simulation": ["abstraction", "entity"],
+    # Hermes ingestion types
+    "hermes_proposal": ["intention", "entity"],
+    "proposed_plan_step": ["process", "entity"],
+    "proposed_imagined_state": ["cognition"],
+    "proposed_tool_call": ["process", "entity"],
+    # Media types
+    "media_sample": ["data", "entity"],
 }
 
 

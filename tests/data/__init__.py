@@ -2,15 +2,7 @@
 
 from typing import Dict, Any
 from sophia.knowledge_graph import KnowledgeGraph, Node, Edge
-
-# Ancestor chains for pick-and-place types (per design spec)
-ANCESTORS = {
-    "location": ["spatial_entity", "entity"],
-    "object": ["physical_entity", "entity"],
-    "action": ["process", "entity"],
-    "goal": ["intention", "entity"],
-    "state": ["cognition"],
-}
+from sophia.hcg_client.seeder import ANCESTORS
 
 
 def load_pick_and_place_scenario() -> KnowledgeGraph:

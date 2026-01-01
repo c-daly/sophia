@@ -158,7 +158,8 @@ class MediaIngestionService:
 
         # Create node using HCG client
         self.hcg_client.add_node(
-            node_id=sample_id,
+            uuid=sample_id,
+            name=f"Media Sample {sample_id[:8]}",
             node_type="media_sample",
             properties=properties,
         )
@@ -348,8 +349,8 @@ class MediaIngestionService:
         try:
             self.hcg_client.add_edge(
                 edge_id=f"e_{sample_id}_{simulation_id}",
-                source_id=sample_id,
-                target_id=simulation_id,
+                source_uuid=sample_id,
+                target_uuid=simulation_id,
                 relation="used_in",
             )
             logger.debug(f"Linked sample {sample_id} to simulation {simulation_id}")
@@ -465,8 +466,8 @@ class MediaIngestionService:
                 try:
                     self.hcg_client.add_edge(
                         edge_id=f"e_{sample_id}_{embedding_id}",
-                        source_id=sample_id,
-                        target_id=embedding_id,
+                        source_uuid=sample_id,
+                        target_uuid=embedding_id,
                         relation="has_embedding",
                         properties={"embedding_type": embedding_type, **metadata},
                     )

@@ -196,3 +196,121 @@ def test_health_check_uses_session(
 
     # Milvus returns True when not configured (no host/port set)
     assert health == {"neo4j": True, "milvus": True}
+
+
+# --- Ancestor auto-computation tests ---
+
+
+def test_get_type_ancestors_returns_ancestors_from_type_definition(
+    client: HCGClient,
+) -> None:
+    """_get_type_ancestors returns ancestors from matching type definition."""
+    client._execute_read = MagicMock(
+        return_value=[{"ancestors": ["physical_entity", "entity"]}]
+    )
+
+    ancestors = client._get_type_ancestors("object")
+
+    assert ancestors == ["physical_entity", "entity"]
+    client._execute_read.assert_called_once()
+    call_args = client._execute_read.call_args
+    assert "name: $node_type" in call_args[0][0]
+    assert call_args[0][1]["node_type"] == "object"
+
+
+def test_get_type_ancestors_returns_empty_when_no_type_definition(
+    client: HCGClient,
+) -> None:
+    """_get_type_ancestors returns empty list when type definition not found."""
+    client._execute_read = MagicMock(return_value=[])
+
+    ancestors = client._get_type_ancestors("unknown_type")
+
+    assert ancestors == []
+
+
+def test_get_type_ancestors_returns_empty_when_ancestors_null(
+    client: HCGClient,
+) -> None:
+    """_get_type_ancestors returns empty list when ancestors field is null."""
+    client._execute_read = MagicMock(return_value=[{"ancestors": None}])
+
+    ancestors = client._get_type_ancestors("some_type")
+
+    assert ancestors == []
+
+
+def test_add_node_auto_computes_ancestors_for_instance(
+    client: HCGClient,
+) -> None:
+    """Instance nodes get ancestors auto-computed as [node_type] + type_def.ancestors."""
+    client._get_type_ancestors = MagicMock(return_value=["physical_entity", "entity"])
+    client._execute_query = MagicMock(return_value=[{"uuid": "generated-uuid"}])
+
+    client.add_node(
+        name="Red Block",
+        node_type="object",
+    )
+
+    client._get_type_ancestors.assert_called_once_with("object")
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+    assert params["ancestors"] == ["object", "physical_entity", "entity"]
+
+
+def test_add_node_type_definition_does_not_auto_compute_ancestors(
+    client: HCGClient,
+) -> None:
+    """Type definitions don't auto-compute ancestors - use empty if not provided."""
+    client._get_type_ancestors = MagicMock()
+    client._execute_query = MagicMock(return_value=[{"uuid": "type-def-uuid"}])
+
+    client.add_node(
+        name="object",
+        node_type="physical_entity",
+        is_type_definition=True,
+    )
+
+    client._get_type_ancestors.assert_not_called()
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+    assert params["ancestors"] == []
+
+
+def test_add_node_uses_provided_ancestors_when_given(
+    client: HCGClient,
+) -> None:
+    """When ancestors are explicitly provided, they are used as-is."""
+    client._get_type_ancestors = MagicMock()
+    client._execute_query = MagicMock(return_value=[{"uuid": "custom-uuid"}])
+
+    custom_ancestors = ["custom_parent", "custom_grandparent"]
+
+    client.add_node(
+        name="Custom Node",
+        node_type="custom_type",
+        ancestors=custom_ancestors,
+    )
+
+    client._get_type_ancestors.assert_not_called()
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+    assert params["ancestors"] == custom_ancestors
+
+
+def test_add_node_generates_uuid_when_not_provided(
+    client: HCGClient,
+) -> None:
+    """UUID is auto-generated when not provided."""
+    client._get_type_ancestors = MagicMock(return_value=[])
+    client._execute_query = MagicMock(return_value=[{"uuid": "auto-generated"}])
+
+    client.add_node(
+        name="Test Node",
+        node_type="test_type",
+    )
+
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+    assert len(params["uuid"]) == 36
+    assert params["uuid"].count("-") == 4

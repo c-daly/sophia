@@ -12,6 +12,7 @@ import logging
 from collections.abc import Sequence
 from contextlib import suppress
 from typing import Any, Dict, List, Mapping, Optional, cast
+from uuid import uuid4
 
 from logos_config import get_env_value
 from logos_hcg.client import HCGClient as LogosHCGClient
@@ -66,22 +67,44 @@ class HCGClient(LogosHCGClient):
     # Graph operations
     # ------------------------------------------------------------------
 
+    def _get_type_ancestors(self, node_type: str) -> List[str]:
+        """Look up ancestors for a type from its type definition in Neo4j.
+
+        The type definition's `name` field identifies what type it defines,
+        while its `type` field is its parent type in the hierarchy.
+
+        Args:
+            node_type: The type name to look up (matches type definition's name)
+
+        Returns:
+            List of ancestors from the type definition, or empty list if not found
+        """
+        query = """
+        MATCH (t:Node {name: $node_type, is_type_definition: true})
+        RETURN t.ancestors as ancestors
+        """
+        records = self._execute_read(query, {"node_type": node_type})
+        if records and records[0].get("ancestors"):
+            return list(records[0]["ancestors"])
+        return []
+
     def add_node(
         self,
-        uuid: str,
         name: str,
         node_type: str,
-        ancestors: List[str],
+        uuid: Optional[str] = None,
+        ancestors: Optional[List[str]] = None,
         is_type_definition: bool = False,
         properties: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Create or update a node with logos-standard properties.
 
         Args:
-            uuid: Unique identifier (e.g., "entity-123", UUID string)
             name: Human-readable name (e.g., "red_block", "pick_action")
             node_type: Semantic type (e.g., "object", "action", "location")
-            ancestors: Type inheritance chain (e.g., ["physical_entity", "entity"])
+            uuid: Unique identifier. If None, auto-generated. Provide to update existing.
+            ancestors: Type inheritance chain. If None, automatically computed
+                from type definition as [node_type] + type_def.ancestors
             is_type_definition: True if this node defines a type, False for instances
             properties: Additional custom properties
 
@@ -89,14 +112,28 @@ class HCGClient(LogosHCGClient):
             The uuid of the created/updated node
 
         Raises:
-            ValueError: If uuid, name, or node_type is empty, or validation fails
+            ValueError: If name or node_type is empty, or validation fails
         """
-        if not uuid:
-            raise ValueError("uuid cannot be empty")
         if not name:
             raise ValueError("name cannot be empty")
         if not node_type:
             raise ValueError("node_type cannot be empty")
+
+        # Generate UUID if not provided, reject empty string
+        if uuid is None:
+            uuid = str(uuid4())
+        elif uuid == "":
+            raise ValueError("uuid cannot be empty")
+
+        # Auto-compute ancestors if not provided
+        if ancestors is None:
+            if is_type_definition:
+                # Type definitions should have ancestors explicitly provided
+                ancestors = []
+            else:
+                # Instance nodes: [node_type] + type_definition.ancestors
+                type_ancestors = self._get_type_ancestors(node_type)
+                ancestors = [node_type] + type_ancestors
 
         node_data = {
             "uuid": uuid,
@@ -166,7 +203,7 @@ class HCGClient(LogosHCGClient):
             DeprecationWarning,
             stacklevel=2,
         )
-        props = properties or {}
+        props = dict(properties) if properties else {}
         name = props.pop("name", node_id)
         return self.add_node(
             uuid=node_id,

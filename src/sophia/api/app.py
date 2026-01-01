@@ -2,7 +2,7 @@
 
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi import (
@@ -119,8 +119,11 @@ def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
             node_data = hcg_client.get_node(node_id)
             if node_data:
                 node = Node(
-                    id=node_data["id"],
+                    uuid=node_data["uuid"],
+                    name=node_data["name"],
                     type=node_data["type"],
+                    ancestors=node_data.get("ancestors", []),
+                    is_type_definition=node_data.get("is_type_definition", False),
                     properties=node_data.get("properties", {}),
                 )
                 kg.add_node(node)
@@ -174,7 +177,18 @@ _cwm_persistence: Optional[CWMPersistence] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
+    global \
+        _planner, \
+        _executor, \
+        _hcg_client, \
+        _cwm_g, \
+        _cwm_a, \
+        _cwm_a_state, \
+        _kg, \
+        _jepa_runner, \
+        _media_storage, \
+        _media_ingestion, \
+        _cwm_persistence
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -411,7 +425,8 @@ def create_app() -> FastAPI:
 
             # Create new state node with SHACL validation
             _hcg_client.add_node(
-                node_id="current_state",
+                uuid="current_state",
+                name="Current State",
                 node_type="state",
                 properties=request.state,
             )
@@ -459,12 +474,16 @@ def create_app() -> FastAPI:
                                 before=(
                                     before_val
                                     if isinstance(before_val, dict)
-                                    else {"value": before_val} if before_val else None
+                                    else {"value": before_val}
+                                    if before_val
+                                    else None
                                 ),
                                 after=(
                                     after_val
                                     if isinstance(after_val, dict)
-                                    else {"value": after_val} if after_val else None
+                                    else {"value": after_val}
+                                    if after_val
+                                    else None
                                 ),
                                 changed_properties=(
                                     changed_props if changed_props else None
@@ -736,7 +755,8 @@ def create_app() -> FastAPI:
 
             # Write plan back to Neo4j HCG with SHACL validation
             _hcg_client.add_node(
-                node_id=plan_id,
+                uuid=plan_id,
+                name=f"Plan {plan_id[:8]}",
                 node_type="plan",
                 properties={
                     "goal": goal_payload,
@@ -761,8 +781,8 @@ def create_app() -> FastAPI:
                     if goal_node:
                         _hcg_client.add_edge(
                             edge_id=f"e_{plan_id}_achieves_goal",
-                            source_id=plan_id,
-                            target_id=goal_node_id,
+                            source_uuid=plan_id,
+                            target_uuid=goal_node_id,
                             relation="achieves",
                         )
                 except Exception as e:
@@ -835,9 +855,9 @@ def create_app() -> FastAPI:
                 imagined_states.append(state)
 
                 # Store in Neo4j with metadata
-                node_id = state_id
                 _hcg_client.add_node(
-                    node_id=node_id,
+                    uuid=state_id,
+                    name=f"Imagined State {i + 1}",
                     node_type="imagined_state",
                     properties={
                         "description": state.description,
@@ -969,7 +989,10 @@ def create_app() -> FastAPI:
             # Store imagined processes in Neo4j
             for process in result.imagined_processes:
                 _hcg_client.add_node(
-                    node_id=process.process_id,
+                    uuid=process.process_id,
+                    name=process.description[:50]
+                    if process.description
+                    else f"Process {process.process_id[:8]}",
                     node_type="imagined_process",
                     properties={
                         "description": process.description,
@@ -986,7 +1009,10 @@ def create_app() -> FastAPI:
             # Store imagined states in Neo4j
             for state in result.imagined_states:
                 _hcg_client.add_node(
-                    node_id=state.state_id,
+                    uuid=state.state_id,
+                    name=state.description[:50]
+                    if state.description
+                    else f"State {state.state_id[:8]}",
                     node_type="imagined_state",
                     properties={
                         "step": state.step,
@@ -1004,8 +1030,8 @@ def create_app() -> FastAPI:
                 # Link state to simulation
                 _hcg_client.add_edge(
                     edge_id=f"e_{result.simulation_id}_{state.state_id}",
-                    source_id=result.simulation_id,
-                    target_id=state.state_id,
+                    source_uuid=result.simulation_id,
+                    target_uuid=state.state_id,
                     relation="produces",
                 )
 
@@ -1024,7 +1050,8 @@ def create_app() -> FastAPI:
                 simulation_properties["media_sample_id"] = request.media_sample_id
 
             _hcg_client.add_node(
-                node_id=result.simulation_id,
+                uuid=result.simulation_id,
+                name=f"Simulation {result.simulation_id[:8]}",
                 node_type="simulation",
                 properties=simulation_properties,
             )
@@ -1034,8 +1061,8 @@ def create_app() -> FastAPI:
                 try:
                     _hcg_client.add_edge(
                         edge_id=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
-                        source_id=result.simulation_id,
-                        target_id=request.media_sample_id,
+                        source_uuid=result.simulation_id,
+                        target_uuid=request.media_sample_id,
                         relation="uses_media",
                         properties={"embedding_count": len(media_embeddings)},
                     )
@@ -1083,138 +1110,41 @@ def create_app() -> FastAPI:
     async def ingest_hermes_proposal(
         request: HermesProposalRequest,
     ) -> HermesProposalResponse:
-        """Ingest an LLM proposal from Hermes with provenance tracking.
+        """Receive a proposal from Hermes for cognitive processing.
 
-        This endpoint accepts structured proposals from Hermes (including plans,
-        imagined states, diagnostics, and tool calls) and persists them to Neo4j
-        with full provenance metadata. SHACL validation is applied automatically.
+        This endpoint accepts structured proposals from Hermes and logs them
+        for observability. Sophia will process the proposal and decide what
+        semantic nodes to create based on her cognitive evaluation.
 
         Note: Authentication is disabled for local development.
         """
-        if not _hcg_client:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="HCG client not available",
+        # Log the proposal for observability
+        logger.info(
+            f"Received proposal {request.proposal_id} from {request.source_service} "
+            f"(provider: {request.llm_provider}, model: {request.model}, "
+            f"confidence: {request.confidence})"
+        )
+        if request.plan_steps:
+            logger.debug(
+                f"Proposal {request.proposal_id} contains {len(request.plan_steps)} plan steps"
+            )
+        if request.imagined_states:
+            logger.debug(
+                f"Proposal {request.proposal_id} contains {len(request.imagined_states)} imagined states"
+            )
+        if request.raw_text:
+            logger.debug(
+                f"Proposal {request.proposal_id} raw text: {request.raw_text[:100]}..."
             )
 
-        try:
-            stored_node_ids = []
+        # TODO: Pass to Sophia's cognitive processing
+        # For now, just acknowledge receipt
 
-            # Store the main proposal node with provenance
-            proposal_properties = {
-                "source_service": request.source_service,
-                "llm_provider": request.llm_provider,
-                "model": request.model,
-                "generated_at": request.generated_at,
-                "confidence": request.confidence,
-                "ingested_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-            if request.raw_text:
-                proposal_properties["raw_text"] = request.raw_text
-            if request.diagnostics:
-                proposal_properties["diagnostics"] = request.diagnostics
-            if request.metadata:
-                proposal_properties.update(request.metadata)
-
-            _hcg_client.add_node(
-                node_id=request.proposal_id,
-                node_type="hermes_proposal",
-                properties=proposal_properties,
-            )
-            stored_node_ids.append(request.proposal_id)
-
-            # Store plan steps if provided
-            if request.plan_steps:
-                for idx, step in enumerate(request.plan_steps):
-                    step_id = f"{request.proposal_id}_plan_step_{idx}"
-                    _hcg_client.add_node(
-                        node_id=step_id,
-                        node_type="proposed_plan_step",
-                        properties={
-                            "source_proposal": request.proposal_id,
-                            "step_index": idx,
-                            **step,
-                        },
-                    )
-                    stored_node_ids.append(step_id)
-
-                    # Create edge from proposal to plan step
-                    _hcg_client.add_edge(
-                        edge_id=f"e_{request.proposal_id}_{step_id}",
-                        source_id=request.proposal_id,
-                        target_id=step_id,
-                        relation="contains_plan_step",
-                    )
-
-            # Store imagined states if provided
-            if request.imagined_states:
-                for idx, state in enumerate(request.imagined_states):
-                    state_id = f"{request.proposal_id}_imagined_state_{idx}"
-                    _hcg_client.add_node(
-                        node_id=state_id,
-                        node_type="proposed_imagined_state",
-                        properties={
-                            "source_proposal": request.proposal_id,
-                            "state_index": idx,
-                            **state,
-                        },
-                    )
-                    stored_node_ids.append(state_id)
-
-                    # Create edge from proposal to imagined state
-                    _hcg_client.add_edge(
-                        edge_id=f"e_{request.proposal_id}_{state_id}",
-                        source_id=request.proposal_id,
-                        target_id=state_id,
-                        relation="contains_imagined_state",
-                    )
-
-            # Store tool calls if provided
-            if request.tool_calls:
-                for idx, tool_call in enumerate(request.tool_calls):
-                    tool_id = f"{request.proposal_id}_tool_call_{idx}"
-                    _hcg_client.add_node(
-                        node_id=tool_id,
-                        node_type="proposed_tool_call",
-                        properties={
-                            "source_proposal": request.proposal_id,
-                            "call_index": idx,
-                            **tool_call,
-                        },
-                    )
-                    stored_node_ids.append(tool_id)
-
-                    # Create edge from proposal to tool call
-                    _hcg_client.add_edge(
-                        edge_id=f"e_{request.proposal_id}_{tool_id}",
-                        source_id=request.proposal_id,
-                        target_id=tool_id,
-                        relation="contains_tool_call",
-                    )
-
-            return HermesProposalResponse(
-                proposal_id=request.proposal_id,
-                stored_node_ids=stored_node_ids,
-                status="accepted",
-            )
-
-        except HTTPException:
-            # Let HTTP exceptions pass through with their status codes
-            raise
-        except ValueError as e:
-            # SHACL validation failed
-            logger.error(f"Proposal validation failed: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Proposal validation failed: {str(e)}",
-            )
-        except Exception as e:
-            logger.error(f"Error ingesting proposal: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to ingest proposal: {str(e)}",
-            )
+        return HermesProposalResponse(
+            proposal_id=request.proposal_id,
+            stored_node_ids=[],  # No nodes created - proposals are logged, not stored
+            status="accepted",
+        )
 
     # Execute endpoint
     @app.post(
@@ -1328,7 +1258,8 @@ def create_app() -> FastAPI:
                 if state_changes:
                     _hcg_client.delete_node("current_state")
                     _hcg_client.add_node(
-                        node_id="current_state",
+                        uuid="current_state",
+                        name="Current State",
                         node_type="state",
                         properties=current_state,
                     )
