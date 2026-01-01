@@ -62,14 +62,17 @@ class TestHermesIngestion:
     """
     Test the Hermes proposal ingestion endpoint.
 
-    This is a critical integration point - Hermes sends LLM-generated
-    plans and imagined states to Sophia for persistence with SHACL validation.
+    Current behavior: Proposals are logged for observability but NOT stored
+    as nodes. Sophia will decide what to do with proposals via cognitive
+    processing (not yet implemented).
+
+    Pattern: "Hermes proposes, Sophia disposes"
     """
 
-    def test_ingest_basic_proposal(
+    def test_ingest_proposal_acknowledged(
         self, sophia_url: str, unique_id: str, test_timestamp: str
     ):
-        """Ingest a basic proposal and verify it's stored."""
+        """Verify proposal ingestion returns acknowledgment."""
         proposal_id = f"proposal_{unique_id}"
 
         resp = httpx.post(
@@ -90,132 +93,8 @@ class TestHermesIngestion:
         data = resp.json()
         assert data["proposal_id"] == proposal_id
         assert data["status"] == "accepted"
-        assert proposal_id in data["stored_node_ids"]
-
-    def test_ingest_proposal_with_plan_steps(
-        self, sophia_url: str, unique_id: str, test_timestamp: str
-    ):
-        """Ingest a proposal with plan steps and verify graph structure."""
-        proposal_id = f"proposal_{unique_id}"
-
-        resp = httpx.post(
-            f"{sophia_url}/ingest/hermes_proposal",
-            json={
-                "proposal_id": proposal_id,
-                "source_service": "hermes",
-                "llm_provider": "openai",
-                "model": "gpt-4",
-                "generated_at": test_timestamp,
-                "confidence": 0.9,
-                "plan_steps": [
-                    {
-                        "name": "move_to_block",
-                        "action_type": "MOVE",
-                        "target": "red_block",
-                    },
-                    {
-                        "name": "grasp_block",
-                        "action_type": "GRASP",
-                        "target": "red_block",
-                    },
-                    {
-                        "name": "move_to_bin",
-                        "action_type": "MOVE",
-                        "target": "bin",
-                    },
-                    {
-                        "name": "release_block",
-                        "action_type": "RELEASE",
-                        "target": "red_block",
-                    },
-                ],
-            },
-            timeout=10,
-        )
-
-        assert resp.status_code == 201, f"Proposal ingestion failed: {resp.text}"
-        data = resp.json()
-        assert data["status"] == "accepted"
-
-        # Should have proposal + 4 plan steps = 5 nodes
-        assert len(data["stored_node_ids"]) == 5
-        assert proposal_id in data["stored_node_ids"]
-        assert f"{proposal_id}_plan_step_0" in data["stored_node_ids"]
-        assert f"{proposal_id}_plan_step_3" in data["stored_node_ids"]
-
-    def test_ingest_proposal_with_imagined_states(
-        self, sophia_url: str, unique_id: str, test_timestamp: str
-    ):
-        """Ingest a proposal with imagined states."""
-        proposal_id = f"proposal_{unique_id}"
-
-        resp = httpx.post(
-            f"{sophia_url}/ingest/hermes_proposal",
-            json={
-                "proposal_id": proposal_id,
-                "source_service": "hermes",
-                "llm_provider": "anthropic",
-                "model": "claude-3",
-                "generated_at": test_timestamp,
-                "confidence": 0.88,
-                "imagined_states": [
-                    {
-                        "description": "Block is grasped",
-                        "confidence": 0.95,
-                    },
-                    {
-                        "description": "Block is above bin",
-                        "confidence": 0.85,
-                    },
-                    {
-                        "description": "Block is in bin",
-                        "confidence": 0.75,
-                    },
-                ],
-            },
-            timeout=10,
-        )
-
-        assert resp.status_code == 201, f"Proposal ingestion failed: {resp.text}"
-        data = resp.json()
-
-        # Should have proposal + 3 imagined states = 4 nodes
-        assert len(data["stored_node_ids"]) == 4
-
-    def test_ingest_proposal_with_tool_calls(
-        self, sophia_url: str, unique_id: str, test_timestamp: str
-    ):
-        """Ingest a proposal with tool call references."""
-        proposal_id = f"proposal_{unique_id}"
-
-        resp = httpx.post(
-            f"{sophia_url}/ingest/hermes_proposal",
-            json={
-                "proposal_id": proposal_id,
-                "source_service": "hermes",
-                "llm_provider": "openai",
-                "model": "gpt-4-turbo",
-                "generated_at": test_timestamp,
-                "confidence": 0.92,
-                "tool_calls": [
-                    {
-                        "tool_name": "perception_query",
-                        "arguments": {"query": "find red blocks"},
-                    },
-                    {
-                        "tool_name": "action_execute",
-                        "arguments": {"action": "grasp", "target": "block_1"},
-                    },
-                ],
-            },
-            timeout=10,
-        )
-
-        assert resp.status_code == 201
-        data = resp.json()
-
-        # Should have proposal + 2 tool calls = 3 nodes
-        assert len(data["stored_node_ids"]) == 3
+        # Currently no nodes are stored - proposals are logged only
+        assert data["stored_node_ids"] == []
 
     def test_ingest_requires_mandatory_fields(self, sophia_url: str):
         """Proposal ingestion should reject requests missing required fields."""

@@ -1,23 +1,86 @@
 // Test data for pick-and-place scenario
 // This cypher file defines the Hierarchical Cognitive Graph (HCG) for a simple pick-and-place task
+// Uses logos flexible ontology: :Node label with uuid, name, type, is_type_definition, ancestors
 
-// Create spatial entities
-CREATE (table:Location {id: 'table', name: 'Table', type: 'surface'})
-CREATE (bin:Location {id: 'bin', name: 'Bin', type: 'container'})
+// Create spatial entities (locations)
+CREATE (table:Node {
+    uuid: 'table',
+    name: 'Table',
+    type: 'location',
+    is_type_definition: false,
+    ancestors: ['spatial_entity', 'entity'],
+    location_type: 'surface'
+})
+CREATE (bin:Node {
+    uuid: 'bin',
+    name: 'Bin',
+    type: 'location',
+    is_type_definition: false,
+    ancestors: ['spatial_entity', 'entity'],
+    location_type: 'container'
+})
 
 // Create objects
-CREATE (red_block:Object {id: 'red_block', name: 'Red Block', color: 'red', type: 'block'})
-CREATE (blue_block:Object {id: 'blue_block', name: 'Blue Block', color: 'blue', type: 'block'})
+CREATE (red_block:Node {
+    uuid: 'red_block',
+    name: 'Red Block',
+    type: 'object',
+    is_type_definition: false,
+    ancestors: ['physical_entity', 'entity'],
+    color: 'red',
+    object_type: 'block'
+})
+CREATE (blue_block:Node {
+    uuid: 'blue_block',
+    name: 'Blue Block',
+    type: 'object',
+    is_type_definition: false,
+    ancestors: ['physical_entity', 'entity'],
+    color: 'blue',
+    object_type: 'block'
+})
 
 // Initial state: blocks on table
 CREATE (red_block)-[:LOCATED_AT]->(table)
 CREATE (blue_block)-[:LOCATED_AT]->(table)
 
 // Create action primitives
-CREATE (move1:Action {id: 'move_to_red_block', name: 'Move to Red Block', type: 'MOVE', target: 'red_block'})
-CREATE (grasp1:Action {id: 'grasp_red_block', name: 'Grasp Red Block', type: 'GRASP', target: 'red_block'})
-CREATE (move2:Action {id: 'move_to_bin', name: 'Move to Bin', type: 'MOVE', target: 'bin'})
-CREATE (release1:Action {id: 'release_red_block', name: 'Release Red Block', type: 'RELEASE', target: 'red_block'})
+CREATE (move1:Node {
+    uuid: 'move_to_red_block',
+    name: 'Move to Red Block',
+    type: 'action',
+    is_type_definition: false,
+    ancestors: ['process', 'entity'],
+    action_type: 'MOVE',
+    target: 'red_block'
+})
+CREATE (grasp1:Node {
+    uuid: 'grasp_red_block',
+    name: 'Grasp Red Block',
+    type: 'action',
+    is_type_definition: false,
+    ancestors: ['process', 'entity'],
+    action_type: 'GRASP',
+    target: 'red_block'
+})
+CREATE (move2:Node {
+    uuid: 'move_to_bin',
+    name: 'Move to Bin',
+    type: 'action',
+    is_type_definition: false,
+    ancestors: ['process', 'entity'],
+    action_type: 'MOVE',
+    target: 'bin'
+})
+CREATE (release1:Node {
+    uuid: 'release_red_block',
+    name: 'Release Red Block',
+    type: 'action',
+    is_type_definition: false,
+    ancestors: ['process', 'entity'],
+    action_type: 'RELEASE',
+    target: 'red_block'
+})
 
 // Action preconditions and effects
 CREATE (move1)-[:ENABLES]->(grasp1)
@@ -26,5 +89,13 @@ CREATE (move2)-[:ENABLES]->(release1)
 CREATE (release1)-[:ACHIEVES {state: 'red_block_in_bin'}]->(bin)
 
 // Goal definition
-CREATE (goal:Goal {id: 'goal_red_block_in_bin', description: 'red block in bin', target_state: 'red_block_in_bin'})
+CREATE (goal:Node {
+    uuid: 'goal_red_block_in_bin',
+    name: 'Goal: Red Block in Bin',
+    type: 'goal',
+    is_type_definition: false,
+    ancestors: ['intention', 'entity'],
+    description: 'red block in bin',
+    target_state: 'red_block_in_bin'
+})
 CREATE (goal)-[:REQUIRES]->(release1)

@@ -38,14 +38,14 @@ except ImportError:
 
 def print_header(title: str) -> None:
     """Print a section header."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {title}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 def print_status(label: str, value: Any, indent: int = 2) -> None:
     """Print a status line."""
-    print(f"{' '*indent}{label}: {value}")
+    print(f"{' ' * indent}{label}: {value}")
 
 
 def demo_environment() -> None:
@@ -213,12 +213,12 @@ async def demo_media_processing() -> None:
         print_status("Physics embedding dim", len(physics_emb), indent=4)
         print_status(
             "Visual embedding norm",
-            f"{sum(x**2 for x in visual_emb)**0.5:.4f}",
+            f"{sum(x**2 for x in visual_emb) ** 0.5:.4f}",
             indent=4,
         )
         print_status(
             "Physics embedding norm",
-            f"{sum(x**2 for x in physics_emb)**0.5:.4f}",
+            f"{sum(x**2 for x in physics_emb) ** 0.5:.4f}",
             indent=4,
         )
 
