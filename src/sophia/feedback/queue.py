@@ -56,7 +56,8 @@ class FeedbackQueue:
         """
         result = self.redis.brpop(self.QUEUE_KEY, timeout=timeout)
         if result:
-            return json.loads(result[1])
+            data: dict = json.loads(result[1])
+            return data
         return None
 
     def requeue_with_backoff(self, message: dict) -> None:
@@ -84,8 +85,10 @@ class FeedbackQueue:
 
     def pending_count(self) -> int:
         """Get number of messages waiting in queue."""
-        return self.redis.llen(self.QUEUE_KEY)
+        count: int = self.redis.llen(self.QUEUE_KEY)
+        return count
 
     def failed_count(self) -> int:
         """Get number of failed messages."""
-        return self.redis.llen(self.FAILED_KEY)
+        count: int = self.redis.llen(self.FAILED_KEY)
+        return count
