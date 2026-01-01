@@ -329,8 +329,8 @@ class TestSimulationWorkflow:
 class TestCrossServiceWorkflow:
     """E2E tests for cross-service interactions."""
 
-    def test_hermes_proposal_to_execution(self, sophia_url, auth_headers, hcg_client):
-        """Test Hermes proposal ingestion followed by execution."""
+    def test_hermes_proposal_to_execution(self, sophia_url, auth_headers):
+        """Test Hermes proposal ingestion and acknowledgment."""
         # Ingest a proposal from Hermes - must match HermesProposalRequest model
         proposal = {
             "proposal_id": "hermes_e2e_test_001",
@@ -358,18 +358,16 @@ class TestCrossServiceWorkflow:
         ingest_response = httpx.post(
             f"{sophia_url}/ingest/hermes_proposal",
             json=proposal,
+            headers=auth_headers,
             timeout=10,
         )
         assert ingest_response.status_code == 201
         result = ingest_response.json()
 
-        # Verify proposal was stored
-        assert "proposal_id" in result or "stored_node_ids" in result
-
-        # Verify in Neo4j - use proposal_id from request since it's the node ID
-        proposal_node = hcg_client.get_node(proposal["proposal_id"])
-        assert proposal_node is not None
-        assert proposal_node["properties"].get("source_service") == "hermes"
+        # Verify proposal was acknowledged (not stored - "Hermes proposes, Sophia disposes")
+        assert result["proposal_id"] == proposal["proposal_id"]
+        assert result["status"] == "accepted"
+        assert result["stored_node_ids"] == []  # Proposals are logged, not stored
 
     def test_concurrent_operations(self, sophia_url, auth_headers):
         """Test concurrent planning and simulation don't interfere."""
