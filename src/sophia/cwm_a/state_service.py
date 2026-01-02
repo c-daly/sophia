@@ -59,33 +59,18 @@ class CWMAGraphPayload(BaseModel):
     )
 
 
-class CWMStateLinks(BaseModel):
-    """Links to related HCG entities."""
-
-    process_ids: Optional[List[str]] = None
-    plan_id: Optional[str] = None
-    entity_ids: Optional[List[str]] = None
-    media_sample_id: Optional[str] = None
-    persona_entry_id: Optional[str] = None
-    talos_run_id: Optional[str] = None
-
-
 class CWMState(BaseModel):
     """Unified CWM state envelope.
 
-    All CWM emissions (CWM-A, CWM-G, CWM-E) share this envelope format
-    for consistent consumption by clients, logs, and Neo4j.
+    Thin transport wrapper - all meaningful metadata lives in data.
+    Provenance fields (source, derivation, confidence, tags, links)
+    are now in data, not on the envelope.
     """
 
     state_id: str = Field(description="Globally unique identifier (cwm_<model>_<uuid>)")
     model_type: str = Field(description="CWM_A, CWM_G, or CWM_E")
-    source: str = Field(description="Subsystem that emitted the record")
-    timestamp: datetime
-    confidence: float = Field(ge=0.0, le=1.0, description="Certainty score")
-    status: str = Field(description="observed, imagined, or reflected")
-    links: CWMStateLinks
-    tags: List[str] = Field(default_factory=list)
-    data: CWMAGraphPayload
+    timestamp: datetime = Field(description="When response was generated")
+    data: Dict[str, Any] = Field(description="Verbatim node properties including provenance")
 
 
 class CWMAStateService:
@@ -181,10 +166,10 @@ class CWMAStateService:
         entity_diffs: List[EntityDiff],
         relation_diffs: Optional[List[RelationDiff]] = None,
         validation: Optional[ValidationResult] = None,
-        confidence: float = 1.0,
-        status: str = "observed",
+        confidence: Optional[float] = None,
+        derivation: str = "observed",
         tags: Optional[List[str]] = None,
-        links: Optional[CWMStateLinks] = None,
+        links: Optional[Dict[str, Any]] = None,
     ) -> CWMState:
         """Emit a CWM-A state update.
 
@@ -192,8 +177,8 @@ class CWMAStateService:
             entity_diffs: List of entity changes
             relation_diffs: List of relationship changes
             validation: SHACL validation result
-            confidence: Confidence score (0.0-1.0)
-            status: State status (observed, imagined, reflected)
+            confidence: Confidence score (0.0-1.0), optional
+            derivation: How derived: observed, imagined, reflected
             tags: Optional tags for filtering
             links: Links to related HCG entities
 
@@ -203,33 +188,39 @@ class CWMAStateService:
         relation_diffs = relation_diffs or []
         validation = validation or ValidationResult(passed=True)
         tags = tags or []
-        links = links or CWMStateLinks()
+        links = links or {}
 
         # Collect entity IDs for links
         entity_ids = [d.entity_id for d in entity_diffs]
-        if links.entity_ids:
-            entity_ids.extend(links.entity_ids)
-        links.entity_ids = list(set(entity_ids))
+        if links.get("entity_ids"):
+            entity_ids.extend(links["entity_ids"])
+        links["entity_ids"] = list(set(entity_ids))
 
-        # Build the payload
-        payload = CWMAGraphPayload(
-            entities=entity_diffs,
-            relations=relation_diffs,
-            violations=validation.violations,
-            validation=validation,
-        )
+        # Build the payload with provenance in data
+        now = datetime.now(timezone.utc)
+        data: Dict[str, Any] = {
+            # Provenance fields
+            "source": self._source,
+            "derivation": derivation,
+            "created": now.isoformat(),
+            "updated": now.isoformat(),
+            "tags": tags,
+            "links": links,
+            # CWM-A specific content
+            "entities": [e.model_dump() for e in entity_diffs],
+            "relations": [r.model_dump() for r in relation_diffs],
+            "violations": validation.violations,
+            "validation": validation.model_dump(),
+        }
+        if confidence is not None:
+            data["confidence"] = confidence
 
-        # Create the state envelope
+        # Create the state envelope (thin wrapper)
         state = CWMState(
             state_id=self._generate_state_id(),
             model_type="CWM_A",
-            source=self._source,
-            timestamp=datetime.now(timezone.utc),
-            confidence=confidence,
-            status=status,
-            links=links,
-            tags=tags,
-            data=payload,
+            timestamp=now,
+            data=data,
         )
 
         # Update internal snapshot
@@ -366,7 +357,7 @@ class CWMAStateService:
             entity_diffs=[],
             relation_diffs=[diff],
             tags=[f"relation_type:{relation_type}", f"operation:{operation}"],
-            links=CWMStateLinks(entity_ids=[source_id, target_id]),
+            links={"entity_ids": [source_id, target_id]},
         )
 
     def get_state_history(self, limit: int = 100) -> List[CWMState]:

@@ -314,3 +314,103 @@ def test_add_node_generates_uuid_when_not_provided(
     params = call_args[0][1]
     assert len(params["uuid"]) == 36
     assert params["uuid"].count("-") == 4
+
+
+# --- Provenance metadata tests ---
+
+
+def test_add_node_with_provenance(
+    client: HCGClient,
+) -> None:
+    """add_node should accept and store provenance metadata."""
+    client._get_type_ancestors = MagicMock(return_value=[])
+    client._execute_query = MagicMock(return_value=[{"uuid": "prov-uuid"}])
+
+    client.add_node(
+        uuid="prov-uuid",
+        name="Provenance Test",
+        node_type="test_type",
+        source="planner",
+        derivation="imagined",
+        confidence=0.85,
+        tags=["simulation", "test"],
+        links={"plan_id": "plan_123", "process_ids": ["proc_1"]},
+    )
+
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+    props = params["properties"]
+
+    assert props["source"] == "planner"
+    assert props["derivation"] == "imagined"
+    assert props["confidence"] == 0.85
+    # Lists with primitive items stay as lists; dicts get JSON-serialized
+    assert props["tags"] == ["simulation", "test"]
+    # Dicts are serialized as JSON strings with __LOGOS_JSON__ prefix
+    assert "__LOGOS_JSON__:" in props["links"]
+    assert "plan_123" in props["links"]
+    assert "created" in props
+    assert "updated" in props
+
+
+def test_add_node_default_provenance(
+    client: HCGClient,
+) -> None:
+    """add_node should apply default provenance when not provided."""
+    client._get_type_ancestors = MagicMock(return_value=[])
+    client._execute_query = MagicMock(return_value=[{"uuid": "default-uuid"}])
+
+    client.add_node(
+        uuid="default-uuid",
+        name="Default Provenance Test",
+        node_type="test_type",
+    )
+
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+    props = params["properties"]
+
+    assert props["source"] == "unknown"
+    assert props["derivation"] == "observed"
+    # confidence is not included when None (not present in properties)
+    assert "confidence" not in props
+    # Empty lists stay as lists; empty dicts get JSON-serialized
+    assert props["tags"] == []
+    assert props["links"] == "__LOGOS_JSON__:{}"
+    assert "created" in props
+    assert "updated" in props
+
+
+def test_update_node_updates_timestamp(
+    client: HCGClient,
+) -> None:
+    """update_node should set updated timestamp."""
+    client._execute_query = MagicMock(return_value=[{"uuid": "existing-uuid"}])
+
+    result = client.update_node(
+        uuid="existing-uuid",
+        properties={"confidence": 0.95},
+    )
+
+    assert result == "existing-uuid"
+    call_args = client._execute_query.call_args
+    params = call_args[0][1]
+
+    # Verify the updated timestamp is in the properties being set
+    assert "updated" in params["properties"]
+    # Verify confidence is in properties
+    assert params["properties"]["confidence"] == 0.95
+
+
+def test_update_node_raises_on_missing_node(
+    client: HCGClient,
+) -> None:
+    """update_node should raise ValueError for non-existent nodes."""
+    # Empty result means node not found
+    client._execute_query = MagicMock(return_value=[])
+
+    with pytest.raises(ValueError, match="not found"):
+        client.update_node(
+            uuid="nonexistent-uuid",
+            properties={"confidence": 0.5},
+        )
