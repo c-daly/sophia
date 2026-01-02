@@ -197,7 +197,9 @@ class CWMPersistence:
                 "entities": payload_dict.get("entities", []),
                 "relations": payload_dict.get("relations", []),
                 "violations": payload_dict.get("violations", []),
-                "validation": payload_dict.get("validation", {"passed": True, "violations": []}),
+                "validation": payload_dict.get(
+                    "validation", {"passed": True, "violations": []}
+                ),
             }
 
             # Build CWMState (thin envelope)

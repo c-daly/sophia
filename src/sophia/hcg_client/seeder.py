@@ -35,7 +35,13 @@ ANCESTORS = {
 }
 
 # Types required by sophia API endpoints (must exist for auto-compute ancestors)
-REQUIRED_TYPES = ["simulation", "imagined_process", "imagined_state", "execution", "process"]
+REQUIRED_TYPES = [
+    "simulation",
+    "imagined_process",
+    "imagined_state",
+    "execution",
+    "process",
+]
 
 
 def seed_type_definitions(hcg_client: HCGClient) -> None:

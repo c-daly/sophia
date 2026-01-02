@@ -70,7 +70,9 @@ class CWMState(BaseModel):
     state_id: str = Field(description="Globally unique identifier (cwm_<model>_<uuid>)")
     model_type: str = Field(description="CWM_A, CWM_G, or CWM_E")
     timestamp: datetime = Field(description="When response was generated")
-    data: Dict[str, Any] = Field(description="Verbatim node properties including provenance")
+    data: Dict[str, Any] = Field(
+        description="Verbatim node properties including provenance"
+    )
 
 
 class CWMAStateService:
