@@ -1,4 +1,6 @@
-# Provenance Design Decisions (Issue #15)
+# Provenance Design Decisions (Issue #15) - COMPLETE
+
+**Status:** Merged (sophia #106, logos #471) on 2026-01-02
 
 ## Core Principles
 1. **Provenance lives on nodes, not envelope** - CWMState is thin transport wrapper
