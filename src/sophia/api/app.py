@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 
 from fastapi import (
     Depends,
@@ -1361,7 +1361,7 @@ def create_app() -> FastAPI:
                         )
                         for i, r in enumerate(results)
                     ]
-                    feedback_outcome = (
+                    feedback_outcome: Literal["success", "partial"] = (
                         "success" if overall_status == "success" else "partial"
                     )
                     _feedback_dispatcher.emit(

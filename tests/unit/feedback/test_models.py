@@ -1,5 +1,7 @@
 """Unit tests for feedback models."""
 
+from typing import Literal, cast
+
 import pytest
 from pydantic import ValidationError
 
@@ -135,6 +137,7 @@ class TestFeedbackPayload:
                 StepResult(step_index=1, action="GRASP", outcome="success"),
             ],
         )
+        assert payload.step_results is not None
         assert len(payload.step_results) == 2
 
     def test_with_state_diff(self) -> None:
@@ -147,6 +150,7 @@ class TestFeedbackPayload:
             state_diff=StateDiff(added_nodes=["node-1"]),
             node_ids_created=["node-1"],
         )
+        assert payload.state_diff is not None
         assert payload.state_diff.added_nodes == ["node-1"]
         assert payload.node_ids_created == ["node-1"]
 
@@ -172,10 +176,11 @@ class TestFeedbackPayload:
 
     def test_feedback_type_literals(self) -> None:
         """Test valid feedback_type values."""
+        FeedbackType = Literal["observation", "plan", "execution", "validation"]
         for ftype in ["observation", "plan", "execution", "validation"]:
             payload = FeedbackPayload(
                 plan_id="plan-123",
-                feedback_type=ftype,
+                feedback_type=cast(FeedbackType, ftype),
                 outcome="created",
                 reason="test",
             )
@@ -183,6 +188,9 @@ class TestFeedbackPayload:
 
     def test_outcome_literals(self) -> None:
         """Test valid outcome values."""
+        OutcomeType = Literal[
+            "accepted", "rejected", "created", "success", "failure", "partial"
+        ]
         for outcome in [
             "accepted",
             "rejected",
@@ -194,7 +202,7 @@ class TestFeedbackPayload:
             payload = FeedbackPayload(
                 plan_id="plan-123",
                 feedback_type="plan",
-                outcome=outcome,
+                outcome=cast(OutcomeType, outcome),
                 reason="test",
             )
             assert payload.outcome == outcome
