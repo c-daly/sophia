@@ -189,7 +189,21 @@ _feedback_worker_task: Optional[Any] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task
+    global \
+        _planner, \
+        _executor, \
+        _hcg_client, \
+        _cwm_g, \
+        _cwm_a, \
+        _cwm_a_state, \
+        _kg, \
+        _jepa_runner, \
+        _media_storage, \
+        _media_ingestion, \
+        _cwm_persistence, \
+        _feedback_dispatcher, \
+        _feedback_worker, \
+        _feedback_worker_task
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -514,12 +528,16 @@ def create_app() -> FastAPI:
                                 before=(
                                     before_val
                                     if isinstance(before_val, dict)
-                                    else {"value": before_val} if before_val else None
+                                    else {"value": before_val}
+                                    if before_val
+                                    else None
                                 ),
                                 after=(
                                     after_val
                                     if isinstance(after_val, dict)
-                                    else {"value": after_val} if after_val else None
+                                    else {"value": after_val}
+                                    if after_val
+                                    else None
                                 ),
                                 changed_properties=(
                                     changed_props if changed_props else None
@@ -532,7 +550,7 @@ def create_app() -> FastAPI:
                         entity_diffs=diffs,
                         validation=ValidationResult(passed=True),
                         confidence=1.0,
-                        status="observed",
+                        derivation="observed",
                         tags=["source:api", "endpoint:/state"],
                     )
                     entity_diffs = [d.model_dump() for d in diffs]
@@ -560,7 +578,7 @@ def create_app() -> FastAPI:
                     entity_diffs=[],
                     validation=ValidationResult(passed=False, violations=[str(e)]),
                     confidence=0.0,
-                    status="observed",
+                    derivation="observed",
                     tags=["source:api", "endpoint:/state", "validation:failed"],
                 )
 
@@ -611,17 +629,19 @@ def create_app() -> FastAPI:
         if _cwm_a_state and (model_type is None or model_type == "CWM_A"):
             cwm_a_states = _cwm_a_state.get_state_history(limit=limit)
             for s in cwm_a_states:
+                # Extract provenance fields from data (now on node, not envelope)
+                data = s.data
                 states.append(
                     CWMStateResponse(
                         state_id=s.state_id,
                         model_type=s.model_type,
-                        source=s.source,
+                        source=data.get("source", "unknown"),
                         timestamp=s.timestamp.isoformat(),
-                        confidence=s.confidence,
-                        status=s.status,
-                        links=s.links.model_dump(),
-                        tags=s.tags,
-                        data=s.data.model_dump(),
+                        confidence=data.get("confidence", 0.0),
+                        status=data.get("derivation", "observed"),
+                        links=data.get("links", {}),
+                        tags=data.get("tags", []),
+                        data=data,
                     )
                 )
 
@@ -705,17 +725,19 @@ def create_app() -> FastAPI:
             # Convert to response format
             response_states = []
             for s in cwm_states:
+                # Extract provenance fields from data (now on node, not envelope)
+                data = s.data if isinstance(s.data, dict) else {}
                 response_states.append(
                     CWMStateResponse(
                         state_id=s.state_id,
                         model_type=s.model_type,
-                        source=s.source,
+                        source=data.get("source", "unknown"),
                         timestamp=s.timestamp.isoformat() if s.timestamp else "",
-                        confidence=s.confidence,
-                        status=s.status,
-                        links=s.links.model_dump() if s.links else {},
-                        tags=s.tags or [],
-                        data=s.data.model_dump() if s.data else {},
+                        confidence=data.get("confidence", 0.0),
+                        status=data.get("derivation", "observed"),
+                        links=data.get("links", {}),
+                        tags=data.get("tags", []),
+                        data=data,
                     )
                 )
 

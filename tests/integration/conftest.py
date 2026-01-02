@@ -10,6 +10,7 @@ These tests make HTTP requests to the running Sophia service.
 """
 
 import os
+from typing import Generator
 
 import pytest
 import httpx
@@ -164,7 +165,7 @@ def verify_infrastructure(infrastructure_ports: dict) -> None:
 
 
 @pytest.fixture(scope="module")
-def http_client(sophia_url: str, verify_sophia) -> httpx.Client:
+def http_client(sophia_url: str, verify_sophia) -> Generator[httpx.Client, None, None]:
     """Create an HTTP client for making requests to Sophia."""
     with httpx.Client(base_url=sophia_url, timeout=30.0) as client:
         yield client

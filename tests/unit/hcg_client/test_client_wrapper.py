@@ -241,29 +241,33 @@ def test_get_type_ancestors_returns_empty_when_ancestors_null(
 
 
 def test_add_node_auto_computes_ancestors_for_instance(
-    client: HCGClient,
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """Instance nodes get ancestors auto-computed as [node_type] + type_def.ancestors."""
-    client._get_type_ancestors = MagicMock(return_value=["physical_entity", "entity"])
-    client._execute_query = MagicMock(return_value=[{"uuid": "generated-uuid"}])
+    mock_ancestors = MagicMock(return_value=["physical_entity", "entity"])
+    mock_execute = MagicMock(return_value=[{"uuid": "generated-uuid"}])
+    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
         name="Red Block",
         node_type="object",
     )
 
-    client._get_type_ancestors.assert_called_once_with("object")
-    call_args = client._execute_query.call_args
+    mock_ancestors.assert_called_once_with("object")
+    call_args = mock_execute.call_args
     params = call_args[0][1]
     assert params["ancestors"] == ["object", "physical_entity", "entity"]
 
 
 def test_add_node_type_definition_does_not_auto_compute_ancestors(
-    client: HCGClient,
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """Type definitions don't auto-compute ancestors - use empty if not provided."""
-    client._get_type_ancestors = MagicMock()
-    client._execute_query = MagicMock(return_value=[{"uuid": "type-def-uuid"}])
+    mock_ancestors = MagicMock()
+    mock_execute = MagicMock(return_value=[{"uuid": "type-def-uuid"}])
+    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
         name="object",
@@ -271,18 +275,20 @@ def test_add_node_type_definition_does_not_auto_compute_ancestors(
         is_type_definition=True,
     )
 
-    client._get_type_ancestors.assert_not_called()
-    call_args = client._execute_query.call_args
+    mock_ancestors.assert_not_called()
+    call_args = mock_execute.call_args
     params = call_args[0][1]
     assert params["ancestors"] == []
 
 
 def test_add_node_uses_provided_ancestors_when_given(
-    client: HCGClient,
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """When ancestors are explicitly provided, they are used as-is."""
-    client._get_type_ancestors = MagicMock()
-    client._execute_query = MagicMock(return_value=[{"uuid": "custom-uuid"}])
+    mock_ancestors = MagicMock()
+    mock_execute = MagicMock(return_value=[{"uuid": "custom-uuid"}])
+    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     custom_ancestors = ["custom_parent", "custom_grandparent"]
 
@@ -292,25 +298,27 @@ def test_add_node_uses_provided_ancestors_when_given(
         ancestors=custom_ancestors,
     )
 
-    client._get_type_ancestors.assert_not_called()
-    call_args = client._execute_query.call_args
+    mock_ancestors.assert_not_called()
+    call_args = mock_execute.call_args
     params = call_args[0][1]
     assert params["ancestors"] == custom_ancestors
 
 
 def test_add_node_generates_uuid_when_not_provided(
-    client: HCGClient,
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """UUID is auto-generated when not provided."""
-    client._get_type_ancestors = MagicMock(return_value=[])
-    client._execute_query = MagicMock(return_value=[{"uuid": "auto-generated"}])
+    mock_ancestors = MagicMock(return_value=[])
+    mock_execute = MagicMock(return_value=[{"uuid": "auto-generated"}])
+    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
         name="Test Node",
         node_type="test_type",
     )
 
-    call_args = client._execute_query.call_args
+    call_args = mock_execute.call_args
     params = call_args[0][1]
     assert len(params["uuid"]) == 36
     assert params["uuid"].count("-") == 4
@@ -320,11 +328,13 @@ def test_add_node_generates_uuid_when_not_provided(
 
 
 def test_add_node_with_provenance(
-    client: HCGClient,
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """add_node should accept and store provenance metadata."""
-    client._get_type_ancestors = MagicMock(return_value=[])
-    client._execute_query = MagicMock(return_value=[{"uuid": "prov-uuid"}])
+    mock_ancestors = MagicMock(return_value=[])
+    mock_execute = MagicMock(return_value=[{"uuid": "prov-uuid"}])
+    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
         uuid="prov-uuid",
@@ -337,7 +347,7 @@ def test_add_node_with_provenance(
         links={"plan_id": "plan_123", "process_ids": ["proc_1"]},
     )
 
-    call_args = client._execute_query.call_args
+    call_args = mock_execute.call_args
     params = call_args[0][1]
     props = params["properties"]
 
@@ -354,11 +364,13 @@ def test_add_node_with_provenance(
 
 
 def test_add_node_default_provenance(
-    client: HCGClient,
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """add_node should apply default provenance when not provided."""
-    client._get_type_ancestors = MagicMock(return_value=[])
-    client._execute_query = MagicMock(return_value=[{"uuid": "default-uuid"}])
+    mock_ancestors = MagicMock(return_value=[])
+    mock_execute = MagicMock(return_value=[{"uuid": "default-uuid"}])
+    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
         uuid="default-uuid",
@@ -366,7 +378,7 @@ def test_add_node_default_provenance(
         node_type="test_type",
     )
 
-    call_args = client._execute_query.call_args
+    call_args = mock_execute.call_args
     params = call_args[0][1]
     props = params["properties"]
 
