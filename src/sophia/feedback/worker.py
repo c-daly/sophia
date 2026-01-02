@@ -48,16 +48,20 @@ class FeedbackWorker:
 
     async def _process_one(self, client: httpx.AsyncClient) -> None:
         """Process single message from queue."""
-        message = self.queue.dequeue(timeout=1)
+        # Run blocking Redis call in thread to avoid blocking event loop
+        message = await asyncio.to_thread(self.queue.dequeue, timeout=1)
         if not message:
             return
 
         # Check backoff
         next_attempt = message.get("next_attempt_after", 0)
-        if datetime.utcnow().timestamp() < next_attempt:
-            # Not ready yet, put it back
-            self.queue.requeue_with_backoff(message)
-            await asyncio.sleep(0.1)
+        now = datetime.utcnow().timestamp()
+        if now < next_attempt:
+            # Not ready yet, put it back without incrementing attempts
+            self.queue.requeue(message)
+            # Sleep until ready (or at least a bit) to avoid busy-loop
+            sleep_time = min(next_attempt - now, 1.0)
+            await asyncio.sleep(sleep_time)
             return
 
         # Attempt send

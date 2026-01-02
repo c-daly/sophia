@@ -60,8 +60,20 @@ class FeedbackQueue:
             return data
         return None
 
+    def requeue(self, message: dict) -> None:
+        """Put message back without modifying attempt count.
+
+        Used when message is not ready yet (still in backoff period).
+
+        Args:
+            message: The message to requeue
+        """
+        self.redis.lpush(self.QUEUE_KEY, json.dumps(message))
+
     def requeue_with_backoff(self, message: dict) -> None:
-        """Put message back with incremented attempt count.
+        """Put message back with incremented attempt count and backoff delay.
+
+        Used after a failed send attempt.
 
         Args:
             message: The message to requeue

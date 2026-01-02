@@ -183,7 +183,14 @@ class TestFeedbackPayload:
 
     def test_outcome_literals(self) -> None:
         """Test valid outcome values."""
-        for outcome in ["accepted", "rejected", "created", "success", "failure", "partial"]:
+        for outcome in [
+            "accepted",
+            "rejected",
+            "created",
+            "success",
+            "failure",
+            "partial",
+        ]:
             payload = FeedbackPayload(
                 plan_id="plan-123",
                 feedback_type="plan",
