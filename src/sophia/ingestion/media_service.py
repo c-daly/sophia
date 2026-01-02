@@ -162,6 +162,8 @@ class MediaIngestionService:
             name=f"Media Sample {sample_id[:8]}",
             node_type="media_sample",
             properties=properties,
+            source="ingestion",
+            derivation="observed",
         )
 
         logger.debug(f"Created MediaSample node {sample_id} in Neo4j")

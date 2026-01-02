@@ -467,6 +467,8 @@ def create_app() -> FastAPI:
                 name="Current State",
                 node_type="state",
                 properties=request.state,
+                source="orchestrator",
+                derivation="observed",
             )
 
             # Emit CWM-A state envelope
@@ -530,7 +532,7 @@ def create_app() -> FastAPI:
                         entity_diffs=diffs,
                         validation=ValidationResult(passed=True),
                         confidence=1.0,
-                        status="observed",
+                        derivation="observed",
                         tags=["source:api", "endpoint:/state"],
                     )
                     entity_diffs = [d.model_dump() for d in diffs]
@@ -558,7 +560,7 @@ def create_app() -> FastAPI:
                     entity_diffs=[],
                     validation=ValidationResult(passed=False, violations=[str(e)]),
                     confidence=0.0,
-                    status="observed",
+                    derivation="observed",
                     tags=["source:api", "endpoint:/state", "validation:failed"],
                 )
 
@@ -609,17 +611,19 @@ def create_app() -> FastAPI:
         if _cwm_a_state and (model_type is None or model_type == "CWM_A"):
             cwm_a_states = _cwm_a_state.get_state_history(limit=limit)
             for s in cwm_a_states:
+                # Extract provenance fields from data (now on node, not envelope)
+                data = s.data
                 states.append(
                     CWMStateResponse(
                         state_id=s.state_id,
                         model_type=s.model_type,
-                        source=s.source,
+                        source=data.get("source", "unknown"),
                         timestamp=s.timestamp.isoformat(),
-                        confidence=s.confidence,
-                        status=s.status,
-                        links=s.links.model_dump(),
-                        tags=s.tags,
-                        data=s.data.model_dump(),
+                        confidence=data.get("confidence", 0.0),
+                        status=data.get("derivation", "observed"),
+                        links=data.get("links", {}),
+                        tags=data.get("tags", []),
+                        data=data,
                     )
                 )
 
@@ -703,17 +707,19 @@ def create_app() -> FastAPI:
             # Convert to response format
             response_states = []
             for s in cwm_states:
+                # Extract provenance fields from data (now on node, not envelope)
+                data = s.data if isinstance(s.data, dict) else {}
                 response_states.append(
                     CWMStateResponse(
                         state_id=s.state_id,
                         model_type=s.model_type,
-                        source=s.source,
+                        source=data.get("source", "unknown"),
                         timestamp=s.timestamp.isoformat() if s.timestamp else "",
-                        confidence=s.confidence,
-                        status=s.status,
-                        links=s.links.model_dump() if s.links else {},
-                        tags=s.tags or [],
-                        data=s.data.model_dump() if s.data else {},
+                        confidence=data.get("confidence", 0.0),
+                        status=data.get("derivation", "observed"),
+                        links=data.get("links", {}),
+                        tags=data.get("tags", []),
+                        data=data,
                     )
                 )
 
@@ -804,6 +810,8 @@ def create_app() -> FastAPI:
                         for step in plan_step_models
                     ],
                 },
+                source="planner",
+                derivation="imagined",
             )
 
             # Link plan to goal if it exists in HCG
@@ -911,13 +919,16 @@ def create_app() -> FastAPI:
                     node_type="imagined_state",
                     properties={
                         "description": state.description,
-                        "confidence": state.confidence,
                         "model_version": request.model_version,
                         "horizon": request.horizon,
                         "horizon_step": i,
                         "assumptions": request.assumptions or [],
                         "imagination_id": imagination_id,
                     },
+                    source="jepa_runner",
+                    derivation="imagined",
+                    confidence=state.confidence,
+                    links={"imagination_id": imagination_id},
                 )
 
             return ImagineResponse(
@@ -1048,7 +1059,6 @@ def create_app() -> FastAPI:
                     node_type="imagined_process",
                     properties={
                         "description": process.description,
-                        "confidence": process.confidence,
                         "model_version": process.model_version,
                         "horizon": process.horizon,
                         "assumptions": process.assumptions,
@@ -1056,6 +1066,10 @@ def create_app() -> FastAPI:
                         "simulation_id": result.simulation_id,
                         **process.properties,
                     },
+                    source="jepa_runner",
+                    derivation="imagined",
+                    confidence=process.confidence,
+                    links={"simulation_id": result.simulation_id},
                 )
 
             # Store imagined states in Neo4j
@@ -1071,7 +1085,6 @@ def create_app() -> FastAPI:
                     properties={
                         "step": state.step,
                         "description": state.description,
-                        "confidence": state.confidence,
                         "model_version": state.model_version,
                         "horizon": state.horizon,
                         "assumptions": state.assumptions,
@@ -1079,6 +1092,10 @@ def create_app() -> FastAPI:
                         "simulation_id": result.simulation_id,
                         "state_data": state.state_data,
                     },
+                    source="jepa_runner",
+                    derivation="imagined",
+                    confidence=state.confidence,
+                    links={"simulation_id": result.simulation_id},
                 )
 
                 # Link state to simulation
@@ -1108,6 +1125,8 @@ def create_app() -> FastAPI:
                 name=f"Simulation {result.simulation_id[:8]}",
                 node_type="simulation",
                 properties=simulation_properties,
+                source="jepa_runner",
+                derivation="imagined",
             )
 
             # Link simulation to media sample if provided
@@ -1254,6 +1273,21 @@ def create_app() -> FastAPI:
             execution_id = str(uuid.uuid4())
             results: List[ExecutionResult] = []
 
+            # Create execution container node (parallel to simulation for imagined)
+            _hcg_client.add_node(
+                uuid=execution_id,
+                name=f"Execution {execution_id[:8]}",
+                node_type="execution",
+                properties={
+                    "plan_id": request.plan_id,
+                    "dry_run": request.dry_run,
+                    "step_index": request.step_index,
+                },
+                source="executor",
+                derivation="observed",
+                links={"plan_id": request.plan_id},
+            )
+
             # Get plan details from Neo4j
             plan_props = plan_node.get("properties", {})
             plan_steps = plan_props.get("steps", [])
@@ -1302,6 +1336,30 @@ def create_app() -> FastAPI:
                         state_changes={},
                     )
 
+                    # Create process node for the executed step (parallel to imagined_process)
+                    process_id = f"{execution_id}_process_{step_model.id}"
+                    _hcg_client.add_node(
+                        uuid=process_id,
+                        name=step_model.name,
+                        node_type="process",
+                        properties={
+                            "action_type": step_model.action_type,
+                            "target": step_model.target,
+                            "step_id": step_model.id,
+                        },
+                        source="executor",
+                        derivation="observed",
+                        links={"execution_id": execution_id},
+                    )
+
+                    # Link process to execution container
+                    _hcg_client.add_edge(
+                        edge_id=f"e_{execution_id}_{process_id}",
+                        source_uuid=execution_id,
+                        target_uuid=process_id,
+                        relation="produces",
+                    )
+
                 results.append(result)
 
             # Apply state changes based on the goal's target_state
@@ -1330,6 +1388,17 @@ def create_app() -> FastAPI:
                         name="Current State",
                         node_type="state",
                         properties=current_state,
+                        source="executor",
+                        derivation="observed",
+                        links={"execution_id": execution_id},
+                    )
+
+                    # Link execution to resulting state
+                    _hcg_client.add_edge(
+                        edge_id=f"e_{execution_id}_results_in_state",
+                        source_uuid=execution_id,
+                        target_uuid="current_state",
+                        relation="results_in",
                     )
 
                     # Update planner state

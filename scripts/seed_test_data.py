@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from sophia.hcg_client import HCGClient  # noqa: E402
-from sophia.hcg_client.seeder import seed_pick_and_place_data  # noqa: E402
+from sophia.hcg_client.seeder import (  # noqa: E402
+    seed_type_definitions,
+    seed_pick_and_place_data,
+)
 
 
 def wait_for_neo4j(uri: str, user: str, password: str, max_retries: int = 30) -> bool:
@@ -73,6 +76,10 @@ def seed_data(uri: str, user: str, password: str) -> bool:
         # Clear existing data
         logger.info("Clearing existing data...")
         client.clear_all()
+
+        # Seed type definitions first (required for auto-compute ancestors)
+        logger.info("Seeding type definitions...")
+        seed_type_definitions(client)
 
         # Seed pick-and-place scenario
         logger.info("Seeding pick-and-place scenario...")

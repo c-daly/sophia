@@ -7,7 +7,6 @@ from sophia.cwm_a import (
     CWMAStateService,
     CWMState,
     CWMAGraphPayload,
-    CWMStateLinks,
     EntityDiff,
     RelationDiff,
     ValidationResult,
@@ -154,11 +153,11 @@ class TestCWMAStateService:
         state = service.emit_state_update(entity_diffs=[diff])
 
         assert state.model_type == "CWM_A"
-        assert state.source == "test"
-        assert state.status == "observed"
-        assert state.confidence == 1.0
-        assert len(state.data.entities) == 1
-        assert state.data.entities[0].entity_id == "red_block"
+        # Provenance is now in data, not on envelope
+        assert state.data["source"] == "test"
+        assert state.data["derivation"] == "observed"
+        assert len(state.data["entities"]) == 1
+        assert state.data["entities"][0]["entity_id"] == "red_block"
 
     def test_emit_state_update_with_validation(self):
         """Test state update with validation result."""
@@ -174,8 +173,8 @@ class TestCWMAStateService:
             validation=validation,
         )
 
-        assert state.data.validation.passed is False
-        assert "Invalid property" in state.data.violations
+        assert state.data["validation"]["passed"] is False
+        assert "Invalid property" in state.data["violations"]
 
     def test_emit_state_update_with_relations(self):
         """Test state update with relation diffs."""
@@ -193,8 +192,8 @@ class TestCWMAStateService:
             relation_diffs=[relation_diff],
         )
 
-        assert len(state.data.relations) == 1
-        assert state.data.relations[0].source_id == "red_block"
+        assert len(state.data["relations"]) == 1
+        assert state.data["relations"][0]["source_id"] == "red_block"
 
     def test_emit_entity_update_convenience(self):
         """Test the convenience method for single entity updates."""
@@ -207,9 +206,9 @@ class TestCWMAStateService:
         )
 
         assert state.model_type == "CWM_A"
-        assert len(state.data.entities) == 1
-        assert state.data.entities[0].entity_id == "gripper"
-        assert state.data.entities[0].operation == "create"
+        assert len(state.data["entities"]) == 1
+        assert state.data["entities"][0]["entity_id"] == "gripper"
+        assert state.data["entities"][0]["operation"] == "create"
 
     def test_emit_entity_update_tracks_changes(self):
         """Test that entity updates track changes correctly."""
@@ -221,7 +220,7 @@ class TestCWMAStateService:
             entity_type="object",
             properties={"x": 0, "y": 0},
         )
-        assert state1.data.entities[0].operation == "create"
+        assert state1.data["entities"][0]["operation"] == "create"
 
         # Second update - update
         state2 = service.emit_entity_update(
@@ -229,9 +228,9 @@ class TestCWMAStateService:
             entity_type="object",
             properties={"x": 10, "y": 0},
         )
-        assert state2.data.entities[0].operation == "update"
-        assert state2.data.entities[0].before == {"x": 0, "y": 0}
-        assert state2.data.entities[0].after == {"x": 10, "y": 0}
+        assert state2.data["entities"][0]["operation"] == "update"
+        assert state2.data["entities"][0]["before"] == {"x": 0, "y": 0}
+        assert state2.data["entities"][0]["after"] == {"x": 10, "y": 0}
 
     def test_emit_entity_deletion(self):
         """Test entity deletion emission."""
@@ -250,9 +249,9 @@ class TestCWMAStateService:
             entity_type="block",
         )
 
-        assert state.data.entities[0].operation == "delete"
-        assert state.data.entities[0].before == {"x": 5}
-        assert state.data.entities[0].after is None
+        assert state.data["entities"][0]["operation"] == "delete"
+        assert state.data["entities"][0]["before"] == {"x": 5}
+        assert state.data["entities"][0]["after"] is None
 
     def test_emit_relation_update(self):
         """Test relation update emission."""
@@ -265,10 +264,10 @@ class TestCWMAStateService:
             operation="create",
         )
 
-        assert len(state.data.relations) == 1
-        assert state.data.relations[0].relation_type == "stacked_on"
-        assert "block_a" in state.links.entity_ids
-        assert "block_b" in state.links.entity_ids
+        assert len(state.data["relations"]) == 1
+        assert state.data["relations"][0]["relation_type"] == "stacked_on"
+        assert "block_a" in state.data["links"]["entity_ids"]
+        assert "block_b" in state.data["links"]["entity_ids"]
 
     def test_state_history(self):
         """Test state history retrieval."""
@@ -286,7 +285,7 @@ class TestCWMAStateService:
 
         assert len(history) == 3
         # Should be the last 3
-        assert history[-1].data.entities[0].entity_id == "entity_4"
+        assert history[-1].data["entities"][0]["entity_id"] == "entity_4"
 
     def test_get_latest_state(self):
         """Test getting the latest state."""
@@ -304,7 +303,7 @@ class TestCWMAStateService:
 
         latest = service.get_latest_state()
         assert latest is not None
-        assert latest.data.entities[0].entity_id == "latest"
+        assert latest.data["entities"][0]["entity_id"] == "latest"
 
     def test_clear_history(self):
         """Test clearing state history."""
@@ -337,10 +336,11 @@ class TestCWMAStateService:
         """Test custom tags and links."""
         service = CWMAStateService()
 
-        links = CWMStateLinks(
-            plan_id="plan_123",
-            process_ids=["proc_1", "proc_2"],
-        )
+        # Links are now a plain dict
+        links = {
+            "plan_id": "plan_123",
+            "process_ids": ["proc_1", "proc_2"],
+        }
 
         state = service.emit_state_update(
             entity_diffs=[],
@@ -348,25 +348,29 @@ class TestCWMAStateService:
             links=links,
         )
 
-        assert "custom:tag" in state.tags
-        assert state.links.plan_id == "plan_123"
-        assert "proc_1" in state.links.process_ids
+        assert "custom:tag" in state.data["tags"]
+        assert state.data["links"]["plan_id"] == "plan_123"
+        assert "proc_1" in state.data["links"]["process_ids"]
 
-    def test_confidence_and_status(self):
-        """Test custom confidence and status."""
+    def test_confidence_and_derivation(self):
+        """Test custom confidence and derivation."""
         service = CWMAStateService()
 
         state = service.emit_state_update(
             entity_diffs=[],
             confidence=0.75,
-            status="imagined",
+            derivation="imagined",
         )
 
-        assert state.confidence == 0.75
-        assert state.status == "imagined"
+        assert state.data["confidence"] == 0.75
+        assert state.data["derivation"] == "imagined"
 
     def test_cwm_state_envelope_format(self):
-        """Test that the CWMState envelope follows the spec."""
+        """Test that the CWMState envelope follows the spec.
+
+        Simplified envelope: state_id, model_type, timestamp, data.
+        Provenance is now in data, not on envelope.
+        """
         service = CWMAStateService(source="sophia_api")
 
         diff = EntityDiff(
@@ -378,42 +382,50 @@ class TestCWMAStateService:
 
         state = service.emit_state_update(entity_diffs=[diff])
 
-        # Verify all required fields per PHASE2_SPEC
+        # Verify envelope fields (thin wrapper)
         assert state.state_id.startswith("cwm_a_")
         assert state.model_type == "CWM_A"
-        assert state.source == "sophia_api"
         assert isinstance(state.timestamp, datetime)
-        assert 0.0 <= state.confidence <= 1.0
-        assert state.status in ["observed", "imagined", "reflected"]
-        assert isinstance(state.links, CWMStateLinks)
-        assert isinstance(state.tags, list)
-        assert isinstance(state.data, CWMAGraphPayload)
+        assert isinstance(state.data, dict)
+
+        # Verify provenance is in data
+        assert state.data["source"] == "sophia_api"
+        assert state.data["derivation"] in ["observed", "imagined", "reflected"]
+        assert isinstance(state.data["tags"], list)
+        assert isinstance(state.data["links"], dict)
+        assert isinstance(state.data["entities"], list)
 
 
 class TestCWMStateModels:
     """Tests for CWMState and related models."""
 
     def test_cwm_state_serialization(self):
-        """Test CWMState model serialization."""
+        """Test CWMState model serialization.
+
+        Simplified CWMState: provenance is in data dict, not on envelope.
+        """
         state = CWMState(
             state_id="cwm_a_test123",
             model_type="CWM_A",
-            source="test",
             timestamp=datetime.now(timezone.utc),
-            confidence=0.95,
-            status="observed",
-            links=CWMStateLinks(entity_ids=["e1", "e2"]),
-            tags=["test"],
-            data=CWMAGraphPayload(
-                entities=[
-                    EntityDiff(
-                        entity_id="e1",
-                        entity_type="test",
-                        operation="create",
-                        after={"x": 1},
-                    )
+            data={
+                "source": "test",
+                "derivation": "observed",
+                "confidence": 0.95,
+                "tags": ["test"],
+                "links": {"entity_ids": ["e1", "e2"]},
+                "entities": [
+                    {
+                        "entity_id": "e1",
+                        "entity_type": "test",
+                        "operation": "create",
+                        "after": {"x": 1},
+                    }
                 ],
-            ),
+                "relations": [],
+                "violations": [],
+                "validation": {"passed": True, "violations": []},
+            },
         )
 
         # Should be serializable
@@ -432,18 +444,19 @@ class TestCWMStateModels:
         assert payload.violations == []
         assert payload.validation.passed is True
 
-    def test_cwm_state_links_optional(self):
-        """Test CWMStateLinks optional fields."""
-        links = CWMStateLinks()
-
-        assert links.process_ids is None
-        assert links.plan_id is None
-        assert links.entity_ids is None
-
-        links_with_values = CWMStateLinks(
-            entity_ids=["e1"],
-            plan_id="p1",
+    def test_links_in_data(self):
+        """Test links are stored as dict in data."""
+        state = CWMState(
+            state_id="cwm_a_test",
+            model_type="CWM_A",
+            timestamp=datetime.now(timezone.utc),
+            data={
+                "links": {
+                    "entity_ids": ["e1"],
+                    "plan_id": "p1",
+                },
+            },
         )
 
-        assert links_with_values.entity_ids == ["e1"]
-        assert links_with_values.plan_id == "p1"
+        assert state.data["links"]["entity_ids"] == ["e1"]
+        assert state.data["links"]["plan_id"] == "p1"

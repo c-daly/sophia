@@ -58,7 +58,7 @@ class CWMPersistence:
         """Persist a CWMState to Neo4j.
 
         Args:
-            state: CWMState envelope to persist
+            state: CWMState envelope to persist (provenance is in data)
 
         Returns:
             The state_id of the persisted state
@@ -67,11 +67,19 @@ class CWMPersistence:
         cwm_type = MODEL_TYPE_MAP.get(state.model_type, state.model_type.lower())
         ancestors = self.ANCESTORS.get(cwm_type, ["cwm", "cognition"])
 
-        # Serialize data payload
-        data_json = state.data.model_dump_json() if state.data else "{}"
+        # Extract provenance from data (simplified CWMState has provenance in data)
+        data = state.data or {}
+        source = data.get("source", "unknown")
+        derivation = data.get("derivation", "observed")
+        confidence = data.get("confidence")
+        tags = data.get("tags", [])
+        links = data.get("links", {})
+
+        # Serialize data payload (full data including provenance)
+        data_json = json.dumps(data) if data else "{}"
 
         # Serialize links
-        links_json = state.links.model_dump_json() if state.links else "{}"
+        links_json = json.dumps(links) if links else "{}"
 
         query = HCGQueries.create_cwm_state()
         params = {
@@ -80,12 +88,12 @@ class CWMPersistence:
             "type": cwm_type,
             "ancestors": ancestors,
             "timestamp": state.timestamp.isoformat(),
-            "source": state.source,
-            "confidence": state.confidence,
-            "status": state.status,
+            "source": source,
+            "confidence": confidence if confidence is not None else 1.0,
+            "status": derivation,  # status field stores derivation value
             "payload": data_json,
             "links": links_json,
-            "tags": state.tags or [],
+            "tags": tags,
             "embedding_id": None,
             "embedding_type": None,
         }
@@ -144,14 +152,8 @@ class CWMPersistence:
             node: Neo4j node properties
 
         Returns:
-            CWMState envelope or None if conversion fails
+            CWMState envelope (simplified: provenance in data) or None if conversion fails
         """
-        from sophia.cwm_a.state_service import (
-            CWMAGraphPayload,
-            CWMStateLinks,
-            ValidationResult,
-        )
-
         try:
             cwm_type = node.get("type", "cwm_a")
             model_type = TYPE_MODEL_MAP.get(cwm_type, "CWM_A")
@@ -181,27 +183,31 @@ class CWMPersistence:
             else:
                 timestamp = raw_timestamp
 
-            # Build CWMState
+            # Build data dict with provenance (simplified CWMState)
+            data = {
+                # Provenance fields
+                "source": node.get("source", "unknown"),
+                "derivation": node.get("status", "observed"),
+                "confidence": node.get("confidence"),
+                "created": node.get("created", timestamp.isoformat()),
+                "updated": node.get("updated", timestamp.isoformat()),
+                "tags": node.get("tags", []),
+                "links": links_dict,
+                # Payload content
+                "entities": payload_dict.get("entities", []),
+                "relations": payload_dict.get("relations", []),
+                "violations": payload_dict.get("violations", []),
+                "validation": payload_dict.get(
+                    "validation", {"passed": True, "violations": []}
+                ),
+            }
+
+            # Build CWMState (thin envelope)
             return CWMState(
                 state_id=node["uuid"],
                 model_type=model_type,
-                source=node.get("source", "unknown"),
                 timestamp=timestamp,  # type: ignore[arg-type]
-                confidence=node.get("confidence", 1.0),
-                status=node.get("status", "observed"),
-                links=CWMStateLinks(**links_dict),
-                tags=node.get("tags", []),
-                data=CWMAGraphPayload(
-                    entities=payload_dict.get("entities", []),
-                    relations=payload_dict.get("relations", []),
-                    violations=payload_dict.get("violations", []),
-                    validation=ValidationResult(
-                        passed=payload_dict.get("validation", {}).get("passed", True),
-                        violations=payload_dict.get("validation", {}).get(
-                            "violations", []
-                        ),
-                    ),
-                ),
+                data=data,
             )
         except Exception as e:
             logger.warning(f"Failed to convert node to CWMState: {e}")

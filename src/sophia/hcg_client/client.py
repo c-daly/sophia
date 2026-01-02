@@ -11,6 +11,7 @@ import json
 import logging
 from collections.abc import Sequence
 from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, cast
 from uuid import uuid4
 
@@ -96,8 +97,14 @@ class HCGClient(LogosHCGClient):
         ancestors: Optional[List[str]] = None,
         is_type_definition: bool = False,
         properties: Optional[Dict[str, Any]] = None,
+        *,
+        source: str = "unknown",
+        derivation: str = "observed",
+        confidence: Optional[float] = None,
+        tags: Optional[List[str]] = None,
+        links: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Create or update a node with logos-standard properties.
+        """Create or update a node with logos-standard properties and provenance.
 
         Args:
             name: Human-readable name (e.g., "red_block", "pick_action")
@@ -107,6 +114,11 @@ class HCGClient(LogosHCGClient):
                 from type definition as [node_type] + type_def.ancestors
             is_type_definition: True if this node defines a type, False for instances
             properties: Additional custom properties
+            source: Module/job that created this node (e.g., "planner", "jepa_runner")
+            derivation: How the node was derived: "observed", "imagined", "reflected"
+            confidence: Optional certainty score 0.0-1.0
+            tags: Free-form labels for classification
+            links: Related entity IDs (e.g., {"process_ids": [...], "plan_id": "..."})
 
         Returns:
             The uuid of the created/updated node
@@ -135,13 +147,31 @@ class HCGClient(LogosHCGClient):
                 type_ancestors = self._get_type_ancestors(node_type)
                 ancestors = [node_type] + type_ancestors
 
+        # Generate timestamps
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Build provenance properties
+        provenance: Dict[str, Any] = {
+            "source": source,
+            "derivation": derivation,
+            "created": now,
+            "updated": now,
+            "tags": tags or [],
+            "links": links or {},
+        }
+        if confidence is not None:
+            provenance["confidence"] = confidence
+
+        # Merge provenance with custom properties (provenance takes precedence)
+        merged_properties = {**(properties or {}), **provenance}
+
         node_data = {
             "uuid": uuid,
             "name": name,
             "type": node_type,
             "ancestors": ancestors,
             "is_type_definition": is_type_definition,
-            "properties": properties or {},
+            "properties": merged_properties,
         }
 
         is_valid, errors = self._validator.validate_node(node_data)
@@ -172,6 +202,51 @@ class HCGClient(LogosHCGClient):
             },
         )
         return str(records[0]["uuid"]) if records else uuid
+
+    def update_node(
+        self,
+        uuid: str,
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Update an existing node's properties and timestamp.
+
+        Args:
+            uuid: Unique identifier of the node to update
+            properties: Properties to merge into the node (optional)
+
+        Returns:
+            The uuid of the updated node
+
+        Raises:
+            ValueError: If node with uuid doesn't exist
+        """
+        if not uuid:
+            raise ValueError("uuid cannot be empty")
+
+        # Generate updated timestamp
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Build properties to update
+        update_props = {**(properties or {}), "updated": now}
+
+        query = """
+        MATCH (n:Node {uuid: $uuid})
+        SET n += $properties
+        RETURN n.uuid as uuid
+        """
+        encoded_properties = self._encode_properties(
+            cast(Mapping[str, Any], update_props)
+        )
+        records = self._execute_query(
+            query,
+            {
+                "uuid": uuid,
+                "properties": encoded_properties,
+            },
+        )
+        if not records:
+            raise ValueError(f"Node with uuid '{uuid}' not found")
+        return str(records[0]["uuid"])
 
     def add_node_legacy(
         self,
