@@ -27,7 +27,7 @@ Sophia provides the non-linguistic cognitive core for LOGOS:
 
 Key directories:
 - `src/sophia/` – Core cognitive components
-- `src/sophia/api/` – FastAPI service endpoints (`/plan`, `/imagine`, `/execute`, `/simulate`, `/ingest`)
+- `src/sophia/api/` – FastAPI service endpoints (`/plan`, `/execute`, `/cwm`, `/state`, `/health`)
 - `tests/` – Unit and integration tests
 
 ### Dependencies
