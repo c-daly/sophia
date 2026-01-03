@@ -434,6 +434,122 @@ class HCGClient(LogosHCGClient):
             )
         return edges
 
+    def list_all_nodes(
+        self,
+        node_type: Optional[str] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Return all nodes in the graph, optionally filtered by type.
+
+        Args:
+            node_type: Optional filter by node type
+            limit: Maximum number of nodes to return (default 1000)
+
+        Returns:
+            List of node dictionaries with uuid, name, type, ancestors, properties
+        """
+        if node_type:
+            query = """
+            MATCH (n:Node {type: $node_type})
+            RETURN n.uuid as uuid, n.name as name, n.type as type,
+                   n.is_type_definition as is_type_definition,
+                   n.ancestors as ancestors, properties(n) as props
+            LIMIT $limit
+            """
+            records = self._execute_read(
+                query, {"node_type": node_type, "limit": limit}
+            )
+        else:
+            query = """
+            MATCH (n:Node)
+            RETURN n.uuid as uuid, n.name as name, n.type as type,
+                   n.is_type_definition as is_type_definition,
+                   n.ancestors as ancestors, properties(n) as props
+            LIMIT $limit
+            """
+            records = self._execute_read(query, {"limit": limit})
+
+        nodes: List[Dict[str, Any]] = []
+        for record in records:
+            props = dict(record["props"])
+            # Remove standard properties from props dict
+            for key in ["uuid", "name", "type", "is_type_definition", "ancestors"]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            nodes.append(
+                {
+                    "uuid": record["uuid"],
+                    "name": record["name"],
+                    "type": record["type"],
+                    "is_type_definition": record["is_type_definition"],
+                    "ancestors": record["ancestors"] or [],
+                    "properties": props,
+                }
+            )
+        return nodes
+
+    def list_all_edges(
+        self,
+        relation_type: Optional[str] = None,
+        source_uuid: Optional[str] = None,
+        target_uuid: Optional[str] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Return all edges in the graph with optional filters.
+
+        Args:
+            relation_type: Optional filter by relationship type
+            source_uuid: Optional filter by source node uuid
+            target_uuid: Optional filter by target node uuid
+            limit: Maximum number of edges to return (default 1000)
+
+        Returns:
+            List of edge dictionaries with id, source, target, relation, properties
+        """
+        # Build query with optional filters
+        conditions = []
+        params: Dict[str, Any] = {"limit": limit}
+
+        if relation_type:
+            conditions.append("r.relation_type = $relation_type")
+            params["relation_type"] = relation_type
+        if source_uuid:
+            conditions.append("source.uuid = $source_uuid")
+            params["source_uuid"] = source_uuid
+        if target_uuid:
+            conditions.append("target.uuid = $target_uuid")
+            params["target_uuid"] = target_uuid
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        query = f"""
+        MATCH (source:Node)-[r:RELATION]->(target:Node)
+        {where_clause}
+        RETURN r.id as id, source.uuid as source, target.uuid as target,
+               r.relation_type as relation, properties(r) as props
+        LIMIT $limit
+        """
+        records = self._execute_read(query, params)
+
+        edges: List[Dict[str, Any]] = []
+        for record in records:
+            props = dict(record["props"])
+            props.pop("id", None)
+            props.pop("relation_type", None)
+            props = self._decode_properties(props)
+            edges.append(
+                {
+                    "id": record["id"],
+                    "source": record["source"],
+                    "target": record["target"],
+                    "relation": record["relation"],
+                    "properties": props,
+                }
+            )
+        return edges
+
     def delete_node(self, uuid: str) -> bool:
         """Delete a node and all relationships."""
         query = """

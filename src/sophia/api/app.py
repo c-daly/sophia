@@ -43,6 +43,9 @@ from sophia.api.models import (
     HermesProposalResponse,
     CWMStateResponse,
     CWMStateListResponse,
+    HCGEntityResponse,
+    HCGEdgeResponse,
+    HCGGraphSnapshotResponse,
 )
 from sophia.jepa.models import SimulationResult
 from sophia.models.media_models import (
@@ -189,7 +192,21 @@ _feedback_worker_task: Optional[Any] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task
+    global \
+        _planner, \
+        _executor, \
+        _hcg_client, \
+        _cwm_g, \
+        _cwm_a, \
+        _cwm_a_state, \
+        _kg, \
+        _jepa_runner, \
+        _media_storage, \
+        _media_ingestion, \
+        _cwm_persistence, \
+        _feedback_dispatcher, \
+        _feedback_worker, \
+        _feedback_worker_task
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -514,12 +531,16 @@ def create_app() -> FastAPI:
                                 before=(
                                     before_val
                                     if isinstance(before_val, dict)
-                                    else {"value": before_val} if before_val else None
+                                    else {"value": before_val}
+                                    if before_val
+                                    else None
                                 ),
                                 after=(
                                     after_val
                                     if isinstance(after_val, dict)
-                                    else {"value": after_val} if after_val else None
+                                    else {"value": after_val}
+                                    if after_val
+                                    else None
                                 ),
                                 changed_properties=(
                                     changed_props if changed_props else None
@@ -1461,6 +1482,206 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to execute plan: {str(e)}",
+            )
+
+    # =========================================================================
+    # HCG Graph API Endpoints (read-only, for Apollo's Neo4j removal)
+    # =========================================================================
+
+    @app.get(
+        "/hcg/snapshot",
+        response_model=HCGGraphSnapshotResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def get_hcg_snapshot(
+        entity_type: Optional[str] = Query(
+            default=None,
+            description="Filter entities by type",
+        ),
+        limit: int = Query(
+            default=1000,
+            ge=1,
+            le=10000,
+            description="Maximum number of entities/edges to return",
+        ),
+    ) -> HCGGraphSnapshotResponse:
+        """Get a snapshot of the entire HCG graph for visualization.
+
+        Returns all entities and edges in the graph, suitable for rendering
+        in Apollo's graph visualization component.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            # Fetch all nodes
+            nodes = _hcg_client.list_all_nodes(node_type=entity_type, limit=limit)
+
+            # Convert to response format
+            entities: List[HCGEntityResponse] = []
+            for node in nodes:
+                props = node.get("properties", {})
+                entities.append(
+                    HCGEntityResponse(
+                        id=node["uuid"],
+                        type=node["type"],
+                        name=node["name"],
+                        properties=props,
+                        labels=node.get("ancestors", []),
+                        created_at=props.get("created"),
+                    )
+                )
+
+            # Fetch all edges
+            raw_edges = _hcg_client.list_all_edges(limit=limit)
+
+            # Convert to response format
+            edges: List[HCGEdgeResponse] = []
+            for edge in raw_edges:
+                edges.append(
+                    HCGEdgeResponse(
+                        id=edge["id"],
+                        source_id=edge["source"],
+                        target_id=edge["target"],
+                        edge_type=edge["relation"],
+                        properties=edge.get("properties", {}),
+                    )
+                )
+
+            return HCGGraphSnapshotResponse(
+                entities=entities,
+                edges=edges,
+                entity_count=len(entities),
+                edge_count=len(edges),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching HCG snapshot: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch HCG snapshot: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/entities/{entity_id}",
+        response_model=HCGEntityResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def get_hcg_entity(entity_id: str) -> HCGEntityResponse:
+        """Get a single entity by ID.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            node = _hcg_client.get_node(entity_id)
+
+            if not node:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Entity not found: {entity_id}",
+                )
+
+            props = node.get("properties", {})
+            return HCGEntityResponse(
+                id=node["uuid"],
+                type=node["type"],
+                name=node["name"],
+                properties=props,
+                labels=node.get("ancestors", []),
+                created_at=props.get("created"),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching entity {entity_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch entity: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/edges",
+        response_model=List[HCGEdgeResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_edges(
+        edge_type: Optional[str] = Query(
+            default=None,
+            description="Filter by edge/relation type (e.g., 'enables', 'achieves')",
+        ),
+        source_id: Optional[str] = Query(
+            default=None,
+            description="Filter by source entity ID",
+        ),
+        target_id: Optional[str] = Query(
+            default=None,
+            description="Filter by target entity ID",
+        ),
+        limit: int = Query(
+            default=1000,
+            ge=1,
+            le=10000,
+            description="Maximum number of edges to return",
+        ),
+    ) -> List[HCGEdgeResponse]:
+        """List causal edges with optional filters.
+
+        Supports filtering by edge type, source entity, or target entity.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            raw_edges = _hcg_client.list_all_edges(
+                relation_type=edge_type,
+                source_uuid=source_id,
+                target_uuid=target_id,
+                limit=limit,
+            )
+
+            edges: List[HCGEdgeResponse] = []
+            for edge in raw_edges:
+                edges.append(
+                    HCGEdgeResponse(
+                        id=edge["id"],
+                        source_id=edge["source"],
+                        target_id=edge["target"],
+                        edge_type=edge["relation"],
+                        properties=edge.get("properties", {}),
+                    )
+                )
+
+            return edges
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG edges: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list edges: {str(e)}",
             )
 
     @app.post(
