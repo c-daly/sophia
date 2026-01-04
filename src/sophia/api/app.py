@@ -46,6 +46,13 @@ from sophia.api.models import (
     HCGEntityResponse,
     HCGEdgeResponse,
     HCGGraphSnapshotResponse,
+    # Persona models
+    PersonaEntryCreate,
+    PersonaEntryResponse,
+    PersonaEntryFull,
+    PersonaEntryUpdate,
+    PersonaListResponse,
+    SentimentResponse,
 )
 from sophia.jepa.models import SimulationResult
 from sophia.models.media_models import (
@@ -1979,6 +1986,531 @@ def create_app() -> FastAPI:
             "timestamp": datetime.now().isoformat(),
             "neo4j_connected": neo4j_connected,
         }
+
+    # =========================================================================
+    # Persona API Endpoints (CWM-E)
+    # =========================================================================
+
+    def _cwmstate_to_persona_entry(state: Dict[str, Any]) -> Optional[PersonaEntryFull]:
+        """Convert a CWMState dict to PersonaEntryFull, or None if not a persona entry."""
+        data = state.get("data", {})
+        entry = data.get("entry", {})
+        if not entry or entry.get("deleted"):
+            return None
+        try:
+            return PersonaEntryFull(
+                entry_id=entry.get("entry_id", ""),
+                timestamp=state.get("timestamp", datetime.now()),
+                entry_type=entry.get("entry_type", "observation"),
+                content=entry.get("content", ""),
+                summary=entry.get("summary"),
+                trigger=entry.get("trigger"),
+                sentiment=entry.get("sentiment"),
+                confidence=entry.get("confidence"),
+                related_process_ids=entry.get("related_process_ids", []),
+                related_goal_ids=entry.get("related_goal_ids", []),
+                emotion_tags=entry.get("emotion_tags", []),
+                metadata=entry.get("metadata", {}),
+            )
+        except Exception:
+            return None
+
+    def _get_persona_entries(
+        entry_type: Optional[str] = None,
+        sentiment: Optional[str] = None,
+        related_process_id: Optional[str] = None,
+        related_goal_id: Optional[str] = None,
+        after_timestamp: Optional[datetime] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[List[PersonaEntryFull], int]:
+        """Fetch and filter persona entries from CWM-E states."""
+        if not _cwm_persistence:
+            return [], 0
+
+        # Fetch more than needed to account for filtering
+        raw_states = _cwm_persistence.find_states(
+            types=["cwm_e"],
+            after_timestamp=after_timestamp,
+            limit=limit * 3 + offset,
+        )
+
+        # Convert and filter
+        entries: List[PersonaEntryFull] = []
+        seen_ids: set[str] = set()
+
+        for state in raw_states:
+            entry = _cwmstate_to_persona_entry(state.__dict__ if hasattr(state, "__dict__") else {"data": state.data, "timestamp": state.timestamp})
+            if not entry:
+                continue
+
+            # Dedupe by entry_id (keep latest by timestamp)
+            if entry.entry_id in seen_ids:
+                continue
+            seen_ids.add(entry.entry_id)
+
+            # Apply filters
+            if entry_type and entry.entry_type != entry_type:
+                continue
+            if sentiment and entry.sentiment != sentiment:
+                continue
+            if related_process_id and related_process_id not in entry.related_process_ids:
+                continue
+            if related_goal_id and related_goal_id not in entry.related_goal_ids:
+                continue
+
+            entries.append(entry)
+
+        total = len(entries)
+        # Apply pagination
+        entries = entries[offset : offset + limit]
+        return entries, total
+
+    @app.post(
+        "/persona/entries",
+        response_model=PersonaEntryResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(verify_token)],
+        tags=["persona"],
+    )
+    async def create_persona_entry(
+        request: PersonaEntryCreate,
+    ) -> PersonaEntryResponse:
+        """Create a new persona diary entry.
+
+        Stores the entry as a CWM-E state in Neo4j.
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            from datetime import timezone
+            from uuid import uuid4
+            from sophia.cwm_a.state_service import CWMState
+
+            entry_id = f"persona_{uuid4().hex[:12]}"
+            state_id = f"cwm_e_{uuid4().hex[:12]}"
+            timestamp = datetime.now(timezone.utc)
+
+            # Build CWMState envelope
+            cwm_state = CWMState(
+                state_id=state_id,
+                model_type="CWM_E",
+                timestamp=timestamp,
+                data={
+                    "entry": {
+                        "entry_id": entry_id,
+                        "entry_type": request.entry_type,
+                        "content": request.content,
+                        "summary": request.summary,
+                        "trigger": request.trigger,
+                        "sentiment": request.sentiment,
+                        "confidence": request.confidence,
+                        "related_process_ids": request.related_process_ids,
+                        "related_goal_ids": request.related_goal_ids,
+                        "emotion_tags": request.emotion_tags,
+                        "metadata": request.metadata,
+                    },
+                    "source": "persona_api",
+                    "derivation": "observed",
+                    "confidence": request.confidence or 1.0,
+                    "tags": [f"entry_type:{request.entry_type}"],
+                    "links": {},
+                },
+            )
+
+            _cwm_persistence.persist(cwm_state)
+
+            logger.info(f"Created persona entry: {entry_id}")
+            return PersonaEntryResponse(
+                entry_id=entry_id,
+                cwm_state_id=state_id,
+                timestamp=timestamp,
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating persona entry: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create persona entry: {str(e)}",
+            )
+
+    @app.get(
+        "/persona/entries",
+        response_model=PersonaListResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["persona"],
+    )
+    async def list_persona_entries(
+        entry_type: Optional[str] = Query(None, description="Filter by entry type"),
+        sentiment: Optional[str] = Query(None, description="Filter by sentiment"),
+        related_process_id: Optional[str] = Query(None, description="Filter by process ID"),
+        related_goal_id: Optional[str] = Query(None, description="Filter by goal ID"),
+        after_timestamp: Optional[str] = Query(None, description="ISO timestamp filter"),
+        limit: int = Query(20, ge=1, le=100, description="Max entries"),
+        offset: int = Query(0, ge=0, description="Pagination offset"),
+    ) -> PersonaListResponse:
+        """List persona diary entries with optional filters.
+
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            # Parse timestamp
+            parsed_ts = None
+            if after_timestamp:
+                parsed_ts = datetime.fromisoformat(after_timestamp)
+
+            entries, total = _get_persona_entries(
+                entry_type=entry_type,
+                sentiment=sentiment,
+                related_process_id=related_process_id,
+                related_goal_id=related_goal_id,
+                after_timestamp=parsed_ts,
+                limit=limit,
+                offset=offset,
+            )
+
+            return PersonaListResponse(
+                entries=entries,
+                total=total,
+                limit=limit,
+                offset=offset,
+            )
+
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid parameter: {str(e)}",
+            )
+        except Exception as e:
+            logger.error(f"Error listing persona entries: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list persona entries: {str(e)}",
+            )
+
+    @app.get(
+        "/persona/entries/{entry_id}",
+        response_model=PersonaEntryFull,
+        dependencies=[Depends(verify_token)],
+        tags=["persona"],
+    )
+    async def get_persona_entry(entry_id: str) -> PersonaEntryFull:
+        """Get a specific persona entry by ID.
+
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            entries, _ = _get_persona_entries(limit=1000)
+            for entry in entries:
+                if entry.entry_id == entry_id:
+                    return entry
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Persona entry not found: {entry_id}",
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting persona entry: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get persona entry: {str(e)}",
+            )
+
+    @app.patch(
+        "/persona/entries/{entry_id}",
+        response_model=PersonaEntryFull,
+        dependencies=[Depends(verify_token)],
+        tags=["persona"],
+    )
+    async def update_persona_entry(
+        entry_id: str,
+        request: PersonaEntryUpdate,
+    ) -> PersonaEntryFull:
+        """Update a persona entry (creates new CWM state, preserves history).
+
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            from datetime import timezone
+            from uuid import uuid4
+            from sophia.cwm_a.state_service import CWMState
+
+            # Find existing entry
+            entries, _ = _get_persona_entries(limit=1000)
+            existing = None
+            for entry in entries:
+                if entry.entry_id == entry_id:
+                    existing = entry
+                    break
+
+            if not existing:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Persona entry not found: {entry_id}",
+                )
+
+            # Merge updates
+            updated_entry = existing.model_copy(
+                update={
+                    k: v
+                    for k, v in request.model_dump(exclude_unset=True).items()
+                    if v is not None
+                }
+            )
+
+            # Create new CWM state with updated data
+            state_id = f"cwm_e_{uuid4().hex[:12]}"
+            timestamp = datetime.now(timezone.utc)
+
+            cwm_state = CWMState(
+                state_id=state_id,
+                model_type="CWM_E",
+                timestamp=timestamp,
+                data={
+                    "entry": {
+                        "entry_id": entry_id,
+                        "entry_type": updated_entry.entry_type,
+                        "content": updated_entry.content,
+                        "summary": updated_entry.summary,
+                        "trigger": updated_entry.trigger,
+                        "sentiment": updated_entry.sentiment,
+                        "confidence": updated_entry.confidence,
+                        "related_process_ids": updated_entry.related_process_ids,
+                        "related_goal_ids": updated_entry.related_goal_ids,
+                        "emotion_tags": updated_entry.emotion_tags,
+                        "metadata": updated_entry.metadata,
+                    },
+                    "source": "persona_api",
+                    "derivation": "observed",
+                    "confidence": updated_entry.confidence or 1.0,
+                    "tags": [f"entry_type:{updated_entry.entry_type}"],
+                    "links": {},
+                },
+            )
+
+            _cwm_persistence.persist(cwm_state)
+
+            # Update timestamp on returned entry
+            updated_entry.timestamp = timestamp
+
+            logger.info(f"Updated persona entry: {entry_id}")
+            return updated_entry
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating persona entry: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update persona entry: {str(e)}",
+            )
+
+    @app.delete(
+        "/persona/entries/{entry_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(verify_token)],
+        tags=["persona"],
+    )
+    async def delete_persona_entry(entry_id: str) -> None:
+        """Delete a persona entry (soft delete via tombstone).
+
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            from datetime import timezone
+            from uuid import uuid4
+            from sophia.cwm_a.state_service import CWMState
+
+            # Find existing entry
+            entries, _ = _get_persona_entries(limit=1000)
+            existing = None
+            for entry in entries:
+                if entry.entry_id == entry_id:
+                    existing = entry
+                    break
+
+            if not existing:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Persona entry not found: {entry_id}",
+                )
+
+            # Create tombstone CWM state
+            state_id = f"cwm_e_{uuid4().hex[:12]}"
+            timestamp = datetime.now(timezone.utc)
+
+            cwm_state = CWMState(
+                state_id=state_id,
+                model_type="CWM_E",
+                timestamp=timestamp,
+                data={
+                    "entry": {
+                        "entry_id": entry_id,
+                        "deleted": True,
+                    },
+                    "source": "persona_api",
+                    "derivation": "observed",
+                    "confidence": 1.0,
+                    "tags": ["deleted"],
+                    "links": {},
+                },
+            )
+
+            _cwm_persistence.persist(cwm_state)
+
+            logger.info(f"Deleted persona entry: {entry_id}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting persona entry: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete persona entry: {str(e)}",
+            )
+
+    @app.get(
+        "/persona/sentiment",
+        response_model=SentimentResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["persona"],
+    )
+    async def get_persona_sentiment(
+        limit: int = Query(20, ge=1, le=100, description="Number of entries to aggregate"),
+        after_timestamp: Optional[str] = Query(None, description="ISO timestamp filter"),
+    ) -> SentimentResponse:
+        """Get aggregated sentiment from recent persona entries.
+
+        Requires authentication via Bearer token.
+        """
+        if not _cwm_persistence:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="CWM persistence service not available",
+            )
+
+        try:
+            # Parse timestamp
+            parsed_ts = None
+            if after_timestamp:
+                parsed_ts = datetime.fromisoformat(after_timestamp)
+
+            entries, _ = _get_persona_entries(
+                after_timestamp=parsed_ts,
+                limit=limit,
+            )
+
+            if not entries:
+                return SentimentResponse(
+                    sentiment=None,
+                    confidence_avg=None,
+                    recent_sentiment_trend=None,
+                    emotion_distribution={},
+                    entry_count=0,
+                    last_updated=None,
+                )
+
+            # Aggregate sentiment
+            sentiment_counts: Dict[str, int] = {}
+            confidences: List[float] = []
+            emotion_dist: Dict[str, int] = {}
+
+            for entry in entries:
+                if entry.sentiment:
+                    sentiment_counts[entry.sentiment] = sentiment_counts.get(entry.sentiment, 0) + 1
+                if entry.confidence is not None:
+                    confidences.append(entry.confidence)
+                for tag in entry.emotion_tags:
+                    emotion_dist[tag] = emotion_dist.get(tag, 0) + 1
+
+            # Most common sentiment
+            most_common = max(sentiment_counts, key=sentiment_counts.get) if sentiment_counts else None
+
+            # Average confidence
+            confidence_avg = sum(confidences) / len(confidences) if confidences else None
+
+            # Trend: compare first half vs second half
+            trend = None
+            if len(entries) >= 4:
+                mid = len(entries) // 2
+                first_half = entries[mid:]  # Older entries (list is sorted newest first)
+                second_half = entries[:mid]  # Newer entries
+
+                def sentiment_score(e: PersonaEntryFull) -> int:
+                    if e.sentiment == "positive":
+                        return 1
+                    elif e.sentiment == "negative":
+                        return -1
+                    return 0
+
+                first_score = sum(sentiment_score(e) for e in first_half)
+                second_score = sum(sentiment_score(e) for e in second_half)
+
+                if second_score > first_score:
+                    trend = "rising"
+                elif second_score < first_score:
+                    trend = "falling"
+                else:
+                    trend = "stable"
+
+            return SentimentResponse(
+                sentiment=most_common,
+                confidence_avg=round(confidence_avg, 3) if confidence_avg else None,
+                recent_sentiment_trend=trend,
+                emotion_distribution=emotion_dist,
+                entry_count=len(entries),
+                last_updated=entries[0].timestamp if entries else None,
+            )
+
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid parameter: {str(e)}",
+            )
+        except Exception as e:
+            logger.error(f"Error getting persona sentiment: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to get persona sentiment: {str(e)}",
+            )
 
     @app.post(
         "/ingest/media",
