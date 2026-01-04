@@ -446,3 +446,53 @@ class HermesProposalResponse(BaseModel):
         default=None,
         description="SHACL validation results if applicable",
     )
+
+
+# =============================================================================
+# HCG Graph API Models (for Apollo's Neo4j removal)
+# =============================================================================
+
+
+class HCGEntityResponse(BaseModel):
+    """Response model for a single HCG entity (node)."""
+
+    id: str = Field(..., description="Unique entity identifier (uuid)")
+    type: str = Field(..., description="Entity type (e.g., 'object', 'action')")
+    name: str = Field(..., description="Human-readable name")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="Entity properties"
+    )
+    labels: List[str] = Field(
+        default_factory=list,
+        description="Type ancestry chain (ancestors)",
+    )
+    created_at: Optional[str] = Field(
+        default=None, description="ISO timestamp of creation"
+    )
+
+
+class HCGEdgeResponse(BaseModel):
+    """Response model for a single HCG edge (relationship)."""
+
+    id: str = Field(..., description="Unique edge identifier")
+    source_id: str = Field(..., description="Source entity uuid")
+    target_id: str = Field(..., description="Target entity uuid")
+    edge_type: str = Field(..., description="Relationship type (e.g., 'enables')")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="Edge properties"
+    )
+
+
+class HCGGraphSnapshotResponse(BaseModel):
+    """Response model for a full graph snapshot."""
+
+    entities: List[HCGEntityResponse] = Field(
+        ..., description="All entities in the graph"
+    )
+    edges: List[HCGEdgeResponse] = Field(..., description="All edges in the graph")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="ISO timestamp when snapshot was taken",
+    )
+    entity_count: int = Field(..., description="Total number of entities")
+    edge_count: int = Field(..., description="Total number of edges")

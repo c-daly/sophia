@@ -43,6 +43,9 @@ from sophia.api.models import (
     HermesProposalResponse,
     CWMStateResponse,
     CWMStateListResponse,
+    HCGEntityResponse,
+    HCGEdgeResponse,
+    HCGGraphSnapshotResponse,
 )
 from sophia.jepa.models import SimulationResult
 from sophia.models.media_models import (
@@ -1462,6 +1465,520 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to execute plan: {str(e)}",
             )
+
+    # =========================================================================
+    # HCG Graph API Endpoints (read-only, for Apollo's Neo4j removal)
+    # =========================================================================
+
+    @app.get(
+        "/hcg/snapshot",
+        response_model=HCGGraphSnapshotResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def get_hcg_snapshot(
+        entity_type: Optional[str] = Query(
+            default=None,
+            description="Filter entities by type",
+        ),
+        limit: int = Query(
+            default=1000,
+            ge=1,
+            le=10000,
+            description="Maximum number of entities/edges to return",
+        ),
+    ) -> HCGGraphSnapshotResponse:
+        """Get a snapshot of the entire HCG graph for visualization.
+
+        Returns all entities and edges in the graph, suitable for rendering
+        in Apollo's graph visualization component.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            # Fetch all nodes
+            nodes = _hcg_client.list_all_nodes(node_type=entity_type, limit=limit)
+
+            # Convert to response format
+            entities: List[HCGEntityResponse] = []
+            for node in nodes:
+                props = node.get("properties", {})
+                entities.append(
+                    HCGEntityResponse(
+                        id=node["uuid"],
+                        type=node["type"],
+                        name=node["name"],
+                        properties=props,
+                        labels=node.get("ancestors", []),
+                        created_at=props.get("created"),
+                    )
+                )
+
+            # Fetch all edges
+            raw_edges = _hcg_client.list_all_edges(limit=limit)
+
+            # Convert to response format
+            edges: List[HCGEdgeResponse] = []
+            for edge in raw_edges:
+                edges.append(
+                    HCGEdgeResponse(
+                        id=edge["id"],
+                        source_id=edge["source"],
+                        target_id=edge["target"],
+                        edge_type=edge["relation"],
+                        properties=edge.get("properties", {}),
+                    )
+                )
+
+            return HCGGraphSnapshotResponse(
+                entities=entities,
+                edges=edges,
+                entity_count=len(entities),
+                edge_count=len(edges),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching HCG snapshot: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch HCG snapshot: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/entities/{entity_id}",
+        response_model=HCGEntityResponse,
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def get_hcg_entity(entity_id: str) -> HCGEntityResponse:
+        """Get a single entity by ID.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            node = _hcg_client.get_node(entity_id)
+
+            if not node:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Entity not found: {entity_id}",
+                )
+
+            props = node.get("properties", {})
+            return HCGEntityResponse(
+                id=node["uuid"],
+                type=node["type"],
+                name=node["name"],
+                properties=props,
+                labels=node.get("ancestors", []),
+                created_at=props.get("created"),
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching entity {entity_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch entity: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/edges",
+        response_model=List[HCGEdgeResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_edges(
+        edge_type: Optional[str] = Query(
+            default=None,
+            description="Filter by edge/relation type (e.g., 'enables', 'achieves')",
+        ),
+        source_id: Optional[str] = Query(
+            default=None,
+            description="Filter by source entity ID",
+        ),
+        target_id: Optional[str] = Query(
+            default=None,
+            description="Filter by target entity ID",
+        ),
+        limit: int = Query(
+            default=1000,
+            ge=1,
+            le=10000,
+            description="Maximum number of edges to return",
+        ),
+    ) -> List[HCGEdgeResponse]:
+        """List causal edges with optional filters.
+
+        Supports filtering by edge type, source entity, or target entity.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            raw_edges = _hcg_client.list_all_edges(
+                relation_type=edge_type,
+                source_uuid=source_id,
+                target_uuid=target_id,
+                limit=limit,
+            )
+
+            edges: List[HCGEdgeResponse] = []
+            for edge in raw_edges:
+                edges.append(
+                    HCGEdgeResponse(
+                        id=edge["id"],
+                        source_id=edge["source"],
+                        target_id=edge["target"],
+                        edge_type=edge["relation"],
+                        properties=edge.get("properties", {}),
+                    )
+                )
+
+            return edges
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG edges: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list edges: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/entities",
+        response_model=List[HCGEntityResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_entities(
+        entity_type: Optional[str] = Query(
+            default=None,
+            alias="type",
+            description="Filter by entity type",
+        ),
+        limit: int = Query(
+            default=100,
+            ge=1,
+            le=500,
+            description="Maximum number of entities to return",
+        ),
+        offset: int = Query(
+            default=0,
+            ge=0,
+            description="Number of entities to skip",
+        ),
+    ) -> List[HCGEntityResponse]:
+        """List entities from HCG with optional type filter.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            raw_nodes = _hcg_client.list_all_nodes(
+                node_type=entity_type,
+                limit=limit,
+            )
+
+            # Apply offset manually since list_all_nodes doesn't support it
+            raw_nodes = raw_nodes[offset : offset + limit]
+
+            entities: List[HCGEntityResponse] = []
+            for node in raw_nodes:
+                entities.append(
+                    HCGEntityResponse(
+                        id=node.get("uuid", node.get("id", "")),
+                        type=node.get("type", "unknown"),
+                        name=node.get("name", ""),
+                        properties=node.get("properties", {}),
+                        labels=node.get("labels", []),
+                        created_at=node.get("created_at"),
+                    )
+                )
+
+            return entities
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG entities: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list entities: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/states",
+        response_model=List[HCGEntityResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_states(
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> List[HCGEntityResponse]:
+        """List state entities from HCG.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            raw_nodes = _hcg_client.list_all_nodes(node_type="state", limit=limit)
+            raw_nodes = raw_nodes[offset : offset + limit]
+
+            states: List[HCGEntityResponse] = []
+            for node in raw_nodes:
+                states.append(
+                    HCGEntityResponse(
+                        id=node.get("uuid", node.get("id", "")),
+                        type="state",
+                        name=node.get("name", ""),
+                        properties=node.get("properties", {}),
+                        labels=node.get("labels", []),
+                        created_at=node.get("created_at"),
+                    )
+                )
+
+            return states
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG states: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list states: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/processes",
+        response_model=List[HCGEntityResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_processes(
+        process_status: Optional[str] = Query(
+            default=None,
+            alias="status",
+            description="Filter by process status",
+        ),
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> List[HCGEntityResponse]:
+        """List process entities from HCG.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            raw_nodes = _hcg_client.list_all_nodes(node_type="process", limit=limit)
+            raw_nodes = raw_nodes[offset : offset + limit]
+
+            # Filter by status if provided
+            if process_status:
+                raw_nodes = [
+                    n
+                    for n in raw_nodes
+                    if n.get("properties", {}).get("status") == process_status
+                ]
+
+            processes: List[HCGEntityResponse] = []
+            for node in raw_nodes:
+                processes.append(
+                    HCGEntityResponse(
+                        id=node.get("uuid", node.get("id", "")),
+                        type="process",
+                        name=node.get("name", ""),
+                        properties=node.get("properties", {}),
+                        labels=node.get("labels", []),
+                        created_at=node.get("created_at"),
+                    )
+                )
+
+            return processes
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG processes: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list processes: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/plans",
+        response_model=List[HCGEntityResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_plans(
+        goal_id: Optional[str] = Query(default=None, description="Filter by goal ID"),
+        limit: int = Query(default=10, ge=1, le=100),
+    ) -> List[HCGEntityResponse]:
+        """List plan entities from HCG.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            raw_nodes = _hcg_client.list_all_nodes(node_type="plan", limit=limit)
+
+            # Filter by goal_id if provided
+            if goal_id:
+                raw_nodes = [
+                    n
+                    for n in raw_nodes
+                    if n.get("properties", {}).get("goal_id") == goal_id
+                ]
+
+            plans: List[HCGEntityResponse] = []
+            for node in raw_nodes:
+                plans.append(
+                    HCGEntityResponse(
+                        id=node.get("uuid", node.get("id", "")),
+                        type="plan",
+                        name=node.get("name", ""),
+                        properties=node.get("properties", {}),
+                        labels=node.get("labels", []),
+                        created_at=node.get("created_at"),
+                    )
+                )
+
+            return plans
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG plans: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list plans: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/history",
+        response_model=List[HCGEntityResponse],
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def list_hcg_history(
+        state_id: Optional[str] = Query(default=None, description="Filter by state ID"),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> List[HCGEntityResponse]:
+        """List state history from HCG.
+
+        Requires authentication via Bearer token.
+        """
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+
+        try:
+            # Query state_history type nodes
+            raw_nodes = _hcg_client.list_all_nodes(
+                node_type="state_history", limit=limit
+            )
+
+            # Filter by state_id if provided
+            if state_id:
+                raw_nodes = [
+                    n
+                    for n in raw_nodes
+                    if n.get("properties", {}).get("state_id") == state_id
+                ]
+
+            history: List[HCGEntityResponse] = []
+            for node in raw_nodes:
+                history.append(
+                    HCGEntityResponse(
+                        id=node.get("uuid", node.get("id", "")),
+                        type="state_history",
+                        name=node.get("name", ""),
+                        properties=node.get("properties", {}),
+                        labels=node.get("labels", []),
+                        created_at=node.get("created_at"),
+                    )
+                )
+
+            return history
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing HCG history: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list history: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/health",
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def hcg_health_check() -> dict:
+        """Check HCG connection health.
+
+        Requires authentication via Bearer token.
+        """
+        neo4j_connected = False
+        if _hcg_client:
+            try:
+                # Simple connectivity check
+                _hcg_client.list_all_nodes(limit=1)
+                neo4j_connected = True
+            except Exception:
+                neo4j_connected = False
+
+        return {
+            "status": "healthy" if neo4j_connected else "degraded",
+            "timestamp": datetime.now().isoformat(),
+            "neo4j_connected": neo4j_connected,
+        }
 
     @app.post(
         "/ingest/media",
