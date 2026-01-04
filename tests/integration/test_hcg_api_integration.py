@@ -17,14 +17,14 @@ class TestHCGSnapshotEndpoint:
     """Integration tests for GET /hcg/snapshot endpoint."""
 
     def test_snapshot_returns_graph_structure(self, http_client, auth_headers):
-        """Test that /hcg/snapshot returns nodes and edges."""
+        """Test that /hcg/snapshot returns entities and edges."""
         response = http_client.get("/hcg/snapshot", headers=auth_headers)
         assert response.status_code == 200
 
         data = response.json()
-        assert "nodes" in data
+        assert "entities" in data
         assert "edges" in data
-        assert isinstance(data["nodes"], list)
+        assert isinstance(data["entities"], list)
         assert isinstance(data["edges"], list)
 
     def test_snapshot_supports_limit(self, http_client, auth_headers):
@@ -36,7 +36,7 @@ class TestHCGSnapshotEndpoint:
         )
         assert response.status_code == 200
         data = response.json()
-        assert len(data["nodes"]) <= 5
+        assert len(data["entities"]) <= 5
 
     def test_snapshot_requires_auth(self, http_client):
         """Test that /hcg/snapshot requires authentication."""
