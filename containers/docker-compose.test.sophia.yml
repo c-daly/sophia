@@ -1,47 +1,6 @@
-# Overlay for containers/docker-compose.test.yml that adds the Sophia API service
-# Usage: docker compose -f containers/docker-compose.test.yml -f containers/docker-compose.test.sophia.yml up
-#
-# This allows running the full test stack locally with the same config as CI.
+# Overlay for containers/docker-compose.test.yml
+# Sophia runs from source (like Apollo), not in a container
+# This file intentionally left minimal - only defines shared volumes if needed
 
 volumes:
   sophia_test_media_storage: {}
-
-services:
-  sophia:
-    container_name: sophia-test-api
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    ports:
-      - "47000:8000"
-    env_file:
-      - ../.env.test
-    environment:
-      # Internal container ports (override .env.test external ports)
-      - NEO4J_HOST=neo4j
-      - NEO4J_BOLT_PORT=7687
-      - NEO4J_HTTP_PORT=7474
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=neo4jtest
-      - MILVUS_HOST=milvus
-      - MILVUS_PORT=19530
-      # Sophia-specific config
-      - SOPHIA_API_TOKEN=test-token-for-sophia
-      - SEED_PICK_AND_PLACE_DATA=true
-      - CLEAR_BEFORE_SEED=false
-      - MEDIA_STORAGE_ROOT=/app/media_storage
-    depends_on:
-      neo4j:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-    volumes:
-      - sophia_test_media_storage:/app/media_storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks:
-      - default
