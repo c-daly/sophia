@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional, cast
 
 from fastapi import (
     Depends,
@@ -2478,7 +2478,7 @@ def create_app() -> FastAPI:
 
             # Most common sentiment
             most_common = (
-                max(sentiment_counts, key=sentiment_counts.get)
+                max(sentiment_counts, key=lambda k: sentiment_counts[k])
                 if sentiment_counts
                 else None
             )
@@ -2489,7 +2489,7 @@ def create_app() -> FastAPI:
             )
 
             # Trend: compare first half vs second half
-            trend = None
+            trend: Optional[Literal["rising", "falling", "stable"]] = None
             if len(entries) >= 4:
                 mid = len(entries) // 2
                 first_half = entries[
