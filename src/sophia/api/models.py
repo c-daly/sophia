@@ -1,8 +1,114 @@
 """Pydantic models for API requests and responses."""
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Literal, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
+
+
+# =============================================================================
+# Persona API Models (CWM-E)
+# =============================================================================
+
+PersonaEntryType = Literal["belief", "decision", "observation", "reflection"]
+PersonaSentiment = Literal["positive", "negative", "neutral", "mixed"]
+
+
+class PersonaEntryCreate(BaseModel):
+    """Request model for creating a persona entry."""
+
+    entry_type: PersonaEntryType = Field(..., description="Type of persona entry")
+    content: str = Field(
+        ..., min_length=1, max_length=10000, description="Main narrative content"
+    )
+    summary: Optional[str] = Field(
+        None, max_length=200, description="Short summary of the entry"
+    )
+    trigger: Optional[str] = Field(
+        None, max_length=200, description="What caused this entry"
+    )
+    sentiment: Optional[PersonaSentiment] = Field(
+        None, description="Sentiment classification"
+    )
+    confidence: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Confidence score"
+    )
+    related_process_ids: List[str] = Field(
+        default_factory=list, description="Linked process IDs"
+    )
+    related_goal_ids: List[str] = Field(
+        default_factory=list, description="Linked goal IDs"
+    )
+    emotion_tags: List[str] = Field(default_factory=list, description="Emotion tags")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata"
+    )
+
+
+class PersonaEntryResponse(BaseModel):
+    """Response after creating a persona entry."""
+
+    entry_id: str = Field(..., description="Unique entry identifier")
+    cwm_state_id: str = Field(..., description="CWM state envelope ID")
+    timestamp: datetime = Field(..., description="Creation timestamp")
+
+
+class PersonaEntryFull(BaseModel):
+    """Complete persona entry with all fields."""
+
+    entry_id: str = Field(..., description="Unique entry identifier")
+    timestamp: datetime = Field(..., description="Entry timestamp")
+    entry_type: PersonaEntryType = Field(..., description="Type of persona entry")
+    content: str = Field(..., description="Main narrative content")
+    summary: Optional[str] = Field(None, description="Short summary")
+    trigger: Optional[str] = Field(None, description="What caused this entry")
+    sentiment: Optional[PersonaSentiment] = Field(None, description="Sentiment")
+    confidence: Optional[float] = Field(None, description="Confidence score")
+    related_process_ids: List[str] = Field(
+        default_factory=list, description="Linked process IDs"
+    )
+    related_goal_ids: List[str] = Field(
+        default_factory=list, description="Linked goal IDs"
+    )
+    emotion_tags: List[str] = Field(default_factory=list, description="Emotion tags")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata"
+    )
+
+
+class PersonaEntryUpdate(BaseModel):
+    """Request model for partial update of persona entry."""
+
+    summary: Optional[str] = Field(None, max_length=200)
+    sentiment: Optional[PersonaSentiment] = None
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    emotion_tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class PersonaListResponse(BaseModel):
+    """Response for listing persona entries."""
+
+    entries: List[PersonaEntryFull] = Field(..., description="List of entries")
+    total: int = Field(..., description="Total matching entries")
+    limit: int = Field(..., description="Limit applied")
+    offset: int = Field(..., description="Offset applied")
+
+
+class SentimentResponse(BaseModel):
+    """Aggregated sentiment from recent persona entries."""
+
+    sentiment: Optional[str] = Field(None, description="Most common recent sentiment")
+    confidence_avg: Optional[float] = Field(None, description="Average confidence")
+    recent_sentiment_trend: Optional[Literal["rising", "falling", "stable"]] = Field(
+        None, description="Sentiment trend direction"
+    )
+    emotion_distribution: Dict[str, int] = Field(
+        default_factory=dict, description="Count of each emotion tag"
+    )
+    entry_count: int = Field(0, description="Number of entries aggregated")
+    last_updated: Optional[datetime] = Field(
+        None, description="Timestamp of most recent entry"
+    )
 
 
 class PlanRequest(BaseModel):
