@@ -1,7 +1,8 @@
 """Environment helpers for Sophia repository configuration.
 
-This module provides utilities for resolving repository paths and loading
-environment configuration in a consistent way across tests and scripts.
+This module wraps logos_config to provide Sophia-specific configuration
+defaults and convenience functions. It follows the standardization pattern
+established in logos #433.
 
 The primary use case is the ``SOPHIA_REPO_ROOT`` environment variable which
 allows tests to run correctly when the repository is relocated or when
@@ -14,6 +15,24 @@ import os
 from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
+from typing import cast
+
+from logos_config.env import (
+    get_env_value as resolve_env_value,
+    get_repo_root as resolve_repo_root,
+    load_env_file as resolve_env_file,
+)
+from logos_config.ports import SOPHIA_PORTS, get_repo_ports
+
+__all__ = [
+    "get_env_value",
+    "get_repo_root",
+    "load_stack_env",
+    "get_neo4j_config",
+    "get_milvus_config",
+    "SOPHIA_PORTS",
+    "get_repo_ports",
+]
 
 
 def _default_env_path() -> Path:
@@ -46,17 +65,9 @@ def load_stack_env(env_path: str | Path | None = None) -> dict[str, str]:
         Dictionary of environment variable name to value.
     """
     path = Path(env_path) if env_path else _default_env_path()
-    env: dict[str, str] = {}
     if not path.exists():
-        return env
-
-    for raw_line in path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, _, value = line.partition("=")
-        env[key.strip()] = value.strip()
-    return env
+        return {}
+    return cast(dict[str, str], resolve_env_file(path))
 
 
 def get_env_value(
@@ -65,6 +76,8 @@ def get_env_value(
     default: str | None = None,
 ) -> str | None:
     """Resolve an env var by checking OS env, stack env, then default.
+
+    Delegates to logos_config.env.get_env_value with type cast.
 
     Priority order:
     1. OS environment variable
@@ -79,15 +92,13 @@ def get_env_value(
     Returns:
         The resolved value or None if not found and no default.
     """
-    if key in os.environ:
-        return os.environ[key]
-    if env and key in env:
-        return env[key]
-    return default
+    return cast(str | None, resolve_env_value(key, env, default))
 
 
 def get_repo_root(env: Mapping[str, str] | None = None) -> Path:
     """Resolve the Sophia repo root, honoring SOPHIA_REPO_ROOT if set.
+
+    Delegates to logos_config.env.get_repo_root with repo name "sophia".
 
     Priority:
     1. SOPHIA_REPO_ROOT from OS env or provided mapping (if path exists).
@@ -100,27 +111,13 @@ def get_repo_root(env: Mapping[str, str] | None = None) -> Path:
     Returns:
         Path to the repository root directory.
     """
-    env_value = get_env_value("SOPHIA_REPO_ROOT", env)
-    if env_value:
-        candidate = Path(env_value).expanduser().resolve()
-        if candidate.exists():
-            return candidate
-
-    # GitHub Actions sets GITHUB_WORKSPACE to the repo checkout
-    github_workspace = os.getenv("GITHUB_WORKSPACE")
-    if github_workspace:
-        candidate = Path(github_workspace).resolve()
-        if candidate.exists():
-            return candidate
-
-    # Fallback: src/sophia/env.py -> parents[2] = repo root
-    return Path(__file__).resolve().parents[2]
+    return cast(Path, resolve_repo_root("sophia", env))
 
 
 def get_neo4j_config(env: Mapping[str, str] | None = None) -> dict[str, str]:
     """Get Neo4j connection configuration.
 
-    Loads from environment variables with sensible defaults for testing.
+    Loads from environment variables with Sophia-specific port defaults.
 
     Args:
         env: Optional mapping from load_stack_env().
@@ -128,20 +125,27 @@ def get_neo4j_config(env: Mapping[str, str] | None = None) -> dict[str, str]:
     Returns:
         Dictionary with 'uri', 'user', and 'password' keys.
     """
-    if env is None:
-        env = load_stack_env()
+    ports = get_repo_ports("sophia", env)
 
-    return {
-        "uri": get_env_value("NEO4J_URI", env, "bolt://localhost:7687") or "",
-        "user": get_env_value("NEO4J_USER", env, "neo4j") or "",
-        "password": get_env_value("NEO4J_PASSWORD", env, "neo4jtest") or "",
-    }
+    uri = get_env_value(
+        "NEO4J_URI",
+        env,
+        f"bolt://localhost:{ports.neo4j_bolt}",
+    )
+    user = get_env_value("NEO4J_USER", env, "neo4j")
+    password = get_env_value("NEO4J_PASSWORD", env, "neo4jtest")
+
+    assert uri is not None
+    assert user is not None
+    assert password is not None
+
+    return {"uri": uri, "user": user, "password": password}
 
 
 def get_milvus_config(env: Mapping[str, str] | None = None) -> dict[str, str]:
     """Get Milvus connection configuration.
 
-    Loads from environment variables with sensible defaults for testing.
+    Loads from environment variables with Sophia-specific port defaults.
 
     Args:
         env: Optional mapping from load_stack_env().
@@ -149,14 +153,22 @@ def get_milvus_config(env: Mapping[str, str] | None = None) -> dict[str, str]:
     Returns:
         Dictionary with 'host', 'port', and 'healthcheck' keys.
     """
-    if env is None:
-        env = load_stack_env()
+    ports = get_repo_ports("sophia", env)
+
+    host = get_env_value("MILVUS_HOST", env, "localhost")
+    port = get_env_value("MILVUS_PORT", env, str(ports.milvus_grpc))
+    healthcheck = get_env_value(
+        "MILVUS_HEALTHCHECK",
+        env,
+        f"http://localhost:{ports.milvus_metrics}/healthz",
+    )
+
+    assert host is not None
+    assert port is not None
+    assert healthcheck is not None
 
     return {
-        "host": get_env_value("MILVUS_HOST", env, "localhost") or "",
-        "port": get_env_value("MILVUS_PORT", env, "19530") or "",
-        "healthcheck": get_env_value(
-            "MILVUS_HEALTHCHECK", env, "http://localhost:9091/healthz"
-        )
-        or "",
+        "host": host,
+        "port": port,
+        "healthcheck": healthcheck,
     }
