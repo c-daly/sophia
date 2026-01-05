@@ -2058,10 +2058,13 @@ def create_app() -> FastAPI:
         seen_ids: set[str] = set()
         deleted_ids: set[str] = set()
 
-
         for state in raw_states:
             # Check if this is a deletion tombstone first
-            state_dict = state.__dict__ if hasattr(state, "__dict__") else {"data": state.data, "timestamp": state.timestamp}
+            state_dict = (
+                state.__dict__
+                if hasattr(state, "__dict__")
+                else {"data": state.data, "timestamp": state.timestamp}
+            )
             data = state_dict.get("data", {})
             entry_data = data.get("entry", {})
             if entry_data and entry_data.get("deleted"):
@@ -2069,7 +2072,7 @@ def create_app() -> FastAPI:
                 if entry_id:
                     deleted_ids.add(entry_id)
                 continue
-            
+
             entry = _cwmstate_to_persona_entry(
                 state.__dict__
                 if hasattr(state, "__dict__")
@@ -2084,7 +2087,7 @@ def create_app() -> FastAPI:
             # Skip if this entry has been deleted
             if entry.entry_id in deleted_ids:
                 continue
-            
+
             seen_ids.add(entry.entry_id)
 
             # Apply filters

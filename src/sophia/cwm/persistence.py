@@ -186,17 +186,19 @@ class CWMPersistence:
             # Build data dict with provenance (simplified CWMState)
             # Start with ALL payload data (preserves entry, etc.)
             data = payload_dict.copy() if payload_dict else {}
-            
+
             # Overlay provenance fields (these override payload if present)
-            data.update({
-                "source": node.get("source", "unknown"),
-                "derivation": node.get("status", "observed"),
-                "confidence": node.get("confidence"),
-                "created": node.get("created", timestamp.isoformat()),
-                "updated": node.get("updated", timestamp.isoformat()),
-                "tags": node.get("tags", []),
-                "links": links_dict,
-            })
+            data.update(
+                {
+                    "source": node.get("source", "unknown"),
+                    "derivation": node.get("status", "observed"),
+                    "confidence": node.get("confidence"),
+                    "created": node.get("created", timestamp.isoformat()),
+                    "updated": node.get("updated", timestamp.isoformat()),
+                    "tags": node.get("tags", []),
+                    "links": links_dict,
+                }
+            )
 
             # Build CWMState (thin envelope)
             return CWMState(
