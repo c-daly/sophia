@@ -186,7 +186,9 @@ function seed_data() {
     cd "${REPO_ROOT}"
     
     # Export environment variables for seeding
-    export NEO4J_URI="bolt://localhost:${NEO4J_BOLT_PORT}"
+    export NEO4J_HOST="localhost"
+    export NEO4J_BOLT_PORT
+    export NEO4J_HTTP_PORT
     export NEO4J_USER NEO4J_PASSWORD
     
     echo -e "${YELLOW}Seeding pick-and-place scenario into Neo4j...${NC}"
@@ -196,7 +198,7 @@ from sophia.hcg_client.seeder import seed_pick_and_place_data
 import os
 
 client = HCGClient(
-    neo4j_uri=os.environ['NEO4J_URI'],
+    neo4j_uri=f"bolt://{os.environ['NEO4J_HOST']}:{os.environ['NEO4J_BOLT_PORT']}",
     neo4j_username=os.environ['NEO4J_USER'],
     neo4j_password=os.environ['NEO4J_PASSWORD'],
 )
@@ -219,16 +221,16 @@ print('Done!')
 function run_tests() {
     echo -e "${BLUE}Running Sophia integration tests...${NC}"
     cd "${REPO_ROOT}"
-    
-    # Export environment variables for tests
-    export NEO4J_URI="bolt://localhost:${NEO4J_BOLT_PORT}"
+    export NEO4J_HOST="localhost"
+    export NEO4J_BOLT_PORT
+    export NEO4J_HTTP_PORT
     export NEO4J_USER NEO4J_PASSWORD
     export MILVUS_HOST="localhost"
     export MILVUS_PORT
     export SOPHIA_URL="http://localhost:${SOPHIA_PORT}"
     export SOPHIA_API_TOKEN
     
-    echo -e "${YELLOW}NEO4J_URI=${NEO4J_URI}${NC}"
+    echo -e "${YELLOW}NEO4J: bolt://${NEO4J_HOST}:${NEO4J_BOLT_PORT}${NC}"
     echo -e "${YELLOW}MILVUS_HOST=localhost:${MILVUS_PORT}${NC}"
     echo -e "${YELLOW}SOPHIA_URL=${SOPHIA_URL}${NC}"
 
