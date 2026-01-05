@@ -46,6 +46,13 @@ jobs:
         echo "Waiting for Milvus..."
         timeout 120 bash -c 'until curl -f http://localhost:47091/healthz 2>/dev/null; do sleep 2; done'
         echo "Starting Sophia API from source..."
+        # Export env vars needed for Sophia startup
+        export NEO4J_URI=bolt://localhost:47687
+        export NEO4J_USER=neo4j
+        export NEO4J_PASSWORD=neo4jtest
+        export MILVUS_HOST=localhost
+        export MILVUS_PORT=47530
+        export SOPHIA_API_TOKEN=test-token-for-sophia
         poetry run uvicorn sophia.api.app:create_app --factory --host 0.0.0.0 --port 47000 --log-level info > /tmp/sophia-ci-api.log 2>&1 &
         SOPHIA_PID=$!
         echo "Sophia API started (PID: $SOPHIA_PID)"
