@@ -1717,7 +1717,7 @@ def create_app() -> FastAPI:
                         type=node.get("type", "unknown"),
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("labels", []),
+                        labels=node.get("ancestors", []),
                         created_at=node.get("created_at"),
                     )
                 )
@@ -1765,7 +1765,7 @@ def create_app() -> FastAPI:
                         type="state",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("labels", []),
+                        labels=node.get("ancestors", []),
                         created_at=node.get("created_at"),
                     )
                 )
@@ -1826,7 +1826,7 @@ def create_app() -> FastAPI:
                         type="process",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("labels", []),
+                        labels=node.get("ancestors", []),
                         created_at=node.get("created_at"),
                     )
                 )
@@ -1881,7 +1881,7 @@ def create_app() -> FastAPI:
                         type="plan",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("labels", []),
+                        labels=node.get("ancestors", []),
                         created_at=node.get("created_at"),
                     )
                 )
@@ -1939,7 +1939,7 @@ def create_app() -> FastAPI:
                         type="state_history",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("labels", []),
+                        labels=node.get("ancestors", []),
                         created_at=node.get("created_at"),
                     )
                 )
