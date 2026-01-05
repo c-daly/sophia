@@ -2056,8 +2056,20 @@ def create_app() -> FastAPI:
         # Convert and filter
         entries: List[PersonaEntryFull] = []
         seen_ids: set[str] = set()
+        deleted_ids: set[str] = set()
+
 
         for state in raw_states:
+            # Check if this is a deletion tombstone first
+            state_dict = state.__dict__ if hasattr(state, "__dict__") else {"data": state.data, "timestamp": state.timestamp}
+            data = state_dict.get("data", {})
+            entry_data = data.get("entry", {})
+            if entry_data and entry_data.get("deleted"):
+                entry_id = entry_data.get("entry_id")
+                if entry_id:
+                    deleted_ids.add(entry_id)
+                continue
+            
             entry = _cwmstate_to_persona_entry(
                 state.__dict__
                 if hasattr(state, "__dict__")
@@ -2069,6 +2081,10 @@ def create_app() -> FastAPI:
             # Dedupe by entry_id (keep latest by timestamp)
             if entry.entry_id in seen_ids:
                 continue
+            # Skip if this entry has been deleted
+            if entry.entry_id in deleted_ids:
+                continue
+            
             seen_ids.add(entry.entry_id)
 
             # Apply filters
