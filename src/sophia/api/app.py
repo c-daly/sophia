@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional, cast
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 
 from fastapi import (
     Depends,
