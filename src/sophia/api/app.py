@@ -2040,7 +2040,11 @@ def create_app() -> FastAPI:
         seen_ids: set[str] = set()
 
         for state in raw_states:
-            entry = _cwmstate_to_persona_entry(state.__dict__ if hasattr(state, "__dict__") else {"data": state.data, "timestamp": state.timestamp})
+            entry = _cwmstate_to_persona_entry(
+                state.__dict__
+                if hasattr(state, "__dict__")
+                else {"data": state.data, "timestamp": state.timestamp}
+            )
             if not entry:
                 continue
 
@@ -2054,7 +2058,10 @@ def create_app() -> FastAPI:
                 continue
             if sentiment and entry.sentiment != sentiment:
                 continue
-            if related_process_id and related_process_id not in entry.related_process_ids:
+            if (
+                related_process_id
+                and related_process_id not in entry.related_process_ids
+            ):
                 continue
             if related_goal_id and related_goal_id not in entry.related_goal_ids:
                 continue
@@ -2150,9 +2157,13 @@ def create_app() -> FastAPI:
     async def list_persona_entries(
         entry_type: Optional[str] = Query(None, description="Filter by entry type"),
         sentiment: Optional[str] = Query(None, description="Filter by sentiment"),
-        related_process_id: Optional[str] = Query(None, description="Filter by process ID"),
+        related_process_id: Optional[str] = Query(
+            None, description="Filter by process ID"
+        ),
         related_goal_id: Optional[str] = Query(None, description="Filter by goal ID"),
-        after_timestamp: Optional[str] = Query(None, description="ISO timestamp filter"),
+        after_timestamp: Optional[str] = Query(
+            None, description="ISO timestamp filter"
+        ),
         limit: int = Query(20, ge=1, le=100, description="Max entries"),
         offset: int = Query(0, ge=0, description="Pagination offset"),
     ) -> PersonaListResponse:
@@ -2412,8 +2423,12 @@ def create_app() -> FastAPI:
         tags=["persona"],
     )
     async def get_persona_sentiment(
-        limit: int = Query(20, ge=1, le=100, description="Number of entries to aggregate"),
-        after_timestamp: Optional[str] = Query(None, description="ISO timestamp filter"),
+        limit: int = Query(
+            20, ge=1, le=100, description="Number of entries to aggregate"
+        ),
+        after_timestamp: Optional[str] = Query(
+            None, description="ISO timestamp filter"
+        ),
     ) -> SentimentResponse:
         """Get aggregated sentiment from recent persona entries.
 
@@ -2453,23 +2468,33 @@ def create_app() -> FastAPI:
 
             for entry in entries:
                 if entry.sentiment:
-                    sentiment_counts[entry.sentiment] = sentiment_counts.get(entry.sentiment, 0) + 1
+                    sentiment_counts[entry.sentiment] = (
+                        sentiment_counts.get(entry.sentiment, 0) + 1
+                    )
                 if entry.confidence is not None:
                     confidences.append(entry.confidence)
                 for tag in entry.emotion_tags:
                     emotion_dist[tag] = emotion_dist.get(tag, 0) + 1
 
             # Most common sentiment
-            most_common = max(sentiment_counts, key=sentiment_counts.get) if sentiment_counts else None
+            most_common = (
+                max(sentiment_counts, key=sentiment_counts.get)
+                if sentiment_counts
+                else None
+            )
 
             # Average confidence
-            confidence_avg = sum(confidences) / len(confidences) if confidences else None
+            confidence_avg = (
+                sum(confidences) / len(confidences) if confidences else None
+            )
 
             # Trend: compare first half vs second half
             trend = None
             if len(entries) >= 4:
                 mid = len(entries) // 2
-                first_half = entries[mid:]  # Older entries (list is sorted newest first)
+                first_half = entries[
+                    mid:
+                ]  # Older entries (list is sorted newest first)
                 second_half = entries[:mid]  # Newer entries
 
                 def sentiment_score(e: PersonaEntryFull) -> int:

@@ -16,9 +16,7 @@ PersonaSentiment = Literal["positive", "negative", "neutral", "mixed"]
 class PersonaEntryCreate(BaseModel):
     """Request model for creating a persona entry."""
 
-    entry_type: PersonaEntryType = Field(
-        ..., description="Type of persona entry"
-    )
+    entry_type: PersonaEntryType = Field(..., description="Type of persona entry")
     content: str = Field(
         ..., min_length=1, max_length=10000, description="Main narrative content"
     )
@@ -40,9 +38,7 @@ class PersonaEntryCreate(BaseModel):
     related_goal_ids: List[str] = Field(
         default_factory=list, description="Linked goal IDs"
     )
-    emotion_tags: List[str] = Field(
-        default_factory=list, description="Emotion tags"
-    )
+    emotion_tags: List[str] = Field(default_factory=list, description="Emotion tags")
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"
     )
@@ -73,9 +69,7 @@ class PersonaEntryFull(BaseModel):
     related_goal_ids: List[str] = Field(
         default_factory=list, description="Linked goal IDs"
     )
-    emotion_tags: List[str] = Field(
-        default_factory=list, description="Emotion tags"
-    )
+    emotion_tags: List[str] = Field(default_factory=list, description="Emotion tags")
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"
     )
