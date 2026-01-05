@@ -56,6 +56,15 @@ jobs:
         export SOPHIA_URL=http://localhost:47000
         export SOPHIA_API_TOKEN=test-token-for-sophia
         export RUN_SOPHIA_INTEGRATION=1
+        # Verify HCG backend connectivity before starting Sophia
+        echo "Verifying HCG backend connectivity..."
+        echo "Waiting 5 seconds for services to stabilize after health checks..."
+        sleep 5
+        echo "Testing Neo4j connection..."
+        poetry run python3 -c "from neo4j import GraphDatabase; driver = GraphDatabase.driver('bolt://localhost:47687', auth=('neo4j', 'neo4jtest')); driver.verify_connectivity(); driver.close(); print('✅ Neo4j connected')"
+        echo "Testing Milvus connection..."
+        poetry run python3 -c "from pymilvus import connections; connections.connect(host='localhost', port='47530'); print('✅ Milvus connected'); connections.disconnect('default')"
+        echo "All HCG backends verified!"
         # Start Sophia API from source (Poetry is now available)
         echo "Starting Sophia API from source..."
         poetry run uvicorn sophia.api.app:create_app --factory --host 0.0.0.0 --port 47000 --log-level info > /tmp/sophia-ci-api.log 2>&1 &
