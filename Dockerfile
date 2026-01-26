@@ -1,4 +1,4 @@
-FROM ghcr.io/c-daly/logos-foundry:0.1.0
+FROM ghcr.io/c-daly/logos-foundry:0.2.0
 
 # Set working directory
 WORKDIR /app/sophia
