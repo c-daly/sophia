@@ -6,6 +6,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 
+from dotenv import load_dotenv
+
+# Load .env file before any pydantic-settings models are instantiated
+load_dotenv()
+
 from fastapi import (
     Depends,
     FastAPI,
@@ -90,6 +95,36 @@ from sophia.feedback import (
 
 # Configure structured logging for sophia
 logger = setup_logging("sophia")
+
+
+def sanitize_neo4j_properties(props: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert neo4j types to JSON-serializable Python types.
+
+    Neo4j returns custom types like neo4j.time.DateTime that Pydantic
+    cannot serialize. This function recursively converts them.
+    """
+    if not props:
+        return props
+
+    result = {}
+    for key, value in props.items():
+        if hasattr(value, "isoformat"):
+            # neo4j.time.DateTime, datetime, date, time
+            result[key] = value.isoformat()
+        elif isinstance(value, dict):
+            result[key] = sanitize_neo4j_properties(value)
+        elif isinstance(value, list):
+            result[key] = [
+                (
+                    sanitize_neo4j_properties(item)
+                    if isinstance(item, dict)
+                    else (item.isoformat() if hasattr(item, "isoformat") else item)
+                )
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -344,7 +379,12 @@ def create_app() -> FastAPI:
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=(get_env_value("CORS_ORIGINS", default="*") or "*").split(","),
+        allow_origins=(
+            get_env_value(
+                "CORS_ORIGINS", default="http://localhost:3000,http://localhost:3001"
+            )
+            or ""
+        ).split(","),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -1515,7 +1555,7 @@ def create_app() -> FastAPI:
             # Convert to response format
             entities: List[HCGEntityResponse] = []
             for node in nodes:
-                props = node.get("properties", {})
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 entities.append(
                     HCGEntityResponse(
                         id=node["uuid"],
@@ -1530,16 +1570,24 @@ def create_app() -> FastAPI:
             # Fetch all edges
             raw_edges = _hcg_client.list_all_edges(limit=limit)
 
-            # Convert to response format
+            # Build set of entity IDs for filtering orphan edges
+            entity_ids = {e.id for e in entities}
+
+            # Convert to response format, filtering out edges with missing nodes
             edges: List[HCGEdgeResponse] = []
             for edge in raw_edges:
+                # Skip edges where source or target isn't in the returned entities
+                if edge["source"] not in entity_ids or edge["target"] not in entity_ids:
+                    continue
                 edges.append(
                     HCGEdgeResponse(
                         id=edge["id"],
                         source_id=edge["source"],
                         target_id=edge["target"],
                         edge_type=edge["relation"],
-                        properties=edge.get("properties", {}),
+                        properties=sanitize_neo4j_properties(
+                            edge.get("properties", {})
+                        ),
                     )
                 )
 
@@ -1585,7 +1633,7 @@ def create_app() -> FastAPI:
                     detail=f"Entity not found: {entity_id}",
                 )
 
-            props = node.get("properties", {})
+            props = sanitize_neo4j_properties(node.get("properties", {}))
             return HCGEntityResponse(
                 id=node["uuid"],
                 type=node["type"],
@@ -1658,7 +1706,9 @@ def create_app() -> FastAPI:
                         source_id=edge["source"],
                         target_id=edge["target"],
                         edge_type=edge["relation"],
-                        properties=edge.get("properties", {}),
+                        properties=sanitize_neo4j_properties(
+                            edge.get("properties", {})
+                        ),
                     )
                 )
 
@@ -2183,7 +2233,7 @@ def create_app() -> FastAPI:
         after_timestamp: Optional[str] = Query(
             None, description="ISO timestamp filter"
         ),
-        limit: int = Query(20, ge=1, le=100, description="Max entries"),
+        limit: int = Query(20, ge=1, le=150, description="Max entries"),
         offset: int = Query(0, ge=0, description="Pagination offset"),
     ) -> PersonaListResponse:
         """List persona diary entries with optional filters.
