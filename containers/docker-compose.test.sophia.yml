@@ -27,7 +27,6 @@ services:
       - MILVUS_PORT=19530
       # Sophia-specific config
       - SOPHIA_API_TOKEN=sophia-dev
-      - SOPHIA_API_KEY=sophia-dev
       - SEED_PICK_AND_PLACE_DATA=true
       - CLEAR_BEFORE_SEED=false
       - MEDIA_STORAGE_ROOT=/app/media_storage
