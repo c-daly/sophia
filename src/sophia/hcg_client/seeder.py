@@ -1,8 +1,8 @@
 """Utilities for seeding HCG with test data."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import List
-
 from sophia.hcg_client.client import HCGClient
 
 
@@ -32,6 +32,10 @@ ANCESTORS = {
     "proposed_tool_call": ["process", "entity"],
     # Media types
     "media_sample": ["data", "entity"],
+    # CWM types
+    "cwm_a": ["cwm", "cognition"],
+    "cwm_g": ["cwm", "cognition"],
+    "cwm_e": ["cwm", "cognition"],
 }
 
 # Types required by sophia API endpoints (must exist for auto-compute ancestors)
@@ -264,3 +268,167 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     )
 
     logger.info("Pick-and-place data seeded successfully")
+
+
+def seed_plan_data(hcg_client: HCGClient) -> None:
+    """Seed plan nodes into Neo4j.
+
+    Creates sample plans that reference the pick-and-place scenario.
+
+    Args:
+        hcg_client: HCG client instance
+    """
+    logger.info("Seeding plan data into Neo4j...")
+
+    # Plan 1: completed plan for red block
+    hcg_client.add_node(
+        uuid="plan_red_block_to_bin",
+        name="Plan: Red Block to Bin",
+        node_type="plan",
+        ancestors=ANCESTORS["plan"],
+        is_type_definition=False,
+        properties={
+            "goal_id": "goal_red_block_in_bin",
+            "status": "completed",
+            "steps": [
+                {"id": "move_to_red_block", "name": "Move to Red Block", "action_type": "MOVE"},
+                {"id": "grasp_red_block", "name": "Grasp Red Block", "action_type": "GRASP"},
+                {"id": "move_to_bin", "name": "Move to Bin", "action_type": "MOVE"},
+                {"id": "release_red_block", "name": "Release Red Block", "action_type": "RELEASE"},
+            ],
+        },
+        source="planner",
+        derivation="observed",
+    )
+    hcg_client.add_edge(
+        edge_id="e_plan_red_for_goal",
+        source_uuid="plan_red_block_to_bin",
+        target_uuid="goal_red_block_in_bin",
+        relation="achieves",
+    )
+
+    # Plan 2: pending plan for blue block
+    hcg_client.add_node(
+        uuid="plan_blue_block_to_bin",
+        name="Plan: Blue Block to Bin",
+        node_type="plan",
+        ancestors=ANCESTORS["plan"],
+        is_type_definition=False,
+        properties={
+            "status": "pending",
+            "steps": [
+                {"id": "move_to_blue_block", "name": "Move to Blue Block", "action_type": "MOVE"},
+                {"id": "grasp_blue_block", "name": "Grasp Blue Block", "action_type": "GRASP"},
+                {"id": "move_to_bin", "name": "Move to Bin", "action_type": "MOVE"},
+                {"id": "release_blue_block", "name": "Release Blue Block", "action_type": "RELEASE"},
+            ],
+        },
+        source="planner",
+        derivation="imagined",
+    )
+
+    logger.info("Plan data seeded successfully")
+
+
+def seed_persona_entries(hcg_client: HCGClient) -> None:
+    """Seed persona diary entries as CWM-E states via CWMPersistence.
+
+    Args:
+        hcg_client: HCG client instance (driver used for CWMPersistence)
+    """
+    from sophia.cwm.persistence import CWMPersistence
+    from sophia.cwm_a.state_service import CWMState
+
+    logger.info("Seeding persona diary entries into Neo4j...")
+
+    persistence = CWMPersistence(
+        neo4j_driver=hcg_client.driver,
+        database=hcg_client.database,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    entries = [
+        {
+            "entry_id": "persona_seed_001",
+            "entry_type": "observation",
+            "content": "I notice the workspace has two blocks on the table. The red block "
+            "and blue block are both resting on the surface. This is a familiar "
+            "starting configuration for pick-and-place tasks.",
+            "summary": "Observed blocks on table",
+            "trigger": "workspace_scan",
+            "sentiment": "neutral",
+            "confidence": 0.9,
+            "emotion_tags": ["curiosity", "readiness"],
+            "related_process_ids": [],
+            "related_goal_ids": [],
+            "metadata": {},
+        },
+        {
+            "entry_id": "persona_seed_002",
+            "entry_type": "reflection",
+            "content": "Successfully completed the red block sorting task. The plan "
+            "executed all four steps without errors. I am becoming more confident "
+            "in my ability to handle pick-and-place operations.",
+            "summary": "Reflected on successful red block task",
+            "trigger": "plan_completed",
+            "sentiment": "positive",
+            "confidence": 0.85,
+            "emotion_tags": ["satisfaction", "confidence"],
+            "related_process_ids": ["plan_red_block_to_bin"],
+            "related_goal_ids": ["goal_red_block_in_bin"],
+            "metadata": {"plan_duration_ms": 1250},
+        },
+        {
+            "entry_id": "persona_seed_003",
+            "entry_type": "decision",
+            "content": "I have decided to prioritize the blue block next. The bin has "
+            "space and the blue block is in a reachable position. Moving it "
+            "will clear the table for future operations.",
+            "summary": "Decided to sort blue block next",
+            "trigger": "goal_evaluation",
+            "sentiment": "positive",
+            "confidence": 0.75,
+            "emotion_tags": ["determination", "planning"],
+            "related_process_ids": ["plan_blue_block_to_bin"],
+            "related_goal_ids": [],
+            "metadata": {},
+        },
+        {
+            "entry_id": "persona_seed_004",
+            "entry_type": "belief",
+            "content": "I believe the current workspace layout is efficient for "
+            "sequential sorting. Objects are well-separated and the bin is "
+            "positioned within reach. No obstacles detected.",
+            "summary": "Belief about workspace efficiency",
+            "trigger": "environment_assessment",
+            "sentiment": "positive",
+            "confidence": 0.8,
+            "emotion_tags": ["confidence", "awareness"],
+            "related_process_ids": [],
+            "related_goal_ids": [],
+            "metadata": {"workspace_score": 0.92},
+        },
+    ]
+
+    for i, entry_data in enumerate(entries):
+        # Stagger timestamps so ordering works
+        entry_timestamp = now - timedelta(minutes=len(entries) - i)
+
+        state = CWMState(
+            state_id=f"cwm_e_{entry_data['entry_id']}",
+            model_type="CWM_E",
+            timestamp=entry_timestamp,
+            data={
+                "entry": entry_data,
+                "source": "persona_api",
+                "derivation": "observed",
+                "confidence": entry_data["confidence"],
+                "tags": [f"entry_type:{entry_data['entry_type']}"],
+                "links": {},
+            },
+        )
+
+        persistence.persist(state)
+
+    logger.info(f"Seeded {len(entries)} persona diary entries")

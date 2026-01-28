@@ -2,19 +2,21 @@
 """Seed test data into Neo4j for integration/e2e tests.
 
 This script should be run AFTER docker services are up and ready.
-It clears existing data and seeds the pick-and-place scenario.
+It clears existing data and seeds the pick-and-place scenario,
+plan data, and persona diary entries.
 
 Usage:
     python scripts/seed_test_data.py
 
 Or via the test runner:
     scripts/run_integration.sh  # handles docker + seeding + tests
+
 """
 
+import logging
 import os
 import sys
 import time
-import logging
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -24,10 +26,13 @@ logger = logging.getLogger(__name__)
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from sophia.env import get_neo4j_config  # noqa: E402
 from sophia.hcg_client import HCGClient  # noqa: E402
 from sophia.hcg_client.seeder import (  # noqa: E402
-    seed_type_definitions,
+    seed_persona_entries,
     seed_pick_and_place_data,
+    seed_plan_data,
+    seed_type_definitions,
 )
 
 
@@ -42,8 +47,7 @@ def wait_for_neo4j(uri: str, user: str, password: str, max_retries: int = 30) ->
                 neo4j_username=user,
                 neo4j_password=password,
             )
-            # Try a simple query
-            client._driver.verify_connectivity()
+            client.driver.verify_connectivity()
             client.close()
             logger.info("Neo4j is ready!")
             return True
@@ -51,7 +55,7 @@ def wait_for_neo4j(uri: str, user: str, password: str, max_retries: int = 30) ->
             if attempt < max_retries - 1:
                 if attempt % 5 == 0:
                     logger.info(
-                        f"Attempt {attempt + 1}/{max_retries}: Neo4j not ready yet..."
+                        f"Attempt {attempt + 1}/{max_retries}: Neo4j not ready yet...{e}"
                     )
                 time.sleep(2)
             else:
@@ -85,9 +89,18 @@ def seed_data(uri: str, user: str, password: str) -> bool:
         logger.info("Seeding pick-and-place scenario...")
         seed_pick_and_place_data(client)
 
-        # Verify
-        nodes = client.get_all_nodes()
-        logger.info(f"Seeded {len(nodes)} nodes")
+        # Seed plan data
+        logger.info("Seeding plan data...")
+        seed_plan_data(client)
+
+        # Seed persona diary entries (CWM-E states)
+        logger.info("Seeding persona diary entries...")
+        seed_persona_entries(client)
+
+        # Verify seeded data
+        nodes = client.list_all_nodes()
+        edges = client.list_all_edges()
+        logger.info(f"Seeded {len(nodes)} nodes and {len(edges)} edges")
 
         client.close()
         logger.info("Test data seeded successfully!")
@@ -99,10 +112,10 @@ def seed_data(uri: str, user: str, password: str) -> bool:
 
 
 def main() -> None:
-    # Configuration from env vars (matching containers/docker-compose.test.yml)
-    neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password = os.getenv("NEO4J_PASSWORD", "neo4jtest")
+    config = get_neo4j_config()
+    neo4j_uri = config["uri"]
+    neo4j_user = config["user"]
+    neo4j_password = config["password"]
 
     logger.info("=== Sophia Test Data Seeder ===")
     logger.info(f"Neo4j URI: {neo4j_uri}")
