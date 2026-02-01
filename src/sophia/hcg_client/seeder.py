@@ -291,10 +291,22 @@ def seed_plan_data(hcg_client: HCGClient) -> None:
             "goal_id": "goal_red_block_in_bin",
             "status": "completed",
             "steps": [
-                {"id": "move_to_red_block", "name": "Move to Red Block", "action_type": "MOVE"},
-                {"id": "grasp_red_block", "name": "Grasp Red Block", "action_type": "GRASP"},
+                {
+                    "id": "move_to_red_block",
+                    "name": "Move to Red Block",
+                    "action_type": "MOVE",
+                },
+                {
+                    "id": "grasp_red_block",
+                    "name": "Grasp Red Block",
+                    "action_type": "GRASP",
+                },
                 {"id": "move_to_bin", "name": "Move to Bin", "action_type": "MOVE"},
-                {"id": "release_red_block", "name": "Release Red Block", "action_type": "RELEASE"},
+                {
+                    "id": "release_red_block",
+                    "name": "Release Red Block",
+                    "action_type": "RELEASE",
+                },
             ],
         },
         source="planner",
@@ -317,10 +329,22 @@ def seed_plan_data(hcg_client: HCGClient) -> None:
         properties={
             "status": "pending",
             "steps": [
-                {"id": "move_to_blue_block", "name": "Move to Blue Block", "action_type": "MOVE"},
-                {"id": "grasp_blue_block", "name": "Grasp Blue Block", "action_type": "GRASP"},
+                {
+                    "id": "move_to_blue_block",
+                    "name": "Move to Blue Block",
+                    "action_type": "MOVE",
+                },
+                {
+                    "id": "grasp_blue_block",
+                    "name": "Grasp Blue Block",
+                    "action_type": "GRASP",
+                },
                 {"id": "move_to_bin", "name": "Move to Bin", "action_type": "MOVE"},
-                {"id": "release_blue_block", "name": "Release Blue Block", "action_type": "RELEASE"},
+                {
+                    "id": "release_blue_block",
+                    "name": "Release Blue Block",
+                    "action_type": "RELEASE",
+                },
             ],
         },
         source="planner",
