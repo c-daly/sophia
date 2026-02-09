@@ -26,9 +26,9 @@ pytestmark = pytest.mark.e2e
 SOPHIA_PORT = os.getenv("SOPHIA_PORT", "47000")
 SOPHIA_URL = os.getenv("SOPHIA_URL", f"http://localhost:{SOPHIA_PORT}")
 
-# Infrastructure ports (all 47xxx per logos_config.SOPHIA_PORTS)
-NEO4J_HTTP_PORT = os.getenv("NEO4J_HTTP_PORT", "47474")
-NEO4J_BOLT_PORT = os.getenv("NEO4J_BOLT_PORT", "47687")
+# Infrastructure ports
+NEO4J_HTTP_PORT = os.getenv("NEO4J_HTTP_PORT", "7474")
+NEO4J_BOLT_PORT = os.getenv("NEO4J_BOLT_PORT", "7687")
 MILVUS_PORT = os.getenv("MILVUS_PORT", "47530")
 MILVUS_METRICS_PORT = os.getenv("MILVUS_METRICS_PORT", "47091")
 

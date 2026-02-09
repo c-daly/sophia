@@ -50,7 +50,7 @@ jobs:
         echo "All services ready!"
       pytest_env_script: |
         # Port values from logos_config.SOPHIA_PORTS
-        export NEO4J_URI=bolt://localhost:47687
+        export NEO4J_URI=bolt://localhost:7687
         export NEO4J_USER=neo4j
         export NEO4J_PASSWORD=logosdev
         export MILVUS_HOST=localhost
