@@ -37,7 +37,7 @@ class HCGClient(LogosHCGClient):
         self,
         neo4j_uri: str = "bolt://localhost:7687",
         neo4j_username: str = "neo4j",
-        neo4j_password: str = "neo4jtest",
+        neo4j_password: str = "logosdev",
         neo4j_database: str = "neo4j",
         milvus_host: Optional[str] = None,
         milvus_port: Optional[int] = None,

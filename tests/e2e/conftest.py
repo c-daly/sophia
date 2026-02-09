@@ -35,7 +35,7 @@ MILVUS_METRICS_PORT = os.getenv("MILVUS_METRICS_PORT", "47091")
 # Neo4j connection config
 NEO4J_URI = os.getenv("NEO4J_URI", f"bolt://localhost:{NEO4J_BOLT_PORT}")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "neo4jtest")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "logosdev")
 
 # Milvus connection config
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")

@@ -29,7 +29,7 @@ def main() -> None:
     client = HCGClient(
         neo4j_uri="bolt://localhost:7687",
         neo4j_username="neo4j",
-        neo4j_password="neo4jtest",
+        neo4j_password="logosdev",
     )
 
     # Check health
