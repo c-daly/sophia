@@ -117,7 +117,7 @@ Full integration tests run automatically every **Sunday at 4 AM UTC** to catch a
 - Use `pytest -k <keyword>` to filter within any category.
 - When editing multiple areas, run `poetry run pytest` from the repo root to
   execute the entire suite.
-- The integration suite requires Docker; see `scripts/test_integration.sh`
+- The integration suite requires Docker; see `./scripts/test.sh integration`
   and `tests/e2e/README.md` for stack details and environment variables.
 
 ## Environment Variables
