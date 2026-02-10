@@ -290,7 +290,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
         # Seed pick-and-place data if enabled
-        if (get_env_value("SEED_PICK_AND_PLACE_DATA", default="") or "").lower() == "true":
+        if (
+            get_env_value("SEED_PICK_AND_PLACE_DATA", default="") or ""
+        ).lower() == "true":
             from sophia.hcg_client.seeder import seed_pick_and_place_data
 
             logger.info("Seeding pick-and-place test data...")
@@ -328,7 +330,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("CWM persistence service initialized")
 
     # Initialize media ingestion services
-    storage_root = get_env_value("MEDIA_STORAGE_ROOT", default="./media_storage") or "./media_storage"
+    storage_root = (
+        get_env_value("MEDIA_STORAGE_ROOT", default="./media_storage")
+        or "./media_storage"
+    )
     _media_storage = MediaStorageService(storage_root=storage_root)
     if _hcg_client:  # Type guard for mypy
         _media_ingestion = MediaIngestionService(
@@ -418,7 +423,9 @@ def create_app() -> FastAPI:
             )
 
         all_healthy = all(d.status == "healthy" for d in dependencies.values())
-        overall_status: Literal["healthy", "degraded"] = "healthy" if all_healthy else "degraded"
+        overall_status: Literal["healthy", "degraded"] = (
+            "healthy" if all_healthy else "degraded"
+        )
 
         return LogosHealthResponse(
             status=overall_status,
