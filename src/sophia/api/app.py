@@ -22,7 +22,7 @@ except ImportError:
     FastAPIInstrumentor = None  # type: ignore[assignment,misc]
     StatusCode = None  # type: ignore[assignment,misc]
 
-    def get_current_span():  # type: ignore[misc]
+    def get_current_span() -> Any:  # type: ignore[misc]
         """No-op stub when OTel is not installed."""
         from types import SimpleNamespace
 
