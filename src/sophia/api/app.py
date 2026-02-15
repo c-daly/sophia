@@ -11,11 +11,10 @@ from dotenv import load_dotenv
 # Load .env file before any pydantic-settings models are instantiated
 load_dotenv()
 
-from logos_observability import setup_telemetry, get_tracer
+from logos_observability import setup_telemetry
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import StatusCode, get_current_span
 
-tracer = get_tracer("sophia.api")
 import os
 
 from fastapi import (
@@ -1346,7 +1345,7 @@ def create_app() -> FastAPI:
         span = get_current_span()
         span.update_name("sophia.execute")
         span.set_attribute("execute.plan_id", str(getattr(request, 'plan_id', '')))
-        span.set_attribute("execute.step", getattr(request, 'step_index', -1) or -1)
+        span.set_attribute("execute.step", getattr(request, 'step_index', -1))
         if not _executor:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

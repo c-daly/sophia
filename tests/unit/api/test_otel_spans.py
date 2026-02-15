@@ -1,12 +1,9 @@
 """Tests for OpenTelemetry span enrichment on Sophia API endpoints."""
 
-from unittest.mock import MagicMock, Mock, patch
-
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import StatusCode
 
 
 @pytest.fixture()
@@ -32,22 +29,12 @@ def test_get_current_span_called_in_endpoints():
 
 def test_span_enrichment_imports():
     """Verify OTel span enrichment imports are present."""
-    from opentelemetry.trace import get_current_span, StatusCode
+    from opentelemetry.trace import get_current_span
     from logos_observability import get_tracer
 
     # These should be importable without error
     assert callable(get_current_span)
     assert callable(get_tracer)
-
-
-def test_sophia_tracer_created():
-    """Verify sophia.api tracer is instantiated at module level."""
-    import sophia.api.app as app_module
-
-    assert hasattr(app_module, "tracer"), (
-        "app.py must define a module-level tracer via get_tracer"
-    )
-
 
 def test_span_name_update_on_state_get(span_capture):
     """Verify get_state endpoint updates span name to sophia.state.get."""
