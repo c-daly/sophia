@@ -13,13 +13,13 @@ Sophia handles cognition without language: planning, execution, world models, an
 poetry install
 
 # Run tests
-./scripts/run_tests.sh unit
+./scripts/test.sh
 
-# Start services
-./scripts/run_tests.sh up
+# Start dev server
+./scripts/dev.sh
 
-# Run API
-poetry run uvicorn sophia.api.app:app --host 0.0.0.0 --port 47000
+# Lint
+./scripts/lint.sh
 ```
 
 ## API
@@ -59,13 +59,18 @@ See [AGENTS.md](AGENTS.md) for development guidelines.
 
 ```bash
 # Lint
-poetry run ruff check --fix . && poetry run ruff format .
+./scripts/lint.sh
 
 # Type check
 poetry run mypy src/
 
 # All tests
 ./scripts/run_tests.sh all
+
+# Unit / integration / e2e
+./scripts/test_unit.sh
+./scripts/test_integration.sh
+./scripts/test_e2e.sh
 ```
 
 ## License
