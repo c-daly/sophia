@@ -11,6 +11,10 @@ from dotenv import load_dotenv
 # Load .env file before any pydantic-settings models are instantiated
 load_dotenv()
 
+from logos_observability import setup_telemetry
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+import os
+
 from fastapi import (
     Depends,
     FastAPI,
@@ -239,6 +243,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
     logger.info("Starting Sophia API service...")
 
+    # Initialize OpenTelemetry
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    setup_telemetry(
+        service_name="sophia",
+        export_to_console=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
+        otlp_endpoint=otlp_endpoint,
+    )
+    logger.info("OpenTelemetry initialized", extra={"otlp_endpoint": otlp_endpoint or "none"})
+
     # Initialize feedback system (non-critical, graceful degradation)
     feedback_config = FeedbackConfig()
     if feedback_config.enabled:
@@ -375,6 +388,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    FastAPIInstrumentor.instrument_app(app)
 
     # CORS middleware
     app.add_middleware(

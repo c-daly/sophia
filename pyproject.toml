@@ -35,6 +35,10 @@ pymilvus = ">=2.5.0"
 urllib3 = "^2.5.0"
 redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
+opentelemetry-api = "^1.20.0"
+opentelemetry-sdk = "^1.20.0"
+opentelemetry-instrumentation-fastapi = "^0.41b0"
+opentelemetry-exporter-otlp = "^1.20.0"
 # Pinned to specific tag for stability
 logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.3.0"}
 

@@ -4,7 +4,7 @@ import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory import InMemorySpanExporter
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from logos_observability import setup_telemetry, get_tracer
 
@@ -53,7 +53,7 @@ def test_sophia_nested_spans():
     provider.add_span_processor(SimpleSpanProcessor(exporter))
 
     tracer = get_tracer("sophia.api")
-    with tracer.start_as_current_span("sophia.plan") as parent:
+    with tracer.start_as_current_span("sophia.plan") as parent:  # noqa: F841
         with tracer.start_as_current_span("sophia.simulate") as child:
             child.set_attribute("simulation.steps", 5)
 
