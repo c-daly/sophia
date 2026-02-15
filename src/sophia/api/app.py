@@ -37,7 +37,6 @@ except ImportError:
 
     _OTEL_AVAILABLE = False
 
-import os
 
 from fastapi import (
     Depends,
@@ -269,10 +268,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Initialize OpenTelemetry
     if _OTEL_AVAILABLE:
-        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        otlp_endpoint = get_env_value("OTEL_EXPORTER_OTLP_ENDPOINT")
         setup_telemetry(
-            service_name="sophia",
-            export_to_console=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower()
+            service_name=get_env_value("OTEL_SERVICE_NAME", default="sophia")
+            or "sophia",
+            export_to_console=(
+                get_env_value("OTEL_CONSOLE_EXPORT", default="false") or "false"
+            ).lower()
             == "true",
             otlp_endpoint=otlp_endpoint,
         )
@@ -870,7 +872,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.plan")
-        span.set_attribute("plan.goal", str(getattr(request, "goal", ""))[:200])
+        span.set_attribute("plan.goal", str(request.goal)[:200])
         if not _planner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1090,7 +1092,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.simulate")
-        span.set_attribute("simulate.horizon", getattr(request, "k_steps", 0))
+        span.set_attribute("simulate.horizon", request.k_steps)
         if not _jepa_runner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1320,11 +1322,9 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.ingest.hermes_proposal")
+        span.set_attribute("ingest.proposal_id", str(request.proposal_id))
         span.set_attribute(
-            "ingest.proposal_id", str(getattr(request, "proposal_id", ""))
-        )
-        span.set_attribute(
-            "ingest.node_count", len(getattr(request, "plan_steps", []) or [])
+            "ingest.node_count", len(request.plan_steps) if request.plan_steps else 0
         )
         # Log the proposal for observability
         logger.info(
@@ -1385,8 +1385,10 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.execute")
-        span.set_attribute("execute.plan_id", str(getattr(request, "plan_id", "")))
-        span.set_attribute("execute.step", getattr(request, "step_index", -1))
+        span.set_attribute("execute.plan_id", str(request.plan_id))
+        span.set_attribute(
+            "execute.step", request.step_index if request.step_index is not None else -1
+        )
         if not _executor:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

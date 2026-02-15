@@ -70,3 +70,7 @@ logs/
 .env.*.local
 .claude/
 .context/
+-e 
+# Claude session artifacts
+.claude_handoff.md
+.claude/docs/scratch/
