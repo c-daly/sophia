@@ -11,9 +11,29 @@ from dotenv import load_dotenv
 # Load .env file before any pydantic-settings models are instantiated
 load_dotenv()
 
-from logos_observability import setup_telemetry
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.trace import StatusCode, get_current_span
+try:
+    from logos_observability import setup_telemetry
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.trace import StatusCode, get_current_span
+
+    _OTEL_AVAILABLE = True
+except ImportError:
+    setup_telemetry = None  # type: ignore[assignment]
+    FastAPIInstrumentor = None  # type: ignore[assignment,misc]
+    StatusCode = None  # type: ignore[assignment,misc]
+
+    def get_current_span():  # type: ignore[misc]
+        """No-op stub when OTel is not installed."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            update_name=lambda *a: None,
+            set_attribute=lambda *a: None,
+            set_status=lambda *a: None,
+            record_exception=lambda *a: None,
+        )
+
+    _OTEL_AVAILABLE = False
 
 import os
 
