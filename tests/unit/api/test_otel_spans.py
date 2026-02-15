@@ -22,9 +22,9 @@ def test_get_current_span_called_in_endpoints():
     import sophia.api.app as app_module
 
     # Confirm the module imports get_current_span
-    assert hasattr(app_module, "get_current_span"), (
-        "app.py must import get_current_span from opentelemetry.trace"
-    )
+    assert hasattr(
+        app_module, "get_current_span"
+    ), "app.py must import get_current_span from opentelemetry.trace"
 
 
 def test_span_enrichment_imports():
@@ -36,13 +36,14 @@ def test_span_enrichment_imports():
     assert callable(get_current_span)
     assert callable(get_tracer)
 
+
 def test_span_name_update_on_state_get(span_capture):
     """Verify get_state endpoint updates span name to sophia.state.get."""
     exporter, provider = span_capture
     tracer = provider.get_tracer("test")
 
     # Simulate what the endpoint does: get current span and update name
-    with tracer.start_as_current_span("GET /state") :
+    with tracer.start_as_current_span("GET /state"):
         from opentelemetry.trace import get_current_span
 
         current = get_current_span()
@@ -58,7 +59,7 @@ def test_span_name_update_on_plan(span_capture):
     exporter, provider = span_capture
     tracer = provider.get_tracer("test")
 
-    with tracer.start_as_current_span("POST /plan") :
+    with tracer.start_as_current_span("POST /plan"):
         from opentelemetry.trace import get_current_span
 
         current = get_current_span()
@@ -74,7 +75,7 @@ def test_span_attributes_on_hcg_snapshot(span_capture):
     exporter, provider = span_capture
     tracer = provider.get_tracer("test")
 
-    with tracer.start_as_current_span("GET /hcg/snapshot") :
+    with tracer.start_as_current_span("GET /hcg/snapshot"):
         from opentelemetry.trace import get_current_span
 
         current = get_current_span()

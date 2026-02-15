@@ -252,7 +252,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         export_to_console=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
         otlp_endpoint=otlp_endpoint,
     )
-    logger.info("OpenTelemetry initialized", extra={"otlp_endpoint": otlp_endpoint or "none"})
+    logger.info(
+        "OpenTelemetry initialized", extra={"otlp_endpoint": otlp_endpoint or "none"}
+    )
 
     # Initialize feedback system (non-critical, graceful degradation)
     feedback_config = FeedbackConfig()
@@ -840,7 +842,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.plan")
-        span.set_attribute("plan.goal", str(getattr(request, 'goal', ''))[:200])
+        span.set_attribute("plan.goal", str(getattr(request, "goal", ""))[:200])
         if not _planner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1060,7 +1062,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.simulate")
-        span.set_attribute("simulate.horizon", getattr(request, 'k_steps', 0))
+        span.set_attribute("simulate.horizon", getattr(request, "k_steps", 0))
         if not _jepa_runner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1290,8 +1292,12 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.ingest.hermes_proposal")
-        span.set_attribute("ingest.proposal_id", str(getattr(request, 'proposal_id', '')))
-        span.set_attribute("ingest.node_count", len(getattr(request, 'plan_steps', []) or []))
+        span.set_attribute(
+            "ingest.proposal_id", str(getattr(request, "proposal_id", ""))
+        )
+        span.set_attribute(
+            "ingest.node_count", len(getattr(request, "plan_steps", []) or [])
+        )
         # Log the proposal for observability
         logger.info(
             f"Received proposal {request.proposal_id} from {request.source_service} "
@@ -1351,8 +1357,8 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.execute")
-        span.set_attribute("execute.plan_id", str(getattr(request, 'plan_id', '')))
-        span.set_attribute("execute.step", getattr(request, 'step_index', -1))
+        span.set_attribute("execute.plan_id", str(getattr(request, "plan_id", "")))
+        span.set_attribute("execute.step", getattr(request, "step_index", -1))
         if not _executor:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
