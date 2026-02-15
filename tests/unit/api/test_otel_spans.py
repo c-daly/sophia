@@ -42,7 +42,7 @@ def test_span_name_update_on_state_get(span_capture):
     tracer = provider.get_tracer("test")
 
     # Simulate what the endpoint does: get current span and update name
-    with tracer.start_as_current_span("GET /state") as span:
+    with tracer.start_as_current_span("GET /state") :
         from opentelemetry.trace import get_current_span
 
         current = get_current_span()
@@ -58,7 +58,7 @@ def test_span_name_update_on_plan(span_capture):
     exporter, provider = span_capture
     tracer = provider.get_tracer("test")
 
-    with tracer.start_as_current_span("POST /plan") as span:
+    with tracer.start_as_current_span("POST /plan") :
         from opentelemetry.trace import get_current_span
 
         current = get_current_span()
@@ -74,7 +74,7 @@ def test_span_attributes_on_hcg_snapshot(span_capture):
     exporter, provider = span_capture
     tracer = provider.get_tracer("test")
 
-    with tracer.start_as_current_span("GET /hcg/snapshot") as span:
+    with tracer.start_as_current_span("GET /hcg/snapshot") :
         from opentelemetry.trace import get_current_span
 
         current = get_current_span()
