@@ -20,7 +20,9 @@ try:
 except ImportError:
     setup_telemetry = None  # type: ignore[assignment]
     FastAPIInstrumentor = None  # type: ignore[assignment,misc]
-    StatusCode = None  # type: ignore[assignment,misc]
+    from types import SimpleNamespace
+
+    StatusCode = SimpleNamespace(ERROR=None, OK=None)  # type: ignore[assignment,misc]
 
     def get_current_span() -> Any:  # type: ignore[misc]
         """No-op stub when OTel is not installed."""
@@ -266,15 +268,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting Sophia API service...")
 
     # Initialize OpenTelemetry
-    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    setup_telemetry(
-        service_name="sophia",
-        export_to_console=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
-        otlp_endpoint=otlp_endpoint,
-    )
-    logger.info(
-        "OpenTelemetry initialized", extra={"otlp_endpoint": otlp_endpoint or "none"}
-    )
+    if _OTEL_AVAILABLE:
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        setup_telemetry(
+            service_name="sophia",
+            export_to_console=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower()
+            == "true",
+            otlp_endpoint=otlp_endpoint,
+        )
+        logger.info(
+            "OpenTelemetry initialized",
+            extra={"otlp_endpoint": otlp_endpoint or "none"},
+        )
+    else:
+        logger.info("OpenTelemetry not available, skipping initialization")
 
     # Initialize feedback system (non-critical, graceful degradation)
     feedback_config = FeedbackConfig()
@@ -418,7 +425,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    FastAPIInstrumentor.instrument_app(app)
+    if _OTEL_AVAILABLE:
+        FastAPIInstrumentor.instrument_app(app)
 
     # CORS middleware
     app.add_middleware(
