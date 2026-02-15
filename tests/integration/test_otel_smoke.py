@@ -9,14 +9,14 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from logos_observability import setup_telemetry, get_tracer
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def reset_tracer_provider():
     """Reset the global tracer provider between tests."""
     yield
     trace.set_tracer_provider(TracerProvider())
 
 
-def test_sophia_telemetry_setup():
+def test_sophia_telemetry_setup(reset_tracer_provider):
     """Verify setup_telemetry configures a working TracerProvider."""
     provider = setup_telemetry(service_name="sophia", export_to_console=False)
     assert provider is not None
@@ -26,7 +26,7 @@ def test_sophia_telemetry_setup():
         span.set_attribute("test.key", "test_value")
 
 
-def test_sophia_spans_have_correct_service_name():
+def test_sophia_spans_have_correct_service_name(reset_tracer_provider):
     """Verify spans carry the correct service.name resource attribute."""
     setup_telemetry(service_name="sophia", export_to_console=False)
     exporter = InMemorySpanExporter()
@@ -45,7 +45,7 @@ def test_sophia_spans_have_correct_service_name():
     assert spans[0].resource.attributes["service.name"] == "sophia"
 
 
-def test_sophia_nested_spans():
+def test_sophia_nested_spans(reset_tracer_provider):
     """Verify nested spans maintain parent-child relationships."""
     setup_telemetry(service_name="sophia", export_to_console=False)
     exporter = InMemorySpanExporter()
