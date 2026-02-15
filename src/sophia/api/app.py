@@ -11,8 +11,11 @@ from dotenv import load_dotenv
 # Load .env file before any pydantic-settings models are instantiated
 load_dotenv()
 
-from logos_observability import setup_telemetry
+from logos_observability import setup_telemetry, get_tracer
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.trace import StatusCode, get_current_span
+
+tracer = get_tracer("sophia.api")
 import os
 
 from fastapi import (
@@ -456,6 +459,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.state.get")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -508,6 +513,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.state.update")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -820,6 +827,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.plan")
         if not _planner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -943,6 +952,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.imagine")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1031,6 +1042,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.simulate")
         if not _jepa_runner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1256,6 +1269,8 @@ def create_app() -> FastAPI:
 
         Note: Authentication is disabled for local development.
         """
+        span = get_current_span()
+        span.update_name("sophia.ingest.hermes_proposal")
         # Log the proposal for observability
         logger.info(
             f"Received proposal {request.proposal_id} from {request.source_service} "
@@ -1313,6 +1328,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.execute")
         if not _executor:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1557,6 +1574,9 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.hcg.snapshot")
+        span.set_attribute("hcg.limit", limit)
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
