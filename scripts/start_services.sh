@@ -82,6 +82,13 @@ echo -e "${BLUE}Stopping any containers using test ports...${NC}"
 stop_containers_on_ports
 compose down 2>/dev/null || true
 
+# Start OTel observability stack if available
+OTEL_COMPOSE="${REPO_ROOT}/../logos/infra/docker-compose.otel.yml"
+if [ -f "${OTEL_COMPOSE}" ]; then
+    echo -e "${BLUE}Starting OTel observability stack...${NC}"
+    docker compose -f "${OTEL_COMPOSE}" up -d 2>/dev/null &&         echo -e "${GREEN}✓ OTel stack started (Collector, Tempo, Grafana)${NC}" ||         echo -e "${YELLOW}⚠ OTel stack failed to start (traces will not be collected)${NC}"
+fi
+
 echo -e "${BLUE}Starting Sophia test services...${NC}"
 compose up -d
 
