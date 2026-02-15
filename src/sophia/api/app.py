@@ -490,6 +490,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error reading state: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -515,6 +517,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.state.update")
+        span.set_attribute("state.id", "current_state")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -644,6 +647,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error updating state: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -829,6 +834,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.plan")
+        span.set_attribute("plan.goal", str(getattr(request, 'goal', ''))[:200])
         if not _planner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -930,6 +936,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error generating plan: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1019,6 +1027,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error generating imagined states: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1044,6 +1054,7 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.simulate")
+        span.set_attribute("simulate.horizon", getattr(request, 'k_steps', 0))
         if not _jepa_runner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1245,6 +1256,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error running simulation: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1271,6 +1284,8 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.ingest.hermes_proposal")
+        span.set_attribute("ingest.proposal_id", str(getattr(request, 'proposal_id', '')))
+        span.set_attribute("ingest.node_count", len(getattr(request, 'plan_steps', []) or []))
         # Log the proposal for observability
         logger.info(
             f"Received proposal {request.proposal_id} from {request.source_service} "
@@ -1330,6 +1345,8 @@ def create_app() -> FastAPI:
         """
         span = get_current_span()
         span.update_name("sophia.execute")
+        span.set_attribute("execute.plan_id", str(getattr(request, 'plan_id', '')))
+        span.set_attribute("execute.step", getattr(request, 'step_index', -1) or -1)
         if not _executor:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1539,6 +1556,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error executing plan: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1636,6 +1655,8 @@ def create_app() -> FastAPI:
         except HTTPException:
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error fetching HCG snapshot: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
