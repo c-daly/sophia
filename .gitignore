@@ -68,3 +68,5 @@ logs/
 .env
 .env.local
 .env.*.local
+.claude/
+.context/

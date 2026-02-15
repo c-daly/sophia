@@ -40,6 +40,7 @@ opentelemetry-sdk = "^1.20.0"
 opentelemetry-instrumentation-fastapi = "^0.41b0"
 opentelemetry-exporter-otlp = "^1.20.0"
 # Pinned to specific tag for stability
+# Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
 logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.3.0"}
 
 [tool.poetry.extras]
