@@ -1,4 +1,4 @@
-FROM ghcr.io/c-daly/logos-foundry:0.2.0
+FROM ghcr.io/c-daly/logos-foundry:0.4.0
 
 # Set working directory
 WORKDIR /app/sophia
@@ -11,9 +11,9 @@ COPY pyproject.toml poetry.lock README.md ./
 ARG SOPHIA_INSTALL_ML=0
 
 RUN if [ "$SOPHIA_INSTALL_ML" = "1" ]; then \
-      poetry install --only main --with ml --no-interaction --no-ansi; \
+      poetry install --only main --with ml -E otel --no-interaction --no-ansi; \
     else \
-      poetry install --only main --no-interaction --no-ansi; \
+      poetry install --only main -E otel --no-interaction --no-ansi; \
     fi
 
 # Expose port

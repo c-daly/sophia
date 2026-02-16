@@ -11,6 +11,33 @@ from dotenv import load_dotenv
 # Load .env file before any pydantic-settings models are instantiated
 load_dotenv()
 
+try:
+    from logos_observability import setup_telemetry
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.trace import StatusCode, get_current_span
+
+    _OTEL_AVAILABLE = True
+except ImportError:
+    setup_telemetry = None  # type: ignore[assignment]
+    FastAPIInstrumentor = None  # type: ignore[assignment,misc]
+    from types import SimpleNamespace
+
+    StatusCode = SimpleNamespace(ERROR=None, OK=None)  # type: ignore[assignment,misc]
+
+    def get_current_span() -> Any:  # type: ignore[misc]
+        """No-op stub when OTel is not installed."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            update_name=lambda *a: None,
+            set_attribute=lambda *a: None,
+            set_status=lambda *a: None,
+            record_exception=lambda *a: None,
+        )
+
+    _OTEL_AVAILABLE = False
+
+
 from fastapi import (
     Depends,
     FastAPI,
@@ -239,6 +266,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
     logger.info("Starting Sophia API service...")
 
+    # Initialize OpenTelemetry
+    if _OTEL_AVAILABLE:
+        otlp_endpoint = get_env_value("OTEL_EXPORTER_OTLP_ENDPOINT")
+        setup_telemetry(
+            service_name=get_env_value("OTEL_SERVICE_NAME", default="sophia")
+            or "sophia",
+            export_to_console=(
+                get_env_value("OTEL_CONSOLE_EXPORT", default="false") or "false"
+            ).lower()
+            == "true",
+            otlp_endpoint=otlp_endpoint,
+        )
+        logger.info(
+            "OpenTelemetry initialized",
+            extra={"otlp_endpoint": otlp_endpoint or "none"},
+        )
+    else:
+        logger.info("OpenTelemetry not available, skipping initialization")
+
     # Initialize feedback system (non-critical, graceful degradation)
     feedback_config = FeedbackConfig()
     if feedback_config.enabled:
@@ -381,6 +427,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    if _OTEL_AVAILABLE:
+        FastAPIInstrumentor.instrument_app(app)
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
@@ -448,6 +497,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.state.get")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -477,6 +528,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error reading state: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -500,6 +553,9 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.state.update")
+        span.set_attribute("state.id", "current_state")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -629,6 +685,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error updating state: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -812,6 +870,9 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.plan")
+        span.set_attribute("plan.goal", str(request.goal)[:200])
         if not _planner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -913,6 +974,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error generating plan: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -935,6 +998,8 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.imagine")
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1000,6 +1065,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error generating imagined states: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1023,6 +1090,9 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.simulate")
+        span.set_attribute("simulate.horizon", request.k_steps)
         if not _jepa_runner:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1224,6 +1294,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error running simulation: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1248,6 +1320,12 @@ def create_app() -> FastAPI:
 
         Note: Authentication is disabled for local development.
         """
+        span = get_current_span()
+        span.update_name("sophia.ingest.hermes_proposal")
+        span.set_attribute("ingest.proposal_id", str(request.proposal_id))
+        span.set_attribute(
+            "ingest.node_count", len(request.plan_steps) if request.plan_steps else 0
+        )
         # Log the proposal for observability
         logger.info(
             f"Received proposal {request.proposal_id} from {request.source_service} "
@@ -1305,6 +1383,12 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.execute")
+        span.set_attribute("execute.plan_id", str(request.plan_id))
+        span.set_attribute(
+            "execute.step", request.step_index if request.step_index is not None else -1
+        )
         if not _executor:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1514,6 +1598,8 @@ def create_app() -> FastAPI:
             # Let HTTP exceptions pass through with their status codes
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error executing plan: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1549,6 +1635,9 @@ def create_app() -> FastAPI:
 
         Requires authentication via Bearer token.
         """
+        span = get_current_span()
+        span.update_name("sophia.hcg.snapshot")
+        span.set_attribute("hcg.limit", limit)
         if not _hcg_client:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1608,6 +1697,8 @@ def create_app() -> FastAPI:
         except HTTPException:
             raise
         except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
             logger.error(f"Error fetching HCG snapshot: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

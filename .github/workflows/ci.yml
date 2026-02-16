@@ -30,7 +30,7 @@ jobs:
       python_versions: '["3.11","3.12"]'
       python_package_manager: 'poetry'
       python_command_prefix: 'poetry run '
-      poetry_install_args: '--with dev'
+      poetry_install_args: '--with dev -E otel'
       python_lint_paths: 'src tests'
       mypy_targets: 'src'
       # Start test services (Neo4j, Milvus, Sophia) using compose overlay
@@ -42,7 +42,7 @@ jobs:
         echo "Waiting for etcd..."
         timeout 60 bash -c 'until docker exec sophia-test-milvus-etcd etcdctl endpoint health 2>/dev/null; do sleep 2; done'
         echo "Waiting for MinIO..."
-        timeout 60 bash -c 'until curl -f http://localhost:47900/minio/health/live 2>/dev/null; do sleep 2; done'
+        timeout 60 bash -c 'until [ "$(docker inspect -f {{.State.Health.Status}} sophia-test-milvus-minio 2>/dev/null)" = "healthy" ]; do sleep 2; done'
         echo "Waiting for Milvus..."
         timeout 120 bash -c 'until curl -f http://localhost:47091/healthz 2>/dev/null; do sleep 2; done'
         echo "Waiting for Sophia API..."
@@ -88,7 +88,7 @@ jobs:
           virtualenvs-in-project: true
       
       - name: Install dependencies with ML extras
-        run: poetry install --with dev,ml
+        run: poetry install --with dev,ml -E otel
       
       - name: Run ML tests
         run: |
