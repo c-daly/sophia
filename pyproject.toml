@@ -42,7 +42,7 @@ opentelemetry-instrumentation-fastapi = {version = "^0.41b0", optional = true}
 opentelemetry-exporter-otlp = {version = "^1.20.0", optional = true}
 # Pinned to specific tag for stability
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
-logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.4.0"}
+logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.4.1"}
 
 [tool.poetry.extras]
 # OpenTelemetry observability (optional, graceful fallback when absent)
