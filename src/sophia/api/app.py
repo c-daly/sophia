@@ -11,31 +11,9 @@ from dotenv import load_dotenv
 # Load .env file before any pydantic-settings models are instantiated
 load_dotenv()
 
-try:
-    from logos_observability import setup_telemetry
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.trace import StatusCode, get_current_span
-
-    _OTEL_AVAILABLE = True
-except ImportError:
-    setup_telemetry = None  # type: ignore[assignment]
-    FastAPIInstrumentor = None  # type: ignore[assignment,misc]
-    from types import SimpleNamespace
-
-    StatusCode = SimpleNamespace(ERROR=None, OK=None)  # type: ignore[assignment,misc]
-
-    def get_current_span() -> Any:  # type: ignore[misc]
-        """No-op stub when OTel is not installed."""
-        from types import SimpleNamespace
-
-        return SimpleNamespace(
-            update_name=lambda *a: None,
-            set_attribute=lambda *a: None,
-            set_status=lambda *a: None,
-            record_exception=lambda *a: None,
-        )
-
-    _OTEL_AVAILABLE = False
+from logos_observability import setup_telemetry
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.trace import StatusCode, get_current_span
 
 
 from fastapi import (
@@ -267,23 +245,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting Sophia API service...")
 
     # Initialize OpenTelemetry
-    if _OTEL_AVAILABLE:
-        otlp_endpoint = get_env_value("OTEL_EXPORTER_OTLP_ENDPOINT")
-        setup_telemetry(
-            service_name=get_env_value("OTEL_SERVICE_NAME", default="sophia")
-            or "sophia",
-            export_to_console=(
-                get_env_value("OTEL_CONSOLE_EXPORT", default="false") or "false"
-            ).lower()
-            == "true",
-            otlp_endpoint=otlp_endpoint,
-        )
-        logger.info(
-            "OpenTelemetry initialized",
-            extra={"otlp_endpoint": otlp_endpoint or "none"},
-        )
-    else:
-        logger.info("OpenTelemetry not available, skipping initialization")
+    otlp_endpoint = get_env_value("OTEL_EXPORTER_OTLP_ENDPOINT")
+    setup_telemetry(
+        service_name=get_env_value("OTEL_SERVICE_NAME", default="sophia")
+        or "sophia",
+        export_to_console=(
+            get_env_value("OTEL_CONSOLE_EXPORT", default="false") or "false"
+        ).lower()
+        == "true",
+        otlp_endpoint=otlp_endpoint,
+    )
+    logger.info(
+        "OpenTelemetry initialized",
+        extra={"otlp_endpoint": otlp_endpoint or "none"},
+    )
 
     # Initialize feedback system (non-critical, graceful degradation)
     feedback_config = FeedbackConfig()
@@ -427,8 +402,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    if _OTEL_AVAILABLE:
-        FastAPIInstrumentor.instrument_app(app)
+    FastAPIInstrumentor.instrument_app(app)
 
     # CORS middleware
     app.add_middleware(
