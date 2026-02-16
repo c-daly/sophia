@@ -30,7 +30,7 @@ jobs:
       python_versions: '["3.11","3.12"]'
       python_package_manager: 'poetry'
       python_command_prefix: 'poetry run '
-      poetry_install_args: '--with dev -E otel'
+      poetry_install_args: '--with dev'
       python_lint_paths: 'src tests'
       mypy_targets: 'src'
       # Start test services (Neo4j, Milvus, Sophia) using compose overlay
@@ -88,7 +88,7 @@ jobs:
           virtualenvs-in-project: true
       
       - name: Install dependencies with ML extras
-        run: poetry install --with dev,ml -E otel
+        run: poetry install --with dev,ml
       
       - name: Run ML tests
         run: |
