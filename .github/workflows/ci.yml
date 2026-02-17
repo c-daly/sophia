@@ -25,7 +25,7 @@ jobs:
   # Uses consistent 47xxx ports per LOGOS ecosystem standard (logos_config.SOPHIA_PORTS)
   # ---------------------------------------------------------------------------
   standard:
-    uses: c-daly/logos/.github/workflows/reusable-standard-ci.yml@main
+    uses: c-daly/logos/.github/workflows/reusable-standard-ci.yml@ci/v1
     with:
       python_versions: '["3.12"]'
       python_package_manager: 'poetry'
