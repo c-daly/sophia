@@ -27,7 +27,7 @@ jobs:
   standard:
     uses: c-daly/logos/.github/workflows/reusable-standard-ci.yml@main
     with:
-      python_versions: '["3.11","3.12"]'
+      python_versions: '["3.12"]'
       python_package_manager: 'poetry'
       python_command_prefix: 'poetry run '
       poetry_install_args: '--with dev'
@@ -75,10 +75,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       
       - name: Install Poetry
         uses: snok/install-poetry@v1
