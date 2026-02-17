@@ -19,7 +19,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<4.0"
+python = ">=3.12,<4.0"
 pydantic = ">=2.0.0"
 networkx = ">=3.0"
 sqlalchemy = ">=2.0.0"
@@ -37,7 +37,7 @@ redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
 # Pinned to specific tag for stability
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
-logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.4.1"}
+logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.4.2"}
 
 [tool.poetry.group.ml]
 optional = true
@@ -65,12 +65,12 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
-target-version = ['py311']
+target-version = ['py312']
 exclude = "src/logos_sophia_sdk"
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 exclude = ["src/logos_sophia_sdk"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -78,7 +78,7 @@ exclude = ["src/logos_sophia_sdk"]
 "src/sophia/api/app.py" = ["E402"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
