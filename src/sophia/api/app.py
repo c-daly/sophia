@@ -247,8 +247,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize OpenTelemetry
     otlp_endpoint = get_env_value("OTEL_EXPORTER_OTLP_ENDPOINT")
     setup_telemetry(
-        service_name=get_env_value("OTEL_SERVICE_NAME", default="sophia")
-        or "sophia",
+        service_name=get_env_value("OTEL_SERVICE_NAME", default="sophia") or "sophia",
         export_to_console=(
             get_env_value("OTEL_CONSOLE_EXPORT", default="false") or "false"
         ).lower()
