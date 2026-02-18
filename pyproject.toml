@@ -37,7 +37,7 @@ redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
 # Pinned to specific tag for stability
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
-logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.4.2"}
+logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "feat/cognitive-loop"}
 
 [tool.poetry.group.ml]
 optional = true

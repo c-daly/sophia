@@ -73,7 +73,7 @@ class Planner:
                 edges = self._kg.get_edges_from(node_id)
                 for edge in edges:
                     if (
-                        edge.relation == "achieves"
+                        edge.relation.upper() == "ACHIEVES"
                         and edge.properties.get("state") == target_state
                     ):
                         # Found the final action, now trace back prerequisites
@@ -106,7 +106,7 @@ class Planner:
             for node_id in self._kg._nodes.keys():
                 edges = self._kg.get_edges_from(node_id)
                 for edge in edges:
-                    if edge.target == current_id and edge.relation == "enables":
+                    if edge.target == current_id and edge.relation.upper() == "ENABLES":
                         prerequisites.append(node_id)
 
             # Recursively trace prerequisites
