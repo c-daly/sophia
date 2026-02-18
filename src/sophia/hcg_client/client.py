@@ -315,7 +315,8 @@ class HCGClient(LogosHCGClient):
         MERGE (edge:Node {source: $source_uuid, target: $target_uuid, relation: $relation})
         ON CREATE SET edge += $props,
                       edge.name = src.name + '_' + $relation + '_' + tgt.name
-        ON MATCH SET edge.updated_at = $now
+        ON MATCH SET edge += $props,
+                     edge.updated_at = $now
         MERGE (edge)-[:FROM]->(src)
         MERGE (edge)-[:TO]->(tgt)
         RETURN edge.uuid AS uuid
@@ -418,23 +419,16 @@ class HCGClient(LogosHCGClient):
         MATCH (n:Node {uuid: $uuid})
         WHERE n.relation IS NULL
         WITH n
-        OPTIONAL MATCH (edge1:Node)-[:FROM]->(n)
-        WHERE edge1.relation IS NOT NULL
-        WITH n, collect(edge1) AS outgoing_edges
-        OPTIONAL MATCH (edge2:Node)-[:TO]->(n)
-        WHERE edge2.relation IS NOT NULL
-        WITH n, outgoing_edges, collect(edge2) AS incoming_edges
-        WITH n, outgoing_edges + incoming_edges AS all_edges
-        UNWIND all_edges AS edge
-        OPTIONAL MATCH (edge)-[:TO]->(neighbor:Node)
-        WHERE neighbor.uuid <> $uuid AND neighbor.relation IS NULL
-        WITH collect(DISTINCT neighbor) AS to_neighbors
-        OPTIONAL MATCH (edge3:Node)-[:TO]->(n2:Node {uuid: $uuid})
-        WHERE edge3.relation IS NOT NULL
-        OPTIONAL MATCH (edge3)-[:FROM]->(src:Node)
-        WHERE src.uuid <> $uuid AND src.relation IS NULL
-        WITH to_neighbors, collect(DISTINCT src) AS from_neighbors
-        WITH to_neighbors + from_neighbors AS all_neighbors
+        // Outgoing: n <-[:FROM]- edge -[:TO]-> neighbor
+        OPTIONAL MATCH (n)<-[:FROM]-(e1:Node)-[:TO]->(nb1:Node)
+        WHERE e1.relation IS NOT NULL AND nb1.relation IS NULL
+              AND nb1.uuid <> $uuid
+        WITH n, collect(DISTINCT nb1) AS out_neighbors
+        // Incoming: n <-[:TO]- edge -[:FROM]-> neighbor
+        OPTIONAL MATCH (n)<-[:TO]-(e2:Node)-[:FROM]->(nb2:Node)
+        WHERE e2.relation IS NOT NULL AND nb2.relation IS NULL
+              AND nb2.uuid <> $uuid
+        WITH out_neighbors + collect(DISTINCT nb2) AS all_neighbors
         UNWIND all_neighbors AS neighbor
         WHERE neighbor IS NOT NULL
         RETURN DISTINCT neighbor.uuid as uuid, neighbor.name as name,

@@ -140,7 +140,7 @@ def test_add_edge_uses_validator(
     execute = MagicMock(return_value=[{"uuid": "edge-1"}])
     monkeypatch.setattr(client, "_execute_query", execute)
 
-    result = client.add_edge("edge-1", "a", "b", "RELATES_TO")
+    result = client.add_edge("a", "b", "RELATES_TO", edge_uuid="edge-1")
 
     assert result == "edge-1"
     validator.validate_edge.assert_called_once()
@@ -163,7 +163,7 @@ def test_add_edge_with_bidirectional(
     execute = MagicMock(return_value=[{"uuid": "edge-2"}])
     monkeypatch.setattr(client, "_execute_query", execute)
 
-    result = client.add_edge("edge-2", "a", "b", "RELATED_TO", bidirectional=True)
+    result = client.add_edge("a", "b", "RELATED_TO", edge_uuid="edge-2", bidirectional=True)
 
     assert result == "edge-2"
     params = execute.call_args[0][1]

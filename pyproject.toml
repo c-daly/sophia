@@ -35,7 +35,7 @@ pymilvus = ">=2.5.0"
 urllib3 = "^2.5.0"
 redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
-# Pinned to specific tag for stability
+# Tracks feat/cognitive-loop branch for reified-edge model support
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
 logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "feat/cognitive-loop"}
 

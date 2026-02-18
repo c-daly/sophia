@@ -15,6 +15,22 @@ logger = logging.getLogger(__name__)
 
 ENTITY_MATCH_THRESHOLD = 0.5
 
+# Milvus collection types to search for context.
+SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")
+
+# Map proposed node types to the Milvus collection used for dedup/storage.
+_NODE_TYPE_TO_COLLECTION = {
+    "entity": "Entity",
+    "concept": "Concept",
+    "state": "State",
+    "process": "Process",
+}
+
+
+def _collection_for(node_type: str) -> str:
+    """Return the Milvus collection name for a given semantic node type."""
+    return _NODE_TYPE_TO_COLLECTION.get(node_type.lower(), "Entity")
+
 
 class ProposalProcessor:
     """Processes proposals from Hermes into graph knowledge."""
@@ -31,10 +47,10 @@ class ProposalProcessor:
         # 1. Search for relevant existing context using document embedding
         doc_emb = proposal.get("document_embedding")
         if doc_emb and doc_emb.get("embedding"):
-            for node_type in ["Entity", "Concept", "State", "Process", "Edge"]:
+            for collection in SEARCHABLE_COLLECTIONS:
                 try:
                     matches = self._milvus.search_similar(
-                        node_type=node_type,
+                        node_type=collection,
                         query_embedding=doc_emb["embedding"],
                         top_k=5,
                     )
@@ -51,7 +67,7 @@ class ProposalProcessor:
                                 }
                             )
                 except Exception as e:
-                    logger.debug(f"Search in {node_type} failed: {e}")
+                    logger.debug(f"Search in {collection} failed: {e}")
 
             relevant_context.sort(key=lambda x: x.get("score", float("inf")))
             relevant_context = relevant_context[:10]
@@ -64,14 +80,14 @@ class ProposalProcessor:
 
             node_type = proposed.get("type", "unknown")
             embedding = proposed.get("embedding")
-            embedding_id = proposed.get("embedding_id")
             model = proposed.get("model", "unknown")
+            collection = _collection_for(node_type)
 
             # 2a. Search for existing node with similar embedding
             if embedding:
                 try:
                     existing = self._milvus.search_similar(
-                        node_type="Entity",
+                        node_type=collection,
                         query_embedding=embedding,
                         top_k=1,
                     )
@@ -107,9 +123,9 @@ class ProposalProcessor:
                 node_uuid = self._hcg.add_node(
                     name=name,
                     node_type=node_type,
+                    source=proposal.get("source_service", "hermes"),
+                    derivation="observed",
                     properties={
-                        "source": proposal.get("source_service", "hermes"),
-                        "derivation": "observed",
                         "confidence": proposal.get("confidence", 0.7),
                         "raw_text": proposal.get("raw_text", ""),
                         **proposed.get("properties", {}),
@@ -121,10 +137,10 @@ class ProposalProcessor:
                 continue
 
             # 2c. Store embedding in Milvus
-            if embedding and embedding_id:
+            if embedding:
                 try:
                     self._milvus.upsert_embedding(
-                        node_type="Entity",
+                        node_type=collection,
                         uuid=node_uuid,
                         embedding=embedding,
                         model=model,

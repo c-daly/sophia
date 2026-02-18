@@ -98,7 +98,6 @@ class TestProposalProcessor:
             [],  # Concept doc search
             [],  # State doc search
             [],  # Process doc search
-            [],  # Edge doc search
             [
                 {"uuid": "existing-paris", "score": 0.2}
             ],  # entity match (below threshold)
