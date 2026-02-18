@@ -283,9 +283,13 @@ class SHACLValidator:
 
         # Reified edge node optional fields
         if "bidirectional" in edge_data:
-            g.add((edge_uri, ex.bidirectional, Literal(
-                edge_data["bidirectional"], datatype=XSD.boolean
-            )))
+            g.add(
+                (
+                    edge_uri,
+                    ex.bidirectional,
+                    Literal(edge_data["bidirectional"], datatype=XSD.boolean),
+                )
+            )
 
         if "properties" in edge_data:
             for key, value in edge_data["properties"].items():

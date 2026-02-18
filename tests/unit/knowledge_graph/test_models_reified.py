@@ -16,7 +16,10 @@ def test_node_has_no_ancestors():
 
 def test_node_has_no_is_type_definition():
     n = Node(name="Paris", type="location")
-    assert not hasattr(n, "is_type_definition") or "is_type_definition" not in n.model_fields
+    assert (
+        not hasattr(n, "is_type_definition")
+        or "is_type_definition" not in n.model_fields
+    )
 
 
 def test_edge_has_bidirectional():

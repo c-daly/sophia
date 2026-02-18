@@ -239,7 +239,22 @@ _proposal_processor: Optional[ProposalProcessor] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task, _proposal_processor
+    global \
+        _planner, \
+        _executor, \
+        _hcg_client, \
+        _cwm_g, \
+        _cwm_a, \
+        _cwm_a_state, \
+        _kg, \
+        _jepa_runner, \
+        _media_storage, \
+        _media_ingestion, \
+        _cwm_persistence, \
+        _feedback_dispatcher, \
+        _feedback_worker, \
+        _feedback_worker_task, \
+        _proposal_processor
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -620,12 +635,16 @@ def create_app() -> FastAPI:
                                 before=(
                                     before_val
                                     if isinstance(before_val, dict)
-                                    else {"value": before_val} if before_val else None
+                                    else {"value": before_val}
+                                    if before_val
+                                    else None
                                 ),
                                 after=(
                                     after_val
                                     if isinstance(after_val, dict)
-                                    else {"value": after_val} if after_val else None
+                                    else {"value": after_val}
+                                    if after_val
+                                    else None
                                 ),
                                 changed_properties=(
                                     changed_props if changed_props else None
@@ -1357,7 +1376,9 @@ def create_app() -> FastAPI:
                 logger.error(f"ProposalProcessor failed for {request.proposal_id}: {e}")
                 span.record_exception(e)
         else:
-            logger.debug("ProposalProcessor not initialized, skipping cognitive processing")
+            logger.debug(
+                "ProposalProcessor not initialized, skipping cognitive processing"
+            )
 
         # Emit feedback to Hermes
         if _feedback_dispatcher:
@@ -1368,8 +1389,8 @@ def create_app() -> FastAPI:
                         feedback_type="observation",
                         outcome="accepted",
                         reason=f"Processed proposal {request.proposal_id}: "
-                               f"{len(stored_node_ids)} nodes stored, "
-                               f"{len(relevant_context)} context items",
+                        f"{len(stored_node_ids)} nodes stored, "
+                        f"{len(relevant_context)} context items",
                     )
                 )
             except Exception as e:

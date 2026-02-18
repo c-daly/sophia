@@ -96,8 +96,7 @@ def seed_type_definitions(hcg_client: HCGClient) -> None:
         )
 
     logger.info(
-        f"Seeded {len(created_types)} type nodes with "
-        f"{len(TYPE_HIERARCHY)} IS_A edges"
+        f"Seeded {len(created_types)} type nodes with {len(TYPE_HIERARCHY)} IS_A edges"
     )
 
 

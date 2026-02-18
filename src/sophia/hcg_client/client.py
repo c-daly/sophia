@@ -302,9 +302,7 @@ class HCGClient(LogosHCGClient):
             "updated_at": now,
         }
         if properties:
-            encoded = self._encode_properties(
-                cast(Mapping[str, Any], properties)
-            )
+            encoded = self._encode_properties(cast(Mapping[str, Any], properties))
             props.update(encoded)
 
         # MERGE on composite key (source + target + relation) for idempotency.
@@ -319,13 +317,16 @@ class HCGClient(LogosHCGClient):
         MERGE (edge)-[:TO]->(tgt)
         RETURN edge.uuid AS uuid
         """
-        result = self._execute_query(query, {
-            "source_uuid": source_uuid,
-            "target_uuid": target_uuid,
-            "relation": relation,
-            "props": props,
-            "now": now,
-        })
+        result = self._execute_query(
+            query,
+            {
+                "source_uuid": source_uuid,
+                "target_uuid": target_uuid,
+                "relation": relation,
+                "props": props,
+                "now": now,
+            },
+        )
         # If MERGE matched an existing edge, return its UUID instead
         if result and result[0].get("uuid"):
             return str(result[0]["uuid"])
@@ -383,8 +384,15 @@ class HCGClient(LogosHCGClient):
         props = dict(records[0]["props"])
         # Remove structural properties from the extra-props dict
         for key in [
-            "uuid", "name", "type", "relation", "source", "target",
-            "bidirectional", "created_at", "updated_at",
+            "uuid",
+            "name",
+            "type",
+            "relation",
+            "source",
+            "target",
+            "bidirectional",
+            "created_at",
+            "updated_at",
         ]:
             props.pop(key, None)
         props = self._decode_properties(props)
@@ -464,8 +472,15 @@ class HCGClient(LogosHCGClient):
         for record in records:
             props = dict(record["props"])
             for key in [
-                "uuid", "name", "type", "relation", "source", "target",
-                "bidirectional", "created_at", "updated_at",
+                "uuid",
+                "name",
+                "type",
+                "relation",
+                "source",
+                "target",
+                "bidirectional",
+                "created_at",
+                "updated_at",
             ]:
                 props.pop(key, None)
             props = self._decode_properties(props)
@@ -586,8 +601,15 @@ class HCGClient(LogosHCGClient):
         for record in records:
             props = dict(record["props"])
             for key in [
-                "uuid", "name", "type", "relation", "source", "target",
-                "bidirectional", "created_at", "updated_at",
+                "uuid",
+                "name",
+                "type",
+                "relation",
+                "source",
+                "target",
+                "bidirectional",
+                "created_at",
+                "updated_at",
             ]:
                 props.pop(key, None)
             props = self._decode_properties(props)
@@ -603,9 +625,7 @@ class HCGClient(LogosHCGClient):
             )
         return edges
 
-    def get_subgraph(
-        self, node_uuids: List[str]
-    ) -> Dict[str, List[Dict[str, Any]]]:
+    def get_subgraph(self, node_uuids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         """Return nodes and connecting edge nodes for the given UUIDs.
 
         Args:
@@ -624,9 +644,7 @@ class HCGClient(LogosHCGClient):
         RETURN n.uuid as uuid, n.name as name, n.type as type,
                properties(n) as props
         """
-        node_records = self._execute_read(
-            nodes_query, {"uuids": node_uuids}
-        )
+        node_records = self._execute_read(nodes_query, {"uuids": node_uuids})
 
         nodes: List[Dict[str, Any]] = []
         for record in node_records:
@@ -656,16 +674,21 @@ class HCGClient(LogosHCGClient):
                edge.bidirectional as bidirectional,
                properties(edge) as props
         """
-        edge_records = self._execute_read(
-            edges_query, {"uuids": node_uuids}
-        )
+        edge_records = self._execute_read(edges_query, {"uuids": node_uuids})
 
         edges: List[Dict[str, Any]] = []
         for record in edge_records:
             props = dict(record["props"])
             for key in [
-                "uuid", "name", "type", "relation", "source", "target",
-                "bidirectional", "created_at", "updated_at",
+                "uuid",
+                "name",
+                "type",
+                "relation",
+                "source",
+                "target",
+                "bidirectional",
+                "created_at",
+                "updated_at",
             ]:
                 props.pop(key, None)
             props = self._decode_properties(props)

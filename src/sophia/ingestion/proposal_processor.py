@@ -7,6 +7,7 @@ for relevant existing context to return.
 Sophia operates on embeddings, not text. Text properties exist on nodes
 for Hermes's benefit when context is returned.
 """
+
 import logging
 from typing import Any
 
@@ -40,13 +41,15 @@ class ProposalProcessor:
                     for match in matches:
                         node = self._hcg.get_node(match["uuid"])
                         if node:
-                            relevant_context.append({
-                                "node_uuid": match["uuid"],
-                                "name": node.get("name", ""),
-                                "type": node.get("type", ""),
-                                "properties": node.get("properties", {}),
-                                "score": match["score"],
-                            })
+                            relevant_context.append(
+                                {
+                                    "node_uuid": match["uuid"],
+                                    "name": node.get("name", ""),
+                                    "type": node.get("type", ""),
+                                    "properties": node.get("properties", {}),
+                                    "score": match["score"],
+                                }
+                            )
                 except Exception as e:
                     logger.debug(f"Search in {node_type} failed: {e}")
 
@@ -80,15 +83,21 @@ class ProposalProcessor:
                                 f"'{existing_node.get('name')}' "
                                 f"(L2={existing[0]['score']:.3f}), skipping creation"
                             )
-                            if not any(c["node_uuid"] == existing[0]["uuid"]
-                                       for c in relevant_context):
-                                relevant_context.append({
-                                    "node_uuid": existing[0]["uuid"],
-                                    "name": existing_node.get("name", ""),
-                                    "type": existing_node.get("type", ""),
-                                    "properties": existing_node.get("properties", {}),
-                                    "score": existing[0]["score"],
-                                })
+                            if not any(
+                                c["node_uuid"] == existing[0]["uuid"]
+                                for c in relevant_context
+                            ):
+                                relevant_context.append(
+                                    {
+                                        "node_uuid": existing[0]["uuid"],
+                                        "name": existing_node.get("name", ""),
+                                        "type": existing_node.get("type", ""),
+                                        "properties": existing_node.get(
+                                            "properties", {}
+                                        ),
+                                        "score": existing[0]["score"],
+                                    }
+                                )
                             continue
                 except Exception as e:
                     logger.debug(f"Entity match search failed for '{name}': {e}")

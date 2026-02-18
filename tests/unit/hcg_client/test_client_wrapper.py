@@ -163,9 +163,7 @@ def test_add_edge_with_bidirectional(
     execute = MagicMock(return_value=[{"uuid": "edge-2"}])
     monkeypatch.setattr(client, "_execute_query", execute)
 
-    result = client.add_edge(
-        "edge-2", "a", "b", "RELATED_TO", bidirectional=True
-    )
+    result = client.add_edge("edge-2", "a", "b", "RELATED_TO", bidirectional=True)
 
     assert result == "edge-2"
     params = execute.call_args[0][1]
@@ -409,7 +407,12 @@ def test_get_subgraph_fetches_nodes_and_edges(
         calls.append(query)
         if "n.relation IS NULL" in query:
             return [
-                {"uuid": "a", "name": "A", "type": "concept", "props": {"uuid": "a", "name": "A", "type": "concept"}},
+                {
+                    "uuid": "a",
+                    "name": "A",
+                    "type": "concept",
+                    "props": {"uuid": "a", "name": "A", "type": "concept"},
+                },
             ]
         elif "edge.relation IS NOT NULL" in query:
             return []
