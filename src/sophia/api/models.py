@@ -530,6 +530,14 @@ class HermesProposalRequest(BaseModel):
         default=None,
         description="Additional metadata for provenance tracking",
     )
+    proposed_nodes: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Structured entity proposals with embeddings",
+    )
+    document_embedding: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Embedding of the full document text",
+    )
 
 
 class HermesProposalResponse(BaseModel):
@@ -551,6 +559,10 @@ class HermesProposalResponse(BaseModel):
     validation_results: Optional[Dict[str, Any]] = Field(
         default=None,
         description="SHACL validation results if applicable",
+    )
+    relevant_context: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Relevant graph context for LLM prompt",
     )
 
 

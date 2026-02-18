@@ -88,6 +88,7 @@ from sophia.jepa.models import (
 )
 from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
+from sophia.ingestion.proposal_processor import ProposalProcessor
 from sophia.cwm import CWMPersistence
 from sophia.feedback import (
     FeedbackConfig,
@@ -232,12 +233,13 @@ _cwm_persistence: Optional[CWMPersistence] = None
 _feedback_dispatcher: Optional[FeedbackDispatcher] = None
 _feedback_worker: Optional[FeedbackWorker] = None
 _feedback_worker_task: Optional[Any] = None
+_proposal_processor: Optional[ProposalProcessor] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task, _proposal_processor
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -362,6 +364,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info(
             f"Media ingestion service initialized with storage root: {storage_root}"
         )
+
+    # Initialize ProposalProcessor (requires HCG client + Milvus)
+    if _hcg_client:
+        try:
+            from logos_hcg.sync import HCGMilvusSync
+
+            _milvus_sync = HCGMilvusSync(
+                milvus_host=milvus_config.host,
+                milvus_port=str(milvus_config.port),
+            )
+            _milvus_sync.connect()
+            _proposal_processor = ProposalProcessor(
+                hcg_client=_hcg_client,
+                milvus_sync=_milvus_sync,
+            )
+            logger.info("ProposalProcessor initialized")
+        except Exception as e:
+            logger.warning(f"ProposalProcessor unavailable (Milvus not ready): {e}")
+            # Still create processor without Milvus — it will fail gracefully on searches
+            _proposal_processor = None
 
     logger.info("Sophia API service started successfully")
 
@@ -1316,8 +1338,26 @@ def create_app() -> FastAPI:
                 f"Proposal {request.proposal_id} raw text: {request.raw_text[:100]}..."
             )
 
-        # TODO: Pass to Sophia's cognitive processing
-        # For now, just acknowledge receipt
+        # Process through ProposalProcessor if available
+        stored_node_ids: List[str] = []
+        relevant_context: List[Dict[str, Any]] = []
+
+        if _proposal_processor:
+            try:
+                result = _proposal_processor.process(request.model_dump())
+                stored_node_ids = result.get("stored_node_ids", [])
+                relevant_context = result.get("relevant_context", [])
+                span.set_attribute("ingest.stored_count", len(stored_node_ids))
+                span.set_attribute("ingest.context_count", len(relevant_context))
+                logger.info(
+                    f"Proposal {request.proposal_id}: stored {len(stored_node_ids)} nodes, "
+                    f"found {len(relevant_context)} context items"
+                )
+            except Exception as e:
+                logger.error(f"ProposalProcessor failed for {request.proposal_id}: {e}")
+                span.record_exception(e)
+        else:
+            logger.debug("ProposalProcessor not initialized, skipping cognitive processing")
 
         # Emit feedback to Hermes
         if _feedback_dispatcher:
@@ -1327,7 +1367,9 @@ def create_app() -> FastAPI:
                         correlation_id=request.correlation_id,
                         feedback_type="observation",
                         outcome="accepted",
-                        reason=f"Received proposal {request.proposal_id} from {request.source_service}",
+                        reason=f"Processed proposal {request.proposal_id}: "
+                               f"{len(stored_node_ids)} nodes stored, "
+                               f"{len(relevant_context)} context items",
                     )
                 )
             except Exception as e:
@@ -1335,7 +1377,8 @@ def create_app() -> FastAPI:
 
         return HermesProposalResponse(
             proposal_id=request.proposal_id,
-            stored_node_ids=[],  # No nodes created - proposals are logged, not stored
+            stored_node_ids=stored_node_ids,
+            relevant_context=relevant_context,
             status="accepted",
         )
 
