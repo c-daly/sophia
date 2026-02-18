@@ -1,4 +1,9 @@
-"""Knowledge graph implementation using NetworkX."""
+"""Knowledge graph implementation using NetworkX.
+
+Edges are stored as reified nodes connected to source and target via
+structural :FROM/:TO relationships, matching the Neo4j reified-edge model
+used in the logos foundry.
+"""
 
 from typing import Dict, List, Optional
 
@@ -12,6 +17,8 @@ class KnowledgeGraph:
     """In-memory knowledge graph using NetworkX.
 
     Provides basic operations for managing nodes and edges in a directed graph.
+    Edges are reified: each Edge is stored as a graph node with structural
+    ``FROM`` and ``TO`` connections to the source and target content nodes.
     """
 
     def __init__(self) -> None:
@@ -27,10 +34,15 @@ class KnowledgeGraph:
             node: The node to add
         """
         self._nodes[node.id] = node
-        self._graph.add_node(node.id, data=node)
+        self._graph.add_node(node.id, data=node, is_edge=False)
 
     def add_edge(self, edge: Edge) -> None:
-        """Add an edge to the knowledge graph.
+        """Add a reified edge to the knowledge graph.
+
+        The edge is stored as a node in the NetworkX graph connected via
+        structural ``FROM`` and ``TO`` relationships::
+
+            (source)<--[FROM]--(edge_node)--[TO]-->(target)
 
         Args:
             edge: The edge to add
@@ -44,7 +56,11 @@ class KnowledgeGraph:
             raise ValueError(f"Target node {edge.target} not found")
 
         self._edges[edge.id] = edge
-        self._graph.add_edge(edge.source, edge.target, data=edge)
+        # Store edge as a graph node
+        self._graph.add_node(edge.id, data=edge, is_edge=True)
+        # Structural relationships: edge --FROM--> source, edge --TO--> target
+        self._graph.add_edge(edge.id, edge.source, rel="FROM")
+        self._graph.add_edge(edge.id, edge.target, rel="TO")
 
     def get_node(self, node_id: str) -> Optional[Node]:
         """Get a node by ID.
@@ -69,41 +85,67 @@ class KnowledgeGraph:
         return self._edges.get(edge_id)
 
     def get_neighbors(self, node_id: str) -> List[Node]:
-        """Get all neighbors of a node.
+        """Get all content-node neighbors of a node via reified edges.
+
+        Traverses edge nodes that connect to *node_id* via :FROM or :TO
+        and returns the content nodes on the other side.
 
         Args:
             node_id: The ID of the node
 
         Returns:
-            List of neighboring nodes
+            List of neighboring content nodes (deduplicated)
         """
         if node_id not in self._nodes:
             return []
 
-        neighbor_ids = self._graph.neighbors(node_id)
-        return [self._nodes[nid] for nid in neighbor_ids]
+        seen: set[str] = set()
+        neighbors: List[Node] = []
+
+        # Find edge nodes that point TO this node (outgoing edges from node_id)
+        # and edge nodes that have FROM this node (incoming edges to node_id)
+        for edge in self._edges.values():
+            if edge.source == node_id:
+                if edge.target not in seen:
+                    seen.add(edge.target)
+                    neighbors.append(self._nodes[edge.target])
+            elif edge.target == node_id:
+                if edge.source not in seen:
+                    seen.add(edge.source)
+                    neighbors.append(self._nodes[edge.source])
+
+        return neighbors
 
     def get_edges_from(self, node_id: str) -> List[Edge]:
         """Get all outgoing edges from a node.
 
         Args:
-            node_id: The ID of the node
+            node_id: The ID of the source node
 
         Returns:
-            List of outgoing edges
+            List of edges whose source is *node_id*
         """
         if node_id not in self._nodes:
             return []
 
-        edges = []
-        for _, target, edge_data in self._graph.out_edges(node_id, data=True):
-            if "data" in edge_data:
-                edges.append(edge_data["data"])
+        return [e for e in self._edges.values() if e.source == node_id]
 
-        return edges
+    def get_edges_to(self, node_id: str) -> List[Edge]:
+        """Get all incoming edges to a node.
+
+        Args:
+            node_id: The ID of the target node
+
+        Returns:
+            List of edges whose target is *node_id*
+        """
+        if node_id not in self._nodes:
+            return []
+
+        return [e for e in self._edges.values() if e.target == node_id]
 
     def remove_node(self, node_id: str) -> bool:
-        """Remove a node and its edges from the graph.
+        """Remove a node and any edge nodes that reference it.
 
         Args:
             node_id: The ID of the node to remove
@@ -114,26 +156,29 @@ class KnowledgeGraph:
         if node_id not in self._nodes:
             return False
 
-        # Remove associated edges
+        # Collect edge nodes that reference this node
         edges_to_remove = [
             edge_id
             for edge_id, edge in self._edges.items()
             if edge.source == node_id or edge.target == node_id
         ]
         for edge_id in edges_to_remove:
+            # Remove the edge's graph-node and its structural relationships
+            if self._graph.has_node(edge_id):
+                self._graph.remove_node(edge_id)
             del self._edges[edge_id]
 
-        # Remove node
+        # Remove content node
         del self._nodes[node_id]
         self._graph.remove_node(node_id)
 
         return True
 
     def node_count(self) -> int:
-        """Get the number of nodes in the graph.
+        """Get the number of content nodes in the graph.
 
         Returns:
-            Number of nodes
+            Number of content nodes (excludes reified edge nodes)
         """
         return len(self._nodes)
 

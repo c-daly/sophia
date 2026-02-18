@@ -181,8 +181,6 @@ def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
                     uuid=node_data["uuid"],
                     name=node_data["name"],
                     type=node_data["type"],
-                    ancestors=node_data.get("ancestors", []),
-                    is_type_definition=node_data.get("is_type_definition", False),
                     properties=node_data.get("properties", {}),
                 )
                 kg.add_node(node)
@@ -1631,7 +1629,7 @@ def create_app() -> FastAPI:
                         type=node["type"],
                         name=node["name"],
                         properties=props,
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=props.get("created"),
                     )
                 )
@@ -1710,7 +1708,7 @@ def create_app() -> FastAPI:
                 type=node["type"],
                 name=node["name"],
                 properties=props,
-                labels=node.get("ancestors", []),
+                labels=[],
                 created_at=props.get("created"),
             )
 
@@ -1845,7 +1843,7 @@ def create_app() -> FastAPI:
                         type=node.get("type", "unknown"),
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=node.get("created_at"),
                     )
                 )
@@ -1893,7 +1891,7 @@ def create_app() -> FastAPI:
                         type="state",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=node.get("created_at"),
                     )
                 )
@@ -1954,7 +1952,7 @@ def create_app() -> FastAPI:
                         type="process",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=node.get("created_at"),
                     )
                 )
@@ -2009,7 +2007,7 @@ def create_app() -> FastAPI:
                         type="plan",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=node.get("created_at"),
                     )
                 )
@@ -2067,7 +2065,7 @@ def create_app() -> FastAPI:
                         type="state_history",
                         name=node.get("name", ""),
                         properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=node.get("created_at"),
                     )
                 )

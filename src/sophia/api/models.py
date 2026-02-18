@@ -570,7 +570,7 @@ class HCGEntityResponse(BaseModel):
     )
     labels: List[str] = Field(
         default_factory=list,
-        description="Type ancestry chain (ancestors)",
+        description="Node labels (reserved for future use)",
     )
     created_at: Optional[str] = Field(
         default=None, description="ISO timestamp of creation"

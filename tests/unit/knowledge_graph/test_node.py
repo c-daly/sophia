@@ -14,8 +14,6 @@ def test_node_creation() -> None:
     assert node.uuid is not None
     assert node.name == "Test Node"
     assert node.type == "concept"
-    assert node.is_type_definition is False
-    assert node.ancestors == []
     assert node.properties == {"extra": "data"}
     # Backward compat alias
     assert node.id == node.uuid
@@ -31,32 +29,15 @@ def test_node_with_custom_uuid() -> None:
     assert node.type == "entity"
 
 
-def test_node_with_ancestors() -> None:
-    """Test creating a node with ancestors."""
-    node = Node(
-        uuid="test-1",
-        name="Test",
-        type="object",
-        ancestors=["physical_entity", "entity"],
-        is_type_definition=False,
-    )
+def test_node_no_longer_has_ancestors_or_type_definition() -> None:
+    """Node model no longer carries ancestors or is_type_definition fields.
 
-    assert node.ancestors == ["physical_entity", "entity"]
-    assert node.is_type_definition is False
+    Type hierarchy is expressed through IS_A edge nodes in the reified model.
+    """
+    node = Node(uuid="test-1", name="Test", type="object")
 
-
-def test_node_type_definition() -> None:
-    """Test creating a type definition node."""
-    node = Node(
-        uuid="type-action",
-        name="action",
-        type="action",
-        ancestors=["process", "entity"],
-        is_type_definition=True,
-    )
-
-    assert node.is_type_definition is True
-    assert node.type == "action"
+    assert "ancestors" not in node.model_fields
+    assert "is_type_definition" not in node.model_fields
 
 
 def test_node_equality() -> None:

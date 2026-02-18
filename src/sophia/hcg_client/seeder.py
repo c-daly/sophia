@@ -1,44 +1,56 @@
-"""Utilities for seeding HCG with test data."""
+"""Utilities for seeding HCG with test data.
+
+Type hierarchy is expressed through IS_A edge nodes in the reified-edge
+model, not stored as node properties.
+"""
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import Dict, List
 from sophia.hcg_client.client import HCGClient
 
 
 logger = logging.getLogger(__name__)
 
-# Ancestor chains for all node types used in sophia
-# Based on logos core ontology hierarchy
-ANCESTORS = {
+# Type hierarchy expressed as parent -> children mapping.
+# Each entry maps a type name to its parent type.
+# These relationships will be created as IS_A edge nodes.
+TYPE_HIERARCHY: Dict[str, str] = {
     # Core pick-and-place types
-    "location": ["spatial_entity", "entity"],
-    "object": ["physical_entity", "entity"],
-    "action": ["process", "entity"],
-    "goal": ["intention", "entity"],
-    "state": ["cognition"],
+    "location": "spatial_entity",
+    "spatial_entity": "entity",
+    "object": "physical_entity",
+    "physical_entity": "entity",
+    "action": "process",
+    "goal": "intention",
+    "intention": "entity",
+    "state": "cognition",
     # API and planning types
-    "plan": ["process", "entity"],
-    "imagined_state": ["cognition"],
-    "imagined_process": ["process", "entity"],
-    "simulation": ["abstraction", "entity"],
+    "plan": "process",
+    "imagined_state": "cognition",
+    "imagined_process": "process",
+    "simulation": "abstraction",
+    "abstraction": "entity",
     # Execution container types (parallel to simulation for observed)
-    "execution": ["abstraction", "entity"],
-    "process": ["entity"],
+    "execution": "abstraction",
+    "process": "entity",
     # Hermes ingestion types
-    "hermes_proposal": ["intention", "entity"],
-    "proposed_plan_step": ["process", "entity"],
-    "proposed_imagined_state": ["cognition"],
-    "proposed_tool_call": ["process", "entity"],
+    "hermes_proposal": "intention",
+    "proposed_plan_step": "process",
+    "proposed_imagined_state": "cognition",
+    "proposed_tool_call": "process",
     # Media types
-    "media_sample": ["data", "entity"],
+    "media_sample": "data",
+    "data": "entity",
     # CWM types
-    "cwm_a": ["cwm", "cognition"],
-    "cwm_g": ["cwm", "cognition"],
-    "cwm_e": ["cwm", "cognition"],
+    "cwm_a": "cwm",
+    "cwm_g": "cwm",
+    "cwm_e": "cwm",
+    "cwm": "cognition",
+    "cognition": "entity",
 }
 
-# Types required by sophia API endpoints (must exist for auto-compute ancestors)
+# Types required by sophia API endpoints
 REQUIRED_TYPES = [
     "simulation",
     "imagined_process",
@@ -49,35 +61,48 @@ REQUIRED_TYPES = [
 
 
 def seed_type_definitions(hcg_client: HCGClient) -> None:
-    """Seed Neo4j with type definitions from ANCESTORS.
+    """Seed Neo4j with type definition nodes and IS_A edge hierarchy.
 
-    Creates type definition nodes for all types in ANCESTORS dict.
-    These are required for the HCG client's auto-compute ancestors feature.
+    Creates a type node for each type and connects them via IS_A edges
+    to express the type hierarchy.
 
     Args:
         hcg_client: HCG client instance
     """
     logger.info("Seeding type definitions into Neo4j...")
 
-    for type_name, ancestors in ANCESTORS.items():
-        # Determine the parent type (first ancestor)
-        parent_type = ancestors[0] if ancestors else "entity"
+    # First pass: create all type nodes
+    created_types = set()
+    all_types = set(TYPE_HIERARCHY.keys()) | set(TYPE_HIERARCHY.values())
 
-        hcg_client.add_node(
-            uuid=f"type_{type_name}",
-            name=type_name,
-            node_type=parent_type,
-            ancestors=ancestors,
-            is_type_definition=True,
-            source="bootstrap",
-            derivation="observed",
+    for type_name in all_types:
+        if type_name not in created_types:
+            hcg_client.add_node(
+                uuid=f"type_{type_name}",
+                name=type_name,
+                node_type="type",
+                source="bootstrap",
+                derivation="observed",
+            )
+            created_types.add(type_name)
+
+    # Second pass: create IS_A edges for the hierarchy
+    for child_type, parent_type in TYPE_HIERARCHY.items():
+        hcg_client.add_edge(
+            edge_id=f"edge_is_a_{child_type}_{parent_type}",
+            source_uuid=f"type_{child_type}",
+            target_uuid=f"type_{parent_type}",
+            relation="IS_A",
         )
 
-    logger.info(f"Seeded {len(ANCESTORS)} type definitions")
+    logger.info(
+        f"Seeded {len(created_types)} type nodes with "
+        f"{len(TYPE_HIERARCHY)} IS_A edges"
+    )
 
 
 def verify_required_types(hcg_client: HCGClient) -> List[str]:
-    """Verify that all required type definitions exist in Neo4j.
+    """Verify that all required type definition nodes exist in Neo4j.
 
     Args:
         hcg_client: HCG client instance
@@ -87,8 +112,8 @@ def verify_required_types(hcg_client: HCGClient) -> List[str]:
     """
     missing = []
     for type_name in REQUIRED_TYPES:
-        ancestors = hcg_client._get_type_ancestors(type_name)
-        if not ancestors:
+        node = hcg_client.get_node(f"type_{type_name}")
+        if not node:
             missing.append(type_name)
     return missing
 
@@ -108,8 +133,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="table",
         name="Table",
         node_type="location",
-        ancestors=ANCESTORS["location"],
-        is_type_definition=False,
         properties={"location_type": "surface"},
         source="bootstrap",
         derivation="observed",
@@ -118,8 +141,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="bin",
         name="Bin",
         node_type="location",
-        ancestors=ANCESTORS["location"],
-        is_type_definition=False,
         properties={"location_type": "container"},
         source="bootstrap",
         derivation="observed",
@@ -130,8 +151,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="red_block",
         name="Red Block",
         node_type="object",
-        ancestors=ANCESTORS["object"],
-        is_type_definition=False,
         properties={"color": "red", "object_type": "block"},
         source="bootstrap",
         derivation="observed",
@@ -140,8 +159,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="blue_block",
         name="Blue Block",
         node_type="object",
-        ancestors=ANCESTORS["object"],
-        is_type_definition=False,
         properties={"color": "blue", "object_type": "block"},
         source="bootstrap",
         derivation="observed",
@@ -152,13 +169,13 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         edge_id="e_red_block_on_table",
         source_uuid="red_block",
         target_uuid="table",
-        relation="located_at",
+        relation="LOCATED_AT",
     )
     hcg_client.add_edge(
         edge_id="e_blue_block_on_table",
         source_uuid="blue_block",
         target_uuid="table",
-        relation="located_at",
+        relation="LOCATED_AT",
     )
 
     # Create action primitives
@@ -166,8 +183,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="move_to_red_block",
         name="Move to Red Block",
         node_type="action",
-        ancestors=ANCESTORS["action"],
-        is_type_definition=False,
         properties={"action_type": "MOVE", "target": "red_block"},
         source="bootstrap",
         derivation="observed",
@@ -176,8 +191,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="grasp_red_block",
         name="Grasp Red Block",
         node_type="action",
-        ancestors=ANCESTORS["action"],
-        is_type_definition=False,
         properties={"action_type": "GRASP", "target": "red_block"},
         source="bootstrap",
         derivation="observed",
@@ -186,8 +199,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="move_to_bin",
         name="Move to Bin",
         node_type="action",
-        ancestors=ANCESTORS["action"],
-        is_type_definition=False,
         properties={"action_type": "MOVE", "target": "bin"},
         source="bootstrap",
         derivation="observed",
@@ -196,8 +207,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="release_red_block",
         name="Release Red Block",
         node_type="action",
-        ancestors=ANCESTORS["action"],
-        is_type_definition=False,
         properties={"action_type": "RELEASE", "target": "red_block"},
         source="bootstrap",
         derivation="observed",
@@ -208,25 +217,25 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         edge_id="e_move_enables_grasp",
         source_uuid="move_to_red_block",
         target_uuid="grasp_red_block",
-        relation="enables",
+        relation="ENABLES",
     )
     hcg_client.add_edge(
         edge_id="e_grasp_enables_move",
         source_uuid="grasp_red_block",
         target_uuid="move_to_bin",
-        relation="enables",
+        relation="ENABLES",
     )
     hcg_client.add_edge(
         edge_id="e_move_enables_release",
         source_uuid="move_to_bin",
         target_uuid="release_red_block",
-        relation="enables",
+        relation="ENABLES",
     )
     hcg_client.add_edge(
         edge_id="e_release_achieves_bin",
         source_uuid="release_red_block",
         target_uuid="bin",
-        relation="achieves",
+        relation="ACHIEVES",
         properties={"state": "red_block_in_bin"},
     )
 
@@ -235,8 +244,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="goal_red_block_in_bin",
         name="Goal: Red Block in Bin",
         node_type="goal",
-        ancestors=ANCESTORS["goal"],
-        is_type_definition=False,
         properties={
             "description": "red block in bin",
             "target_state": "red_block_in_bin",
@@ -248,7 +255,7 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         edge_id="e_goal_requires_release",
         source_uuid="goal_red_block_in_bin",
         target_uuid="release_red_block",
-        relation="requires",
+        relation="REQUIRES",
     )
 
     # Create initial state node
@@ -256,8 +263,6 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         uuid="current_state",
         name="Current State",
         node_type="state",
-        ancestors=ANCESTORS["state"],
-        is_type_definition=False,
         properties={
             "red_block": {"location": "table", "grasped": False},
             "blue_block": {"location": "table", "grasped": False},
@@ -285,8 +290,6 @@ def seed_plan_data(hcg_client: HCGClient) -> None:
         uuid="plan_red_block_to_bin",
         name="Plan: Red Block to Bin",
         node_type="plan",
-        ancestors=ANCESTORS["plan"],
-        is_type_definition=False,
         properties={
             "goal_id": "goal_red_block_in_bin",
             "status": "completed",
@@ -316,7 +319,7 @@ def seed_plan_data(hcg_client: HCGClient) -> None:
         edge_id="e_plan_red_for_goal",
         source_uuid="plan_red_block_to_bin",
         target_uuid="goal_red_block_in_bin",
-        relation="achieves",
+        relation="ACHIEVES",
     )
 
     # Plan 2: pending plan for blue block
@@ -324,8 +327,6 @@ def seed_plan_data(hcg_client: HCGClient) -> None:
         uuid="plan_blue_block_to_bin",
         name="Plan: Blue Block to Bin",
         node_type="plan",
-        ancestors=ANCESTORS["plan"],
-        is_type_definition=False,
         properties={
             "status": "pending",
             "steps": [

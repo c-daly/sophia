@@ -54,8 +54,6 @@ def test_add_node_runs_shacl_validation(
         uuid="node-1",
         name="Test Node",
         node_type="concept",
-        ancestors=["parent", "root"],
-        is_type_definition=False,
         properties={"custom": "value"},
     )
 
@@ -71,7 +69,6 @@ def test_add_node_raises_on_empty_uuid(client: HCGClient) -> None:
             uuid="",
             name="Test",
             node_type="concept",
-            ancestors=[],
         )
 
 
@@ -82,7 +79,6 @@ def test_add_node_raises_on_empty_name(client: HCGClient) -> None:
             uuid="test-1",
             name="",
             node_type="concept",
-            ancestors=[],
         )
 
 
@@ -93,7 +89,6 @@ def test_add_node_raises_on_empty_node_type(client: HCGClient) -> None:
             uuid="test-1",
             name="Test",
             node_type="",
-            ancestors=[],
         )
 
 
@@ -110,7 +105,6 @@ def test_add_node_raises_on_validation_error(
             uuid="bad",
             name="Bad Node",
             node_type="concept",
-            ancestors=[],
         )
 
 
@@ -138,19 +132,44 @@ def test_add_node_legacy_warns_deprecation(
 def test_add_edge_uses_validator(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
-    """Edges also run through SHACL validation."""
+    """Edges also run through SHACL validation and execute reified Cypher."""
     validator = MagicMock()
     validator.validate_edge.return_value = (True, [])
     monkeypatch.setattr(client, "_validator", validator)
 
-    execute = MagicMock(return_value=[{"id": "edge-1"}])
+    execute = MagicMock(return_value=[{"uuid": "edge-1"}])
     monkeypatch.setattr(client, "_execute_query", execute)
 
-    result = client.add_edge("edge-1", "a", "b", "relates_to")
+    result = client.add_edge("edge-1", "a", "b", "RELATES_TO")
 
     assert result == "edge-1"
     validator.validate_edge.assert_called_once()
     execute.assert_called_once()
+    # Verify the Cypher creates reified edge with :FROM/:TO
+    query = execute.call_args[0][0]
+    assert "MERGE (edge:Node" in query
+    assert "[:FROM]" in query
+    assert "[:TO]" in query
+
+
+def test_add_edge_with_bidirectional(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """add_edge should pass bidirectional flag in the edge props."""
+    validator = MagicMock()
+    validator.validate_edge.return_value = (True, [])
+    monkeypatch.setattr(client, "_validator", validator)
+
+    execute = MagicMock(return_value=[{"uuid": "edge-2"}])
+    monkeypatch.setattr(client, "_execute_query", execute)
+
+    result = client.add_edge(
+        "edge-2", "a", "b", "RELATED_TO", bidirectional=True
+    )
+
+    assert result == "edge-2"
+    params = execute.call_args[0][1]
+    assert params["props"]["bidirectional"] is True
 
 
 def test_get_node_returns_none_when_missing(
@@ -162,15 +181,42 @@ def test_get_node_returns_none_when_missing(
     assert client.get_node("unknown") is None
 
 
+def test_get_node_excludes_edge_nodes(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """get_node query should filter out edge nodes (WHERE n.relation IS NULL)."""
+    calls = []
+
+    def mock_execute_read(query, params):
+        calls.append(query)
+        return []
+
+    monkeypatch.setattr(client, "_execute_read", mock_execute_read)
+
+    client.get_node("some-uuid")
+
+    assert len(calls) == 1
+    assert "n.relation IS NULL" in calls[0]
+
+
 def test_delete_node_reports_deleted(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
-    """delete_node exposes count returned by Cypher."""
-    monkeypatch.setattr(
-        client, "_execute_query", lambda *args, **kwargs: [{"deleted": 1}]
-    )
+    """delete_node cleans up edge nodes then deletes the content node."""
+    calls = []
+
+    def mock_execute(query, params=None):
+        calls.append(query)
+        if "count(n)" in query:
+            return [{"deleted": 1}]
+        return []
+
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     assert client.delete_node("node-1") is True
+    # Should have two queries: cleanup edges, then delete node
+    assert len(calls) == 2
+    assert "edge.source = $uuid OR edge.target = $uuid" in calls[0]
 
 
 def test_health_check_uses_session(
@@ -198,119 +244,14 @@ def test_health_check_uses_session(
     assert health == {"neo4j": True, "milvus": True}
 
 
-# --- Ancestor auto-computation tests ---
-
-
-def test_get_type_ancestors_returns_ancestors_from_type_definition(
-    client: HCGClient,
-) -> None:
-    """_get_type_ancestors returns ancestors from matching type definition."""
-    client._execute_read = MagicMock(
-        return_value=[{"ancestors": ["physical_entity", "entity"]}]
-    )
-
-    ancestors = client._get_type_ancestors("object")
-
-    assert ancestors == ["physical_entity", "entity"]
-    client._execute_read.assert_called_once()
-    call_args = client._execute_read.call_args
-    assert "name: $node_type" in call_args[0][0]
-    assert call_args[0][1]["node_type"] == "object"
-
-
-def test_get_type_ancestors_returns_empty_when_no_type_definition(
-    client: HCGClient,
-) -> None:
-    """_get_type_ancestors returns empty list when type definition not found."""
-    client._execute_read = MagicMock(return_value=[])
-
-    ancestors = client._get_type_ancestors("unknown_type")
-
-    assert ancestors == []
-
-
-def test_get_type_ancestors_returns_empty_when_ancestors_null(
-    client: HCGClient,
-) -> None:
-    """_get_type_ancestors returns empty list when ancestors field is null."""
-    client._execute_read = MagicMock(return_value=[{"ancestors": None}])
-
-    ancestors = client._get_type_ancestors("some_type")
-
-    assert ancestors == []
-
-
-def test_add_node_auto_computes_ancestors_for_instance(
-    monkeypatch: pytest.MonkeyPatch, client: HCGClient
-) -> None:
-    """Instance nodes get ancestors auto-computed as [node_type] + type_def.ancestors."""
-    mock_ancestors = MagicMock(return_value=["physical_entity", "entity"])
-    mock_execute = MagicMock(return_value=[{"uuid": "generated-uuid"}])
-    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
-    monkeypatch.setattr(client, "_execute_query", mock_execute)
-
-    client.add_node(
-        name="Red Block",
-        node_type="object",
-    )
-
-    mock_ancestors.assert_called_once_with("object")
-    call_args = mock_execute.call_args
-    params = call_args[0][1]
-    assert params["ancestors"] == ["object", "physical_entity", "entity"]
-
-
-def test_add_node_type_definition_does_not_auto_compute_ancestors(
-    monkeypatch: pytest.MonkeyPatch, client: HCGClient
-) -> None:
-    """Type definitions don't auto-compute ancestors - use empty if not provided."""
-    mock_ancestors = MagicMock()
-    mock_execute = MagicMock(return_value=[{"uuid": "type-def-uuid"}])
-    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
-    monkeypatch.setattr(client, "_execute_query", mock_execute)
-
-    client.add_node(
-        name="object",
-        node_type="physical_entity",
-        is_type_definition=True,
-    )
-
-    mock_ancestors.assert_not_called()
-    call_args = mock_execute.call_args
-    params = call_args[0][1]
-    assert params["ancestors"] == []
-
-
-def test_add_node_uses_provided_ancestors_when_given(
-    monkeypatch: pytest.MonkeyPatch, client: HCGClient
-) -> None:
-    """When ancestors are explicitly provided, they are used as-is."""
-    mock_ancestors = MagicMock()
-    mock_execute = MagicMock(return_value=[{"uuid": "custom-uuid"}])
-    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
-    monkeypatch.setattr(client, "_execute_query", mock_execute)
-
-    custom_ancestors = ["custom_parent", "custom_grandparent"]
-
-    client.add_node(
-        name="Custom Node",
-        node_type="custom_type",
-        ancestors=custom_ancestors,
-    )
-
-    mock_ancestors.assert_not_called()
-    call_args = mock_execute.call_args
-    params = call_args[0][1]
-    assert params["ancestors"] == custom_ancestors
+# --- Node creation tests ---
 
 
 def test_add_node_generates_uuid_when_not_provided(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """UUID is auto-generated when not provided."""
-    mock_ancestors = MagicMock(return_value=[])
     mock_execute = MagicMock(return_value=[{"uuid": "auto-generated"}])
-    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
     monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
@@ -324,6 +265,29 @@ def test_add_node_generates_uuid_when_not_provided(
     assert params["uuid"].count("-") == 4
 
 
+def test_add_node_no_ancestors_or_is_type_definition(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """add_node should not send ancestors or is_type_definition to Neo4j."""
+    mock_execute = MagicMock(return_value=[{"uuid": "node-1"}])
+    monkeypatch.setattr(client, "_execute_query", mock_execute)
+
+    client.add_node(
+        uuid="node-1",
+        name="Test Node",
+        node_type="concept",
+    )
+
+    call_args = mock_execute.call_args
+    query = call_args[0][0]
+    params = call_args[0][1]
+
+    assert "ancestors" not in query
+    assert "is_type_definition" not in query
+    assert "ancestors" not in params
+    assert "is_type_definition" not in params
+
+
 # --- Provenance metadata tests ---
 
 
@@ -331,9 +295,7 @@ def test_add_node_with_provenance(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """add_node should accept and store provenance metadata."""
-    mock_ancestors = MagicMock(return_value=[])
     mock_execute = MagicMock(return_value=[{"uuid": "prov-uuid"}])
-    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
     monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
@@ -367,9 +329,7 @@ def test_add_node_default_provenance(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """add_node should apply default provenance when not provided."""
-    mock_ancestors = MagicMock(return_value=[])
     mock_execute = MagicMock(return_value=[{"uuid": "default-uuid"}])
-    monkeypatch.setattr(client, "_get_type_ancestors", mock_ancestors)
     monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
@@ -426,3 +386,39 @@ def test_update_node_raises_on_missing_node(
             uuid="nonexistent-uuid",
             properties={"confidence": 0.5},
         )
+
+
+# --- get_subgraph tests ---
+
+
+def test_get_subgraph_empty_uuids(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """get_subgraph with empty list returns empty result."""
+    result = client.get_subgraph([])
+    assert result == {"nodes": [], "edges": []}
+
+
+def test_get_subgraph_fetches_nodes_and_edges(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """get_subgraph queries both content nodes and connecting edge nodes."""
+    calls = []
+
+    def mock_execute_read(query, params):
+        calls.append(query)
+        if "n.relation IS NULL" in query:
+            return [
+                {"uuid": "a", "name": "A", "type": "concept", "props": {"uuid": "a", "name": "A", "type": "concept"}},
+            ]
+        elif "edge.relation IS NOT NULL" in query:
+            return []
+        return []
+
+    monkeypatch.setattr(client, "_execute_read", mock_execute_read)
+
+    result = client.get_subgraph(["a", "b"])
+
+    assert len(calls) == 2
+    assert len(result["nodes"]) == 1
+    assert result["nodes"][0]["uuid"] == "a"

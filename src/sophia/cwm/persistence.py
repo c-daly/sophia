@@ -38,12 +38,6 @@ TYPE_MODEL_MAP = {v: k for k, v in MODEL_TYPE_MAP.items()}
 class CWMPersistence:
     """Service for persisting CWM states to Neo4j."""
 
-    ANCESTORS = {
-        "cwm_a": ["cwm", "cognition"],
-        "cwm_g": ["cwm", "cognition"],
-        "cwm_e": ["cwm", "cognition"],
-    }
-
     def __init__(self, neo4j_driver: Any, database: str = "neo4j") -> None:
         """Initialize with Neo4j driver.
 
@@ -65,7 +59,6 @@ class CWMPersistence:
         """
         # Map model_type to internal type
         cwm_type = MODEL_TYPE_MAP.get(state.model_type, state.model_type.lower())
-        ancestors = self.ANCESTORS.get(cwm_type, ["cwm", "cognition"])
 
         # Extract provenance from data (simplified CWMState has provenance in data)
         data = state.data or {}
@@ -86,7 +79,6 @@ class CWMPersistence:
             "uuid": state.state_id,
             "name": f"{cwm_type}_{state.timestamp.strftime('%Y%m%d_%H%M%S')}",
             "type": cwm_type,
-            "ancestors": ancestors,
             "timestamp": state.timestamp.isoformat(),
             "source": source,
             "confidence": confidence if confidence is not None else 1.0,
