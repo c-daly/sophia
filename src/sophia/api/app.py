@@ -933,7 +933,7 @@ def create_app() -> FastAPI:
                     goal_node = _hcg_client.get_node(goal_node_id)
                     if goal_node:
                         _hcg_client.add_edge(
-                            edge_id=f"e_{plan_id}_achieves_goal",
+                            edge_uuid=f"e_{plan_id}_achieves_goal",
                             source_uuid=plan_id,
                             target_uuid=goal_node_id,
                             relation="achieves",
@@ -1220,7 +1220,7 @@ def create_app() -> FastAPI:
 
                 # Link state to simulation
                 _hcg_client.add_edge(
-                    edge_id=f"e_{result.simulation_id}_{state.state_id}",
+                    edge_uuid=f"e_{result.simulation_id}_{state.state_id}",
                     source_uuid=result.simulation_id,
                     target_uuid=state.state_id,
                     relation="produces",
@@ -1253,7 +1253,7 @@ def create_app() -> FastAPI:
             if request.media_sample_id:
                 try:
                     _hcg_client.add_edge(
-                        edge_id=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
+                        edge_uuid=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
                         source_uuid=result.simulation_id,
                         target_uuid=request.media_sample_id,
                         relation="uses_media",
@@ -1511,7 +1511,7 @@ def create_app() -> FastAPI:
 
                     # Link process to execution container
                     _hcg_client.add_edge(
-                        edge_id=f"e_{execution_id}_{process_id}",
+                        edge_uuid=f"e_{execution_id}_{process_id}",
                         source_uuid=execution_id,
                         target_uuid=process_id,
                         relation="produces",
@@ -1552,7 +1552,7 @@ def create_app() -> FastAPI:
 
                     # Link execution to resulting state
                     _hcg_client.add_edge(
-                        edge_id=f"e_{execution_id}_results_in_state",
+                        edge_uuid=f"e_{execution_id}_results_in_state",
                         source_uuid=execution_id,
                         target_uuid="current_state",
                         relation="results_in",

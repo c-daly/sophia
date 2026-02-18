@@ -252,12 +252,12 @@ class HCGClient(LogosHCGClient):
 
     def add_edge(
         self,
-        edge_id: str,
         source_uuid: str,
         target_uuid: str,
         relation: str,
-        properties: Optional[Dict[str, Any]] = None,
+        edge_uuid: Optional[str] = None,
         bidirectional: bool = False,
+        properties: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Create or update a reified edge node after SHACL validation.
 
@@ -266,16 +266,19 @@ class HCGClient(LogosHCGClient):
             (source)<-[:FROM]-(edge_node)-[:TO]->(target)
 
         Args:
-            edge_id: Unique identifier for the edge node
             source_uuid: Source node UUID
             target_uuid: Target node UUID
             relation: Edge type (e.g., "IS_A", "CAUSES", "LOCATED_AT")
-            properties: Additional properties on the edge node
+            edge_uuid: Unique identifier for the edge node (auto-generated if None)
             bidirectional: Whether the relationship is bidirectional
+            properties: Additional properties on the edge node
 
         Returns:
             The UUID of the created/updated edge node
         """
+        from uuid import uuid4
+
+        edge_id = edge_uuid or str(uuid4())
         edge_data = {
             "id": edge_id,
             "source": source_uuid,

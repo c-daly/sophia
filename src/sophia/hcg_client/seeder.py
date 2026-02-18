@@ -89,7 +89,7 @@ def seed_type_definitions(hcg_client: HCGClient) -> None:
     # Second pass: create IS_A edges for the hierarchy
     for child_type, parent_type in TYPE_HIERARCHY.items():
         hcg_client.add_edge(
-            edge_id=f"edge_is_a_{child_type}_{parent_type}",
+            edge_uuid=f"edge_is_a_{child_type}_{parent_type}",
             source_uuid=f"type_{child_type}",
             target_uuid=f"type_{parent_type}",
             relation="IS_A",
@@ -165,13 +165,13 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
 
     # Initial state: blocks on table
     hcg_client.add_edge(
-        edge_id="e_red_block_on_table",
+        edge_uuid="e_red_block_on_table",
         source_uuid="red_block",
         target_uuid="table",
         relation="LOCATED_AT",
     )
     hcg_client.add_edge(
-        edge_id="e_blue_block_on_table",
+        edge_uuid="e_blue_block_on_table",
         source_uuid="blue_block",
         target_uuid="table",
         relation="LOCATED_AT",
@@ -213,25 +213,25 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
 
     # Action preconditions and effects (causal chain)
     hcg_client.add_edge(
-        edge_id="e_move_enables_grasp",
+        edge_uuid="e_move_enables_grasp",
         source_uuid="move_to_red_block",
         target_uuid="grasp_red_block",
         relation="ENABLES",
     )
     hcg_client.add_edge(
-        edge_id="e_grasp_enables_move",
+        edge_uuid="e_grasp_enables_move",
         source_uuid="grasp_red_block",
         target_uuid="move_to_bin",
         relation="ENABLES",
     )
     hcg_client.add_edge(
-        edge_id="e_move_enables_release",
+        edge_uuid="e_move_enables_release",
         source_uuid="move_to_bin",
         target_uuid="release_red_block",
         relation="ENABLES",
     )
     hcg_client.add_edge(
-        edge_id="e_release_achieves_bin",
+        edge_uuid="e_release_achieves_bin",
         source_uuid="release_red_block",
         target_uuid="bin",
         relation="ACHIEVES",
@@ -251,7 +251,7 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
         derivation="observed",
     )
     hcg_client.add_edge(
-        edge_id="e_goal_requires_release",
+        edge_uuid="e_goal_requires_release",
         source_uuid="goal_red_block_in_bin",
         target_uuid="release_red_block",
         relation="REQUIRES",
@@ -315,7 +315,7 @@ def seed_plan_data(hcg_client: HCGClient) -> None:
         derivation="observed",
     )
     hcg_client.add_edge(
-        edge_id="e_plan_red_for_goal",
+        edge_uuid="e_plan_red_for_goal",
         source_uuid="plan_red_block_to_bin",
         target_uuid="goal_red_block_in_bin",
         relation="ACHIEVES",
