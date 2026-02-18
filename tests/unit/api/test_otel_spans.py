@@ -22,9 +22,9 @@ def test_get_current_span_called_in_endpoints():
     import sophia.api.app as app_module
 
     # Confirm the module imports get_current_span
-    assert hasattr(app_module, "get_current_span"), (
-        "app.py must import get_current_span from opentelemetry.trace"
-    )
+    assert hasattr(
+        app_module, "get_current_span"
+    ), "app.py must import get_current_span from opentelemetry.trace"
 
 
 def test_span_enrichment_imports():
