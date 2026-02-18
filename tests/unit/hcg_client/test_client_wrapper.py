@@ -163,7 +163,9 @@ def test_add_edge_with_bidirectional(
     execute = MagicMock(return_value=[{"uuid": "edge-2"}])
     monkeypatch.setattr(client, "_execute_query", execute)
 
-    result = client.add_edge("a", "b", "RELATED_TO", edge_uuid="edge-2", bidirectional=True)
+    result = client.add_edge(
+        "a", "b", "RELATED_TO", edge_uuid="edge-2", bidirectional=True
+    )
 
     assert result == "edge-2"
     params = execute.call_args[0][1]
