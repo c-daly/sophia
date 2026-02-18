@@ -125,8 +125,8 @@ class ProposalProcessor:
                     node_type=node_type,
                     source=proposal.get("source_service", "hermes"),
                     derivation="observed",
+                    confidence=proposal.get("confidence", 0.7),
                     properties={
-                        "confidence": proposal.get("confidence", 0.7),
                         "raw_text": proposal.get("raw_text", ""),
                         **proposed.get("properties", {}),
                     },

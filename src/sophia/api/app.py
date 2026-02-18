@@ -382,6 +382,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info("ProposalProcessor initialized")
         except Exception as e:
             logger.warning(f"ProposalProcessor unavailable (Milvus not ready): {e}")
+            # Processor not available without Milvus — endpoint will skip cognitive processing
             _proposal_processor = None
 
     logger.info("Sophia API service started successfully")
