@@ -725,7 +725,7 @@ name = "logos-foundry"
 version = "0.4.2"
 description = "LOGOS Foundry - Canonical source of truth for Project LOGOS specifications, ontology, and infrastructure"
 optional = false
-python-versions = "^3.11"
+python-versions = "^3.12"
 groups = ["main"]
 files = []
 develop = false
@@ -745,7 +745,7 @@ uvicorn = {version = "^0.32.0", extras = ["standard"]}
 type = "git"
 url = "https://github.com/c-daly/logos.git"
 reference = "main"
-resolved_reference = "9768cfb31b4fef3bc8873f24d74da5edfc474fac"
+resolved_reference = "9dc5fcdb04b5efde601b0c4812e541d7420a824a"
 
 [[package]]
 name = "markupsafe"
