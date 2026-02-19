@@ -308,6 +308,10 @@ class HCGClient(LogosHCGClient):
             encoded = self._encode_properties(cast(Mapping[str, Any], properties))
             props.update(encoded)
 
+        # Build update-only props that preserve uuid and created_at on match.
+        update_props = {k: v for k, v in props.items() if k not in ("uuid", "created_at")}
+        update_props["updated_at"] = now
+
         # MERGE on composite key (source + target + relation) for idempotency.
         query = """
         MATCH (src:Node {uuid: $source_uuid})
@@ -315,8 +319,7 @@ class HCGClient(LogosHCGClient):
         MERGE (edge:Node {source: $source_uuid, target: $target_uuid, relation: $relation})
         ON CREATE SET edge += $props,
                       edge.name = src.name + '_' + $relation + '_' + tgt.name
-        ON MATCH SET edge += $props,
-                     edge.updated_at = $now
+        ON MATCH SET edge += $update_props
         MERGE (edge)-[:FROM]->(src)
         MERGE (edge)-[:TO]->(tgt)
         RETURN edge.uuid AS uuid
@@ -328,6 +331,7 @@ class HCGClient(LogosHCGClient):
                 "target_uuid": target_uuid,
                 "relation": relation,
                 "props": props,
+                "update_props": update_props,
                 "now": now,
             },
         )
