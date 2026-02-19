@@ -744,8 +744,8 @@ uvicorn = {version = "^0.32.0", extras = ["standard"]}
 [package.source]
 type = "git"
 url = "https://github.com/c-daly/logos.git"
-reference = "feat/cognitive-loop"
-resolved_reference = "a07290748152b25f976f3e9f456fa2c4dc621aac"
+reference = "main"
+resolved_reference = "9768cfb31b4fef3bc8873f24d74da5edfc474fac"
 
 [[package]]
 name = "markupsafe"
@@ -3305,4 +3305,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "a7f0055364a46ee011fe5196d1387ba10e72410d4041f2979df05312ac90f86e"
+content-hash = "b1747df67f2d8a30972afdcecf8bb31df6b178a9f4c54854e19ba952d5d3ec86"
