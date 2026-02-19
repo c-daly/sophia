@@ -190,13 +190,13 @@ def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
 
     # Query edges (using Neo4j adapter's query methods)
     edge_queries = [
-        ("red_block", "table", "located_at"),
-        ("blue_block", "table", "located_at"),
-        ("move_to_red_block", "grasp_red_block", "enables"),
-        ("grasp_red_block", "move_to_bin", "enables"),
-        ("move_to_bin", "release_red_block", "enables"),
-        ("release_red_block", "bin", "achieves"),
-        ("goal_red_block_in_bin", "release_red_block", "requires"),
+        ("red_block", "table", "LOCATED_AT"),
+        ("blue_block", "table", "LOCATED_AT"),
+        ("move_to_red_block", "grasp_red_block", "ENABLES"),
+        ("grasp_red_block", "move_to_bin", "ENABLES"),
+        ("move_to_bin", "release_red_block", "ENABLES"),
+        ("release_red_block", "bin", "ACHIEVES"),
+        ("goal_red_block_in_bin", "release_red_block", "REQUIRES"),
     ]
 
     for source, target, relation in edge_queries:
@@ -1783,7 +1783,7 @@ def create_app() -> FastAPI:
     async def list_hcg_edges(
         edge_type: Optional[str] = Query(
             default=None,
-            description="Filter by edge/relation type (e.g., 'enables', 'achieves')",
+            description="Filter by edge/relation type (e.g., 'ENABLES', 'ACHIEVES')",
         ),
         source_id: Optional[str] = Query(
             default=None,
