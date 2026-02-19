@@ -39,7 +39,9 @@ class TestPersonaCreateEndpoint:
         response = http_client.post(
             "/persona/entries", json=payload, headers=auth_headers
         )
-        assert response.status_code == 201
+        assert response.status_code == 201, (
+            f"Expected 201, got {response.status_code}: {response.text}"
+        )
 
         data = response.json()
         assert "entry_id" in data
@@ -59,7 +61,9 @@ class TestPersonaCreateEndpoint:
         response = http_client.post(
             "/persona/entries", json=payload, headers=auth_headers
         )
-        assert response.status_code == 201
+        assert response.status_code == 201, (
+            f"Expected 201, got {response.status_code}: {response.text}"
+        )
 
         data = response.json()
         assert "entry_id" in data
@@ -204,7 +208,9 @@ class TestPersonaGetByIdEndpoint:
         create_response = http_client.post(
             "/persona/entries", json=payload, headers=auth_headers
         )
-        assert create_response.status_code == 201
+        assert create_response.status_code == 201, (
+            f"Create failed: {create_response.text}"
+        )
         entry_id = create_response.json()["entry_id"]
 
         # Now get it by ID

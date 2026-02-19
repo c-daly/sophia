@@ -313,11 +313,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if (
             get_env_value("SEED_PICK_AND_PLACE_DATA", default="") or ""
         ).lower() == "true":
-            from sophia.hcg_client.seeder import seed_pick_and_place_data
+            from sophia.hcg_client.seeder import (
+                seed_pick_and_place_data,
+                seed_plan_data,
+                seed_persona_entries,
+                seed_type_definitions,
+            )
 
-            logger.info("Seeding pick-and-place test data...")
+            logger.info("Seeding test data into Neo4j...")
             try:
+                seed_type_definitions(_hcg_client)
                 seed_pick_and_place_data(_hcg_client)
+                seed_plan_data(_hcg_client)
+                seed_persona_entries(_hcg_client)
                 # Reload knowledge graph after seeding
                 _kg = load_kg_from_hcg(_hcg_client)
                 logger.info(
