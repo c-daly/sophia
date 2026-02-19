@@ -1890,14 +1890,15 @@ def create_app() -> FastAPI:
 
             entities: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 entities.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type=node.get("type", "unknown"),
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
+                        properties=props,
                         labels=[],
-                        created_at=node.get("created_at"),
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -1938,14 +1939,15 @@ def create_app() -> FastAPI:
 
             states: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 states.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="state",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
+                        properties=props,
                         labels=[],
-                        created_at=node.get("created_at"),
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -1999,14 +2001,15 @@ def create_app() -> FastAPI:
 
             processes: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 processes.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="process",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
+                        properties=props,
                         labels=[],
-                        created_at=node.get("created_at"),
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -2054,14 +2057,15 @@ def create_app() -> FastAPI:
 
             plans: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 plans.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="plan",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
+                        properties=props,
                         labels=[],
-                        created_at=node.get("created_at"),
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -2112,14 +2116,15 @@ def create_app() -> FastAPI:
 
             history: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 history.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="state_history",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
+                        properties=props,
                         labels=[],
-                        created_at=node.get("created_at"),
+                        created_at=props.get("created"),
                     )
                 )
 

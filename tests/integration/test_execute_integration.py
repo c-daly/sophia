@@ -110,7 +110,13 @@ class TestExecuteIntegration:
             json={"goal": GOAL_PAYLOAD},
             headers=auth_headers,
         )
+        assert plan_response.status_code == 201
         plan_data = plan_response.json()
+
+        # Planner may return 0 steps if graph lacks matching preconditions
+        plan_steps = plan_data.get("plan", [])
+        if not plan_steps:
+            pytest.skip("Planner returned empty plan; step_index test requires steps")
 
         response = http_client.post(
             "/execute",
