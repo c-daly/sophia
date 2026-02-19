@@ -88,6 +88,7 @@ from sophia.jepa.models import (
 )
 from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
+from sophia.ingestion.proposal_processor import ProposalProcessor
 from sophia.cwm import CWMPersistence
 from sophia.feedback import (
     FeedbackConfig,
@@ -181,8 +182,6 @@ def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
                     uuid=node_data["uuid"],
                     name=node_data["name"],
                     type=node_data["type"],
-                    ancestors=node_data.get("ancestors", []),
-                    is_type_definition=node_data.get("is_type_definition", False),
                     properties=node_data.get("properties", {}),
                 )
                 kg.add_node(node)
@@ -191,13 +190,13 @@ def load_kg_from_hcg(hcg_client: HCGClient) -> KnowledgeGraph:
 
     # Query edges (using Neo4j adapter's query methods)
     edge_queries = [
-        ("red_block", "table", "located_at"),
-        ("blue_block", "table", "located_at"),
-        ("move_to_red_block", "grasp_red_block", "enables"),
-        ("grasp_red_block", "move_to_bin", "enables"),
-        ("move_to_bin", "release_red_block", "enables"),
-        ("release_red_block", "bin", "achieves"),
-        ("goal_red_block_in_bin", "release_red_block", "requires"),
+        ("red_block", "table", "LOCATED_AT"),
+        ("blue_block", "table", "LOCATED_AT"),
+        ("move_to_red_block", "grasp_red_block", "ENABLES"),
+        ("grasp_red_block", "move_to_bin", "ENABLES"),
+        ("move_to_bin", "release_red_block", "ENABLES"),
+        ("release_red_block", "bin", "ACHIEVES"),
+        ("goal_red_block_in_bin", "release_red_block", "REQUIRES"),
     ]
 
     for source, target, relation in edge_queries:
@@ -234,12 +233,13 @@ _cwm_persistence: Optional[CWMPersistence] = None
 _feedback_dispatcher: Optional[FeedbackDispatcher] = None
 _feedback_worker: Optional[FeedbackWorker] = None
 _feedback_worker_task: Optional[Any] = None
+_proposal_processor: Optional[ProposalProcessor] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task, _proposal_processor
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -313,11 +313,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if (
             get_env_value("SEED_PICK_AND_PLACE_DATA", default="") or ""
         ).lower() == "true":
-            from sophia.hcg_client.seeder import seed_pick_and_place_data
+            from sophia.hcg_client.seeder import (
+                seed_pick_and_place_data,
+                seed_plan_data,
+                seed_persona_entries,
+                seed_type_definitions,
+            )
 
-            logger.info("Seeding pick-and-place test data...")
+            logger.info("Seeding test data into Neo4j...")
             try:
+                seed_type_definitions(_hcg_client)
                 seed_pick_and_place_data(_hcg_client)
+                seed_plan_data(_hcg_client)
+                seed_persona_entries(_hcg_client)
                 # Reload knowledge graph after seeding
                 _kg = load_kg_from_hcg(_hcg_client)
                 logger.info(
@@ -364,6 +372,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info(
             f"Media ingestion service initialized with storage root: {storage_root}"
         )
+
+    # Initialize ProposalProcessor (requires HCG client + Milvus)
+    if _hcg_client:
+        try:
+            from logos_hcg.sync import HCGMilvusSync
+
+            _milvus_sync = HCGMilvusSync(
+                milvus_host=milvus_config.host,
+                milvus_port=str(milvus_config.port),
+            )
+            _milvus_sync.connect()
+            _proposal_processor = ProposalProcessor(
+                hcg_client=_hcg_client,
+                milvus_sync=_milvus_sync,
+            )
+            logger.info("ProposalProcessor initialized")
+        except Exception as e:
+            logger.warning(f"ProposalProcessor unavailable (Milvus not ready): {e}")
+            # Processor not available without Milvus — endpoint will skip cognitive processing
+            _proposal_processor = None
 
     logger.info("Sophia API service started successfully")
 
@@ -913,10 +941,10 @@ def create_app() -> FastAPI:
                     goal_node = _hcg_client.get_node(goal_node_id)
                     if goal_node:
                         _hcg_client.add_edge(
-                            edge_id=f"e_{plan_id}_achieves_goal",
+                            edge_uuid=f"e_{plan_id}_achieves_goal",
                             source_uuid=plan_id,
                             target_uuid=goal_node_id,
-                            relation="achieves",
+                            relation="ACHIEVES",
                         )
                 except Exception as e:
                     logger.warning(f"Could not link plan to goal: {e}")
@@ -1200,10 +1228,10 @@ def create_app() -> FastAPI:
 
                 # Link state to simulation
                 _hcg_client.add_edge(
-                    edge_id=f"e_{result.simulation_id}_{state.state_id}",
+                    edge_uuid=f"e_{result.simulation_id}_{state.state_id}",
                     source_uuid=result.simulation_id,
                     target_uuid=state.state_id,
-                    relation="produces",
+                    relation="PRODUCES",
                 )
 
             # Store simulation metadata node
@@ -1233,10 +1261,10 @@ def create_app() -> FastAPI:
             if request.media_sample_id:
                 try:
                     _hcg_client.add_edge(
-                        edge_id=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
+                        edge_uuid=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
                         source_uuid=result.simulation_id,
                         target_uuid=request.media_sample_id,
-                        relation="uses_media",
+                        relation="USES_MEDIA",
                         properties={"embedding_count": len(media_embeddings)},
                     )
                     logger.info(
@@ -1318,8 +1346,28 @@ def create_app() -> FastAPI:
                 f"Proposal {request.proposal_id} raw text: {request.raw_text[:100]}..."
             )
 
-        # TODO: Pass to Sophia's cognitive processing
-        # For now, just acknowledge receipt
+        # Process through ProposalProcessor if available
+        stored_node_ids: List[str] = []
+        relevant_context: List[Dict[str, Any]] = []
+
+        if _proposal_processor:
+            try:
+                result = _proposal_processor.process(request.model_dump())
+                stored_node_ids = result.get("stored_node_ids", [])
+                relevant_context = result.get("relevant_context", [])
+                span.set_attribute("ingest.stored_count", len(stored_node_ids))
+                span.set_attribute("ingest.context_count", len(relevant_context))
+                logger.info(
+                    f"Proposal {request.proposal_id}: stored {len(stored_node_ids)} nodes, "
+                    f"found {len(relevant_context)} context items"
+                )
+            except Exception as e:
+                logger.error(f"ProposalProcessor failed for {request.proposal_id}: {e}")
+                span.record_exception(e)
+        else:
+            logger.debug(
+                "ProposalProcessor not initialized, skipping cognitive processing"
+            )
 
         # Emit feedback to Hermes
         if _feedback_dispatcher:
@@ -1329,7 +1377,9 @@ def create_app() -> FastAPI:
                         correlation_id=request.correlation_id,
                         feedback_type="observation",
                         outcome="accepted",
-                        reason=f"Received proposal {request.proposal_id} from {request.source_service}",
+                        reason=f"Processed proposal {request.proposal_id}: "
+                        f"{len(stored_node_ids)} nodes stored, "
+                        f"{len(relevant_context)} context items",
                     )
                 )
             except Exception as e:
@@ -1337,7 +1387,8 @@ def create_app() -> FastAPI:
 
         return HermesProposalResponse(
             proposal_id=request.proposal_id,
-            stored_node_ids=[],  # No nodes created - proposals are logged, not stored
+            stored_node_ids=stored_node_ids,
+            relevant_context=relevant_context,
             status="accepted",
         )
 
@@ -1468,10 +1519,10 @@ def create_app() -> FastAPI:
 
                     # Link process to execution container
                     _hcg_client.add_edge(
-                        edge_id=f"e_{execution_id}_{process_id}",
+                        edge_uuid=f"e_{execution_id}_{process_id}",
                         source_uuid=execution_id,
                         target_uuid=process_id,
-                        relation="produces",
+                        relation="PRODUCES",
                     )
 
                 results.append(result)
@@ -1509,10 +1560,10 @@ def create_app() -> FastAPI:
 
                     # Link execution to resulting state
                     _hcg_client.add_edge(
-                        edge_id=f"e_{execution_id}_results_in_state",
+                        edge_uuid=f"e_{execution_id}_results_in_state",
                         source_uuid=execution_id,
                         target_uuid="current_state",
-                        relation="results_in",
+                        relation="RESULTS_IN",
                     )
 
                     # Update planner state
@@ -1631,7 +1682,7 @@ def create_app() -> FastAPI:
                         type=node["type"],
                         name=node["name"],
                         properties=props,
-                        labels=node.get("ancestors", []),
+                        labels=[],
                         created_at=props.get("created"),
                     )
                 )
@@ -1710,7 +1761,7 @@ def create_app() -> FastAPI:
                 type=node["type"],
                 name=node["name"],
                 properties=props,
-                labels=node.get("ancestors", []),
+                labels=[],
                 created_at=props.get("created"),
             )
 
@@ -1732,7 +1783,7 @@ def create_app() -> FastAPI:
     async def list_hcg_edges(
         edge_type: Optional[str] = Query(
             default=None,
-            description="Filter by edge/relation type (e.g., 'enables', 'achieves')",
+            description="Filter by edge/relation type (e.g., 'ENABLES', 'ACHIEVES')",
         ),
         source_id: Optional[str] = Query(
             default=None,
@@ -1839,14 +1890,15 @@ def create_app() -> FastAPI:
 
             entities: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 entities.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type=node.get("type", "unknown"),
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
-                        created_at=node.get("created_at"),
+                        properties=props,
+                        labels=[],
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -1887,14 +1939,15 @@ def create_app() -> FastAPI:
 
             states: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 states.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="state",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
-                        created_at=node.get("created_at"),
+                        properties=props,
+                        labels=[],
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -1948,14 +2001,15 @@ def create_app() -> FastAPI:
 
             processes: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 processes.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="process",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
-                        created_at=node.get("created_at"),
+                        properties=props,
+                        labels=[],
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -2003,14 +2057,15 @@ def create_app() -> FastAPI:
 
             plans: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 plans.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="plan",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
-                        created_at=node.get("created_at"),
+                        properties=props,
+                        labels=[],
+                        created_at=props.get("created"),
                     )
                 )
 
@@ -2061,14 +2116,15 @@ def create_app() -> FastAPI:
 
             history: List[HCGEntityResponse] = []
             for node in raw_nodes:
+                props = sanitize_neo4j_properties(node.get("properties", {}))
                 history.append(
                     HCGEntityResponse(
                         id=node.get("uuid", node.get("id", "")),
                         type="state_history",
                         name=node.get("name", ""),
-                        properties=node.get("properties", {}),
-                        labels=node.get("ancestors", []),
-                        created_at=node.get("created_at"),
+                        properties=props,
+                        labels=[],
+                        created_at=props.get("created"),
                     )
                 )
 

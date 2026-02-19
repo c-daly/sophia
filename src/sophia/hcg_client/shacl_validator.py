@@ -254,6 +254,10 @@ class SHACLValidator:
     def _edge_to_graph(self, edge_data: Dict[str, Any]) -> Graph:
         """Convert edge data to RDF graph.
 
+        Handles reified edge node properties: relation, source, target
+        are required; bidirectional, confidence, source_service, and
+        derivation are optional.
+
         Args:
             edge_data: Edge data dictionary
 
@@ -277,9 +281,26 @@ class SHACLValidator:
         if "relation" in edge_data:
             g.add((edge_uri, ex.relation, Literal(edge_data["relation"])))
 
+        # Reified edge node optional fields
+        if "bidirectional" in edge_data:
+            g.add(
+                (
+                    edge_uri,
+                    ex.bidirectional,
+                    Literal(edge_data["bidirectional"], datatype=XSD.boolean),
+                )
+            )
+
         if "properties" in edge_data:
             for key, value in edge_data["properties"].items():
-                g.add((edge_uri, ex[key], Literal(str(value))))
+                if isinstance(value, float):
+                    g.add((edge_uri, ex[key], Literal(value, datatype=XSD.double)))
+                elif isinstance(value, bool):
+                    g.add((edge_uri, ex[key], Literal(value, datatype=XSD.boolean)))
+                elif isinstance(value, int):
+                    g.add((edge_uri, ex[key], Literal(value, datatype=XSD.integer)))
+                else:
+                    g.add((edge_uri, ex[key], Literal(str(value))))
 
         return g
 

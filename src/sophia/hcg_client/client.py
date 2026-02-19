@@ -3,6 +3,10 @@
 This module reuses the canonical `logos_hcg` package for connection management,
 retry logic, and query helpers while layering on Sophia-specific SHACL
 validation and helper methods that were previously duplicated in this repo.
+
+Edges are stored as *reified* edge nodes connected to source/target via
+structural :FROM/:TO native Neo4j relationships.  This mirrors the foundry's
+``add_edge()`` contract established in Task 1 of the cognitive-loop plan.
 """
 
 from __future__ import annotations
@@ -68,34 +72,11 @@ class HCGClient(LogosHCGClient):
     # Graph operations
     # ------------------------------------------------------------------
 
-    def _get_type_ancestors(self, node_type: str) -> List[str]:
-        """Look up ancestors for a type from its type definition in Neo4j.
-
-        The type definition's `name` field identifies what type it defines,
-        while its `type` field is its parent type in the hierarchy.
-
-        Args:
-            node_type: The type name to look up (matches type definition's name)
-
-        Returns:
-            List of ancestors from the type definition, or empty list if not found
-        """
-        query = """
-        MATCH (t:Node {name: $node_type, is_type_definition: true})
-        RETURN t.ancestors as ancestors
-        """
-        records = self._execute_read(query, {"node_type": node_type})
-        if records and records[0].get("ancestors"):
-            return list(records[0]["ancestors"])
-        return []
-
     def add_node(
         self,
         name: str,
         node_type: str,
         uuid: Optional[str] = None,
-        ancestors: Optional[List[str]] = None,
-        is_type_definition: bool = False,
         properties: Optional[Dict[str, Any]] = None,
         *,
         source: str = "unknown",
@@ -106,13 +87,13 @@ class HCGClient(LogosHCGClient):
     ) -> str:
         """Create or update a node with logos-standard properties and provenance.
 
+        Type hierarchy is expressed through IS_A edge nodes, not stored as
+        node properties.  Use ``add_edge(relation="IS_A")`` for hierarchy.
+
         Args:
             name: Human-readable name (e.g., "red_block", "pick_action")
             node_type: Semantic type (e.g., "object", "action", "location")
             uuid: Unique identifier. If None, auto-generated. Provide to update existing.
-            ancestors: Type inheritance chain. If None, automatically computed
-                from type definition as [node_type] + type_def.ancestors
-            is_type_definition: True if this node defines a type, False for instances
             properties: Additional custom properties
             source: Module/job that created this node (e.g., "planner", "jepa_runner")
             derivation: How the node was derived: "observed", "imagined", "reflected"
@@ -137,16 +118,6 @@ class HCGClient(LogosHCGClient):
         elif uuid == "":
             raise ValueError("uuid cannot be empty")
 
-        # Auto-compute ancestors if not provided
-        if ancestors is None:
-            if is_type_definition:
-                # Type definitions should have ancestors explicitly provided
-                ancestors = []
-            else:
-                # Instance nodes: [node_type] + type_definition.ancestors
-                type_ancestors = self._get_type_ancestors(node_type)
-                ancestors = [node_type] + type_ancestors
-
         # Generate timestamps
         now = datetime.now(timezone.utc).isoformat()
 
@@ -169,8 +140,6 @@ class HCGClient(LogosHCGClient):
             "uuid": uuid,
             "name": name,
             "type": node_type,
-            "ancestors": ancestors,
-            "is_type_definition": is_type_definition,
             "properties": merged_properties,
         }
 
@@ -181,9 +150,7 @@ class HCGClient(LogosHCGClient):
         query = """
         MERGE (n:Node {uuid: $uuid})
         SET n.name = $name,
-            n.type = $type,
-            n.is_type_definition = $is_type_definition,
-            n.ancestors = $ancestors
+            n.type = $type
         SET n += $properties
         RETURN n.uuid as uuid
         """
@@ -196,8 +163,6 @@ class HCGClient(LogosHCGClient):
                 "uuid": uuid,
                 "name": name,
                 "type": node_type,
-                "is_type_definition": is_type_definition,
-                "ancestors": ancestors,
                 "properties": encoded_properties,
             },
         )
@@ -258,10 +223,8 @@ class HCGClient(LogosHCGClient):
 
         This method provides backward compatibility during migration.
         Maps old signature to new:
-        - node_id → uuid
+        - node_id -> uuid
         - name = properties.get("name", node_id)
-        - ancestors = []
-        - is_type_definition = False
 
         Args:
             node_id: Node identifier (maps to uuid)
@@ -284,25 +247,44 @@ class HCGClient(LogosHCGClient):
             uuid=node_id,
             name=name,
             node_type=node_type,
-            ancestors=[],
-            is_type_definition=False,
             properties=props,
         )
 
     def add_edge(
         self,
-        edge_id: str,
         source_uuid: str,
         target_uuid: str,
         relation: str,
+        edge_uuid: Optional[str] = None,
+        bidirectional: bool = False,
         properties: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Create or update an edge after SHACL validation."""
+        """Create or update a reified edge node after SHACL validation.
+
+        The edge is stored as a node connected to source and target::
+
+            (source)<-[:FROM]-(edge_node)-[:TO]->(target)
+
+        Args:
+            source_uuid: Source node UUID
+            target_uuid: Target node UUID
+            relation: Edge type (e.g., "IS_A", "CAUSES", "LOCATED_AT")
+            edge_uuid: Unique identifier for the edge node (auto-generated if None)
+            bidirectional: Whether the relationship is bidirectional
+            properties: Additional properties on the edge node
+
+        Returns:
+            The UUID of the created/updated edge node
+        """
+        from uuid import uuid4
+
+        edge_id = edge_uuid or str(uuid4())
         edge_data = {
             "id": edge_id,
             "source": source_uuid,
             "target": target_uuid,
             "relation": relation,
+            "bidirectional": bidirectional,
             "properties": properties or {},
         }
 
@@ -310,36 +292,66 @@ class HCGClient(LogosHCGClient):
         if not is_valid:
             raise ValueError(f"Edge validation failed: {'; '.join(errors)}")
 
+        now = datetime.now(timezone.utc).isoformat()
+
+        props: Dict[str, Any] = {
+            "uuid": edge_id,
+            "type": "edge",
+            "relation": relation,
+            "source": source_uuid,
+            "target": target_uuid,
+            "bidirectional": bidirectional,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if properties:
+            encoded = self._encode_properties(cast(Mapping[str, Any], properties))
+            props.update(encoded)
+
+        # Build update-only props that preserve uuid and created_at on match.
+        update_props = {
+            k: v for k, v in props.items() if k not in ("uuid", "created_at")
+        }
+        update_props["updated_at"] = now
+
+        # MERGE on composite key (source + target + relation) for idempotency.
         query = """
-        MATCH (source:Node {uuid: $source_uuid})
-        MATCH (target:Node {uuid: $target_uuid})
-        MERGE (source)-[r:RELATION {id: $edge_id}]->(target)
-        SET r.relation_type = $relation
-        SET r += $properties
-        RETURN r.id as id
+        MATCH (src:Node {uuid: $source_uuid})
+        MATCH (tgt:Node {uuid: $target_uuid})
+        MERGE (edge:Node {source: $source_uuid, target: $target_uuid, relation: $relation})
+        ON CREATE SET edge += $props,
+                      edge.name = src.name + '_' + $relation + '_' + tgt.name
+        ON MATCH SET edge += $update_props
+        MERGE (edge)-[:FROM]->(src)
+        MERGE (edge)-[:TO]->(tgt)
+        RETURN edge.uuid AS uuid
         """
-        encoded_properties = self._encode_properties(
-            cast(Mapping[str, Any], edge_data["properties"])
-        )
-        records = self._execute_query(
+        result = self._execute_query(
             query,
             {
-                "edge_id": edge_id,
                 "source_uuid": source_uuid,
                 "target_uuid": target_uuid,
                 "relation": relation,
-                "properties": encoded_properties,
+                "props": props,
+                "update_props": update_props,
+                "now": now,
             },
         )
-        return str(records[0]["id"]) if records else edge_id
+        # If MERGE matched an existing edge, return its UUID instead
+        if result and result[0].get("uuid"):
+            return str(result[0]["uuid"])
+        return edge_id
 
     def get_node(self, uuid: str) -> Optional[Dict[str, Any]]:
-        """Fetch a node by uuid."""
+        """Fetch a content node by uuid.
+
+        Returns None for edge nodes (those with a ``relation`` property).
+        """
         query = """
         MATCH (n:Node {uuid: $uuid})
+        WHERE n.relation IS NULL
         RETURN n.uuid as uuid, n.name as name, n.type as type,
-               n.is_type_definition as is_type_definition,
-               n.ancestors as ancestors, properties(n) as props
+               properties(n) as props
         """
         records = self._execute_read(query, {"uuid": uuid})
         if not records:
@@ -347,54 +359,88 @@ class HCGClient(LogosHCGClient):
 
         props = dict(records[0]["props"])
         # Remove standard properties from props dict
-        for key in ["uuid", "name", "type", "is_type_definition", "ancestors"]:
+        for key in ["uuid", "name", "type"]:
             props.pop(key, None)
         props = self._decode_properties(props)
         return {
             "uuid": records[0]["uuid"],
             "name": records[0]["name"],
             "type": records[0]["type"],
-            "is_type_definition": records[0]["is_type_definition"],
-            "ancestors": records[0]["ancestors"] or [],
             "properties": props,
         }
 
     def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
-        """Fetch an edge by ID."""
-        query = """
-        MATCH (source:Node)-[r:RELATION {id: $id}]->(target:Node)
-        RETURN r.id as id, source.uuid as source, target.uuid as target,
-               r.relation_type as relation, properties(r) as props
+        """Fetch a reified edge node by UUID.
+
+        Queries an edge node (has ``relation`` property) and resolves its
+        source/target via :FROM/:TO structural relationships.
         """
-        records = self._execute_read(query, {"id": edge_id})
+        query = """
+        MATCH (edge:Node {uuid: $uuid})
+        WHERE edge.relation IS NOT NULL
+        OPTIONAL MATCH (edge)-[:FROM]->(src:Node)
+        OPTIONAL MATCH (edge)-[:TO]->(tgt:Node)
+        RETURN edge.uuid as id,
+               edge.source as source,
+               edge.target as target,
+               edge.relation as relation,
+               edge.bidirectional as bidirectional,
+               properties(edge) as props
+        """
+        records = self._execute_read(query, {"uuid": edge_id})
         if not records:
             return None
 
         props = dict(records[0]["props"])
-        props.pop("id", None)
-        props.pop("relation_type", None)
+        # Remove structural properties from the extra-props dict
+        for key in [
+            "uuid",
+            "name",
+            "type",
+            "relation",
+            "source",
+            "target",
+            "bidirectional",
+            "created_at",
+            "updated_at",
+        ]:
+            props.pop(key, None)
         props = self._decode_properties(props)
         return {
             "id": records[0]["id"],
             "source": records[0]["source"],
             "target": records[0]["target"],
             "relation": records[0]["relation"],
+            "bidirectional": bool(records[0].get("bidirectional", False)),
             "properties": props,
         }
 
     def query_neighbors(self, uuid: str) -> List[Dict[str, Any]]:
-        """Return unique neighbor nodes for the provided node."""
+        """Return unique content-node neighbors connected via edge nodes.
+
+        Traverses outgoing edges (node is source) and incoming edges
+        (node is target) through reified edge nodes.
+        """
         query = """
-        MATCH (n:Node {uuid: $uuid})-[r]-(neighbor:Node)
+        MATCH (n:Node {uuid: $uuid})
+        // Find neighbors via outgoing edges (n is source)
+        OPTIONAL MATCH (n)<-[:FROM]-(:Node)-[:TO]->(out_neighbor:Node)
+        WHERE out_neighbor.relation IS NULL
+        // Find neighbors via incoming edges (n is target)
+        OPTIONAL MATCH (n)<-[:TO]-(:Node)-[:FROM]->(in_neighbor:Node)
+        WHERE in_neighbor.relation IS NULL
+        // Collect and return unique neighbors
+        WITH collect(DISTINCT out_neighbor) + collect(DISTINCT in_neighbor) as all_neighbors
+        UNWIND all_neighbors as neighbor
+        WHERE neighbor IS NOT NULL AND neighbor.uuid <> $uuid
         RETURN DISTINCT neighbor.uuid as uuid, neighbor.name as name,
-               neighbor.type as type, neighbor.is_type_definition as is_type_definition,
-               neighbor.ancestors as ancestors, properties(neighbor) as props
+               neighbor.type as type, properties(neighbor) as props
         """
         records = self._execute_read(query, {"uuid": uuid})
         neighbors: List[Dict[str, Any]] = []
         for record in records:
             props = dict(record["props"])
-            for key in ["uuid", "name", "type", "is_type_definition", "ancestors"]:
+            for key in ["uuid", "name", "type"]:
                 props.pop(key, None)
             props = self._decode_properties(props)
             neighbors.append(
@@ -402,26 +448,40 @@ class HCGClient(LogosHCGClient):
                     "uuid": record["uuid"],
                     "name": record["name"],
                     "type": record["type"],
-                    "is_type_definition": record["is_type_definition"],
-                    "ancestors": record["ancestors"] or [],
                     "properties": props,
                 }
             )
         return neighbors
 
     def query_edges_from(self, uuid: str) -> List[Dict[str, Any]]:
-        """Return outgoing edges for the provided node."""
+        """Return outgoing reified edges where the node is the source."""
         query = """
-        MATCH (source:Node {uuid: $uuid})-[r:RELATION]->(target:Node)
-        RETURN r.id as id, source.uuid as source, target.uuid as target,
-               r.relation_type as relation, properties(r) as props
+        MATCH (edge:Node)-[:FROM]->(src:Node {uuid: $uuid})
+        WHERE edge.relation IS NOT NULL
+        OPTIONAL MATCH (edge)-[:TO]->(tgt:Node)
+        RETURN edge.uuid as id,
+               edge.source as source,
+               edge.target as target,
+               edge.relation as relation,
+               edge.bidirectional as bidirectional,
+               properties(edge) as props
         """
         records = self._execute_read(query, {"uuid": uuid})
         edges: List[Dict[str, Any]] = []
         for record in records:
             props = dict(record["props"])
-            props.pop("id", None)
-            props.pop("relation_type", None)
+            for key in [
+                "uuid",
+                "name",
+                "type",
+                "relation",
+                "source",
+                "target",
+                "bidirectional",
+                "created_at",
+                "updated_at",
+            ]:
+                props.pop(key, None)
             props = self._decode_properties(props)
             edges.append(
                 {
@@ -429,6 +489,7 @@ class HCGClient(LogosHCGClient):
                     "source": record["source"],
                     "target": record["target"],
                     "relation": record["relation"],
+                    "bidirectional": bool(record.get("bidirectional", False)),
                     "properties": props,
                 }
             )
@@ -439,21 +500,23 @@ class HCGClient(LogosHCGClient):
         node_type: Optional[str] = None,
         limit: int = 1000,
     ) -> List[Dict[str, Any]]:
-        """Return all nodes in the graph, optionally filtered by type.
+        """Return all content nodes in the graph, optionally filtered by type.
+
+        Edge nodes (those with a ``relation`` property) are excluded.
 
         Args:
             node_type: Optional filter by node type
             limit: Maximum number of nodes to return (default 1000)
 
         Returns:
-            List of node dictionaries with uuid, name, type, ancestors, properties
+            List of node dictionaries with uuid, name, type, properties
         """
         if node_type:
             query = """
             MATCH (n:Node {type: $node_type})
+            WHERE n.relation IS NULL
             RETURN n.uuid as uuid, n.name as name, n.type as type,
-                   n.is_type_definition as is_type_definition,
-                   n.ancestors as ancestors, properties(n) as props
+                   properties(n) as props
             LIMIT $limit
             """
             records = self._execute_read(
@@ -462,9 +525,9 @@ class HCGClient(LogosHCGClient):
         else:
             query = """
             MATCH (n:Node)
+            WHERE n.relation IS NULL
             RETURN n.uuid as uuid, n.name as name, n.type as type,
-                   n.is_type_definition as is_type_definition,
-                   n.ancestors as ancestors, properties(n) as props
+                   properties(n) as props
             LIMIT $limit
             """
             records = self._execute_read(query, {"limit": limit})
@@ -473,7 +536,7 @@ class HCGClient(LogosHCGClient):
         for record in records:
             props = dict(record["props"])
             # Remove standard properties from props dict
-            for key in ["uuid", "name", "type", "is_type_definition", "ancestors"]:
+            for key in ["uuid", "name", "type"]:
                 props.pop(key, None)
             props = self._decode_properties(props)
             nodes.append(
@@ -481,8 +544,6 @@ class HCGClient(LogosHCGClient):
                     "uuid": record["uuid"],
                     "name": record["name"],
                     "type": record["type"],
-                    "is_type_definition": record["is_type_definition"],
-                    "ancestors": record["ancestors"] or [],
                     "properties": props,
                 }
             )
@@ -495,10 +556,10 @@ class HCGClient(LogosHCGClient):
         target_uuid: Optional[str] = None,
         limit: int = 1000,
     ) -> List[Dict[str, Any]]:
-        """Return all edges in the graph with optional filters.
+        """Return all reified edge nodes in the graph with optional filters.
 
         Args:
-            relation_type: Optional filter by relationship type
+            relation_type: Optional filter by relation type
             source_uuid: Optional filter by source node uuid
             target_uuid: Optional filter by target node uuid
             limit: Maximum number of edges to return (default 1000)
@@ -507,28 +568,30 @@ class HCGClient(LogosHCGClient):
             List of edge dictionaries with id, source, target, relation, properties
         """
         # Build query with optional filters
-        conditions = []
+        conditions = ["edge.relation IS NOT NULL"]
         params: Dict[str, Any] = {"limit": limit}
 
         if relation_type:
-            conditions.append("r.relation_type = $relation_type")
+            conditions.append("edge.relation = $relation_type")
             params["relation_type"] = relation_type
         if source_uuid:
-            conditions.append("source.uuid = $source_uuid")
+            conditions.append("edge.source = $source_uuid")
             params["source_uuid"] = source_uuid
         if target_uuid:
-            conditions.append("target.uuid = $target_uuid")
+            conditions.append("edge.target = $target_uuid")
             params["target_uuid"] = target_uuid
 
-        where_clause = ""
-        if conditions:
-            where_clause = "WHERE " + " AND ".join(conditions)
+        where_clause = "WHERE " + " AND ".join(conditions)
 
         query = f"""
-        MATCH (source:Node)-[r:RELATION]->(target:Node)
+        MATCH (edge:Node)
         {where_clause}
-        RETURN r.id as id, source.uuid as source, target.uuid as target,
-               r.relation_type as relation, properties(r) as props
+        RETURN edge.uuid as id,
+               edge.source as source,
+               edge.target as target,
+               edge.relation as relation,
+               edge.bidirectional as bidirectional,
+               properties(edge) as props
         LIMIT $limit
         """
         records = self._execute_read(query, params)
@@ -536,8 +599,18 @@ class HCGClient(LogosHCGClient):
         edges: List[Dict[str, Any]] = []
         for record in records:
             props = dict(record["props"])
-            props.pop("id", None)
-            props.pop("relation_type", None)
+            for key in [
+                "uuid",
+                "name",
+                "type",
+                "relation",
+                "source",
+                "target",
+                "bidirectional",
+                "created_at",
+                "updated_at",
+            ]:
+                props.pop(key, None)
             props = self._decode_properties(props)
             edges.append(
                 {
@@ -545,13 +618,104 @@ class HCGClient(LogosHCGClient):
                     "source": record["source"],
                     "target": record["target"],
                     "relation": record["relation"],
+                    "bidirectional": bool(record.get("bidirectional", False)),
                     "properties": props,
                 }
             )
         return edges
 
+    def get_subgraph(self, node_uuids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        """Return nodes and connecting edge nodes for the given UUIDs.
+
+        Args:
+            node_uuids: List of content-node UUIDs to include
+
+        Returns:
+            Dict with ``"nodes"`` and ``"edges"`` lists
+        """
+        if not node_uuids:
+            return {"nodes": [], "edges": []}
+
+        # Fetch the content nodes
+        nodes_query = """
+        MATCH (n:Node)
+        WHERE n.uuid IN $uuids AND n.relation IS NULL
+        RETURN n.uuid as uuid, n.name as name, n.type as type,
+               properties(n) as props
+        """
+        node_records = self._execute_read(nodes_query, {"uuids": node_uuids})
+
+        nodes: List[Dict[str, Any]] = []
+        for record in node_records:
+            props = dict(record["props"])
+            for key in ["uuid", "name", "type"]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            nodes.append(
+                {
+                    "uuid": record["uuid"],
+                    "name": record["name"],
+                    "type": record["type"],
+                    "properties": props,
+                }
+            )
+
+        # Fetch edge nodes where both source and target are in the set
+        edges_query = """
+        MATCH (edge:Node)
+        WHERE edge.relation IS NOT NULL
+          AND edge.source IN $uuids
+          AND edge.target IN $uuids
+        RETURN edge.uuid as id,
+               edge.source as source,
+               edge.target as target,
+               edge.relation as relation,
+               edge.bidirectional as bidirectional,
+               properties(edge) as props
+        """
+        edge_records = self._execute_read(edges_query, {"uuids": node_uuids})
+
+        edges: List[Dict[str, Any]] = []
+        for record in edge_records:
+            props = dict(record["props"])
+            for key in [
+                "uuid",
+                "name",
+                "type",
+                "relation",
+                "source",
+                "target",
+                "bidirectional",
+                "created_at",
+                "updated_at",
+            ]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            edges.append(
+                {
+                    "id": record["id"],
+                    "source": record["source"],
+                    "target": record["target"],
+                    "relation": record["relation"],
+                    "bidirectional": bool(record.get("bidirectional", False)),
+                    "properties": props,
+                }
+            )
+
+        return {"nodes": nodes, "edges": edges}
+
     def delete_node(self, uuid: str) -> bool:
-        """Delete a node and all relationships."""
+        """Delete a content node, its edge nodes, and all relationships."""
+        # First delete any edge nodes that reference this node
+        cleanup_query = """
+        MATCH (edge:Node)
+        WHERE edge.relation IS NOT NULL
+          AND (edge.source = $uuid OR edge.target = $uuid)
+        DETACH DELETE edge
+        """
+        self._execute_query(cleanup_query, {"uuid": uuid})
+
+        # Then delete the content node itself
         query = """
         MATCH (n:Node {uuid: $uuid})
         DETACH DELETE n

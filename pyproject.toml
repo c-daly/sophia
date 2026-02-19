@@ -10,7 +10,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 packages = [
@@ -35,9 +34,8 @@ pymilvus = ">=2.5.0"
 urllib3 = "^2.5.0"
 redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
-# Pinned to specific tag for stability
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
-logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.4.2"}
+logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "main"}
 
 [tool.poetry.group.ml]
 optional = true

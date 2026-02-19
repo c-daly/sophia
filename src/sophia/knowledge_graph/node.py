@@ -1,6 +1,6 @@
 """Node representation in the knowledge graph."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,12 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class Node(BaseModel):
     """Represents a node in the knowledge graph with logos-standard properties.
 
+    Type hierarchy is expressed through IS_A edge nodes, not stored as
+    node properties.  Use ``add_edge(relation="IS_A")`` for hierarchy.
+
     Attributes:
         uuid: Unique identifier for the node
         name: Human-readable name for the node
         type: Type/category of the node
-        is_type_definition: True if this node defines a type, False for instances
-        ancestors: Type inheritance chain (e.g., ["parent_type", "root_type"])
         properties: Additional properties associated with the node
     """
 
@@ -23,8 +24,6 @@ class Node(BaseModel):
     uuid: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     type: str
-    is_type_definition: bool = False
-    ancestors: List[str] = Field(default_factory=list)
     properties: Dict[str, Any] = Field(default_factory=dict)
 
     @property

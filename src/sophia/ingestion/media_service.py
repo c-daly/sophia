@@ -350,7 +350,7 @@ class MediaIngestionService:
         """
         try:
             self.hcg_client.add_edge(
-                edge_id=f"e_{sample_id}_{simulation_id}",
+                edge_uuid=f"e_{sample_id}_{simulation_id}",
                 source_uuid=sample_id,
                 target_uuid=simulation_id,
                 relation="used_in",
@@ -467,7 +467,7 @@ class MediaIngestionService:
                 embedding_id = f"{sample_id}_{embedding_type}"
                 try:
                     self.hcg_client.add_edge(
-                        edge_id=f"e_{sample_id}_{embedding_id}",
+                        edge_uuid=f"e_{sample_id}_{embedding_id}",
                         source_uuid=sample_id,
                         target_uuid=embedding_id,
                         relation="has_embedding",

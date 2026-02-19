@@ -3,6 +3,11 @@ FROM ghcr.io/c-daly/logos-foundry:0.4.2
 # Set working directory
 WORKDIR /app/sophia
 
+# Clear PYTHONPATH from base image — the base image sets PYTHONPATH=/app which
+# causes Python to import logos_hcg from the base image's source tree (/app/logos_hcg/)
+# instead of the git-pinned version installed by poetry to site-packages.
+ENV PYTHONPATH=
+
 # Copy application code and configuration
 COPY src/ ./src/
 COPY pyproject.toml poetry.lock README.md ./
