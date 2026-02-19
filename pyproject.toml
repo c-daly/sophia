@@ -34,7 +34,6 @@ pymilvus = ">=2.5.0"
 urllib3 = "^2.5.0"
 redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
-# Temporarily tracking feature branch (revert to tag after c-daly/logos#490 merges)
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
 logos-foundry = {git = "https://github.com/c-daly/logos.git", branch = "main"}
 
