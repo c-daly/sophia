@@ -309,7 +309,9 @@ class HCGClient(LogosHCGClient):
             props.update(encoded)
 
         # Build update-only props that preserve uuid and created_at on match.
-        update_props = {k: v for k, v in props.items() if k not in ("uuid", "created_at")}
+        update_props = {
+            k: v for k, v in props.items() if k not in ("uuid", "created_at")
+        }
         update_props["updated_at"] = now
 
         # MERGE on composite key (source + target + relation) for idempotency.
