@@ -417,20 +417,16 @@ class HCGClient(LogosHCGClient):
         """
         query = """
         MATCH (n:Node {uuid: $uuid})
-        WHERE n.relation IS NULL
-        WITH n
-        // Outgoing: n <-[:FROM]- edge -[:TO]-> neighbor
-        OPTIONAL MATCH (n)<-[:FROM]-(e1:Node)-[:TO]->(nb1:Node)
-        WHERE e1.relation IS NOT NULL AND nb1.relation IS NULL
-              AND nb1.uuid <> $uuid
-        WITH n, collect(DISTINCT nb1) AS out_neighbors
-        // Incoming: n <-[:TO]- edge -[:FROM]-> neighbor
-        OPTIONAL MATCH (n)<-[:TO]-(e2:Node)-[:FROM]->(nb2:Node)
-        WHERE e2.relation IS NOT NULL AND nb2.relation IS NULL
-              AND nb2.uuid <> $uuid
-        WITH out_neighbors + collect(DISTINCT nb2) AS all_neighbors
-        UNWIND all_neighbors AS neighbor
-        WHERE neighbor IS NOT NULL
+        // Find neighbors via outgoing edges (n is source)
+        OPTIONAL MATCH (n)<-[:FROM]-(:Node)-[:TO]->(out_neighbor:Node)
+        WHERE out_neighbor.relation IS NULL
+        // Find neighbors via incoming edges (n is target)
+        OPTIONAL MATCH (n)<-[:TO]-(:Node)-[:FROM]->(in_neighbor:Node)
+        WHERE in_neighbor.relation IS NULL
+        // Collect and return unique neighbors
+        WITH collect(DISTINCT out_neighbor) + collect(DISTINCT in_neighbor) as all_neighbors
+        UNWIND all_neighbors as neighbor
+        WHERE neighbor IS NOT NULL AND neighbor.uuid <> $uuid
         RETURN DISTINCT neighbor.uuid as uuid, neighbor.name as name,
                neighbor.type as type, properties(neighbor) as props
         """

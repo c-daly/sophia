@@ -944,7 +944,7 @@ def create_app() -> FastAPI:
                             edge_uuid=f"e_{plan_id}_achieves_goal",
                             source_uuid=plan_id,
                             target_uuid=goal_node_id,
-                            relation="achieves",
+                            relation="ACHIEVES",
                         )
                 except Exception as e:
                     logger.warning(f"Could not link plan to goal: {e}")
@@ -1231,7 +1231,7 @@ def create_app() -> FastAPI:
                     edge_uuid=f"e_{result.simulation_id}_{state.state_id}",
                     source_uuid=result.simulation_id,
                     target_uuid=state.state_id,
-                    relation="produces",
+                    relation="PRODUCES",
                 )
 
             # Store simulation metadata node
@@ -1264,7 +1264,7 @@ def create_app() -> FastAPI:
                         edge_uuid=f"e_{result.simulation_id}_uses_{request.media_sample_id}",
                         source_uuid=result.simulation_id,
                         target_uuid=request.media_sample_id,
-                        relation="uses_media",
+                        relation="USES_MEDIA",
                         properties={"embedding_count": len(media_embeddings)},
                     )
                     logger.info(
@@ -1522,7 +1522,7 @@ def create_app() -> FastAPI:
                         edge_uuid=f"e_{execution_id}_{process_id}",
                         source_uuid=execution_id,
                         target_uuid=process_id,
-                        relation="produces",
+                        relation="PRODUCES",
                     )
 
                 results.append(result)
@@ -1563,7 +1563,7 @@ def create_app() -> FastAPI:
                         edge_uuid=f"e_{execution_id}_results_in_state",
                         source_uuid=execution_id,
                         target_uuid="current_state",
-                        relation="results_in",
+                        relation="RESULTS_IN",
                     )
 
                     # Update planner state
