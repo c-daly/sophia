@@ -1,6 +1,7 @@
 """Main FastAPI application for Sophia service."""
 
 import asyncio
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -88,7 +89,10 @@ from sophia.jepa.models import (
 )
 from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
-from sophia.ingestion.proposal_processor import ProposalProcessor
+from sophia.ingestion.proposal_processor import (
+    ALL_MILVUS_COLLECTIONS,
+    ProposalProcessor,
+)
 from sophia.cwm import CWMPersistence
 from sophia.feedback import (
     FeedbackConfig,
@@ -317,12 +321,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 seed_pick_and_place_data,
                 seed_plan_data,
                 seed_persona_entries,
-                seed_type_definitions,
             )
 
             logger.info("Seeding test data into Neo4j...")
             try:
-                seed_type_definitions(_hcg_client)
                 seed_pick_and_place_data(_hcg_client)
                 seed_plan_data(_hcg_client)
                 seed_persona_entries(_hcg_client)
@@ -383,6 +385,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 milvus_port=str(milvus_config.port),
             )
             _milvus_sync.connect()
+            # Ensure HCG collections exist for proposal processing
+            for _nt in ALL_MILVUS_COLLECTIONS:
+                _milvus_sync.ensure_collection(_nt)  # type: ignore[attr-defined]
             _proposal_processor = ProposalProcessor(
                 hcg_client=_hcg_client,
                 milvus_sync=_milvus_sync,
@@ -447,6 +452,15 @@ def create_app() -> FastAPI:
 
     # Request ID middleware for tracing
     app.add_middleware(RequestIDMiddleware)
+
+    # Include experiment tracking routes
+    from sophia.api.experiment_routes import (
+        router as experiment_router,
+        set_hcg_client_getter,
+    )
+
+    set_hcg_client_getter(lambda: _hcg_client)
+    app.include_router(experiment_router)
 
     # Health check endpoint (no auth required)
     @app.get("/health", response_model=LogosHealthResponse, tags=["health"])
@@ -1039,7 +1053,7 @@ def create_app() -> FastAPI:
                 _hcg_client.add_node(
                     uuid=state_id,
                     name=f"Imagined State {i + 1}",
-                    node_type="imagined_state",
+                    node_type="state",
                     properties={
                         "description": state.description,
                         "model_version": request.model_version,
@@ -1184,7 +1198,7 @@ def create_app() -> FastAPI:
                         if process.description
                         else f"Process {process.process_id[:8]}"
                     ),
-                    node_type="imagined_process",
+                    node_type="process",
                     properties={
                         "description": process.description,
                         "model_version": process.model_version,
@@ -1209,7 +1223,7 @@ def create_app() -> FastAPI:
                         if state.description
                         else f"State {state.state_id[:8]}"
                     ),
-                    node_type="imagined_state",
+                    node_type="state",
                     properties={
                         "step": state.step,
                         "description": state.description,
@@ -1304,6 +1318,8 @@ def create_app() -> FastAPI:
             )
 
     # Hermes proposal ingestion endpoint
+    # NOTE: Intentionally unauthenticated for local development.
+    # In production, set SOPHIA_ENABLE_DEV_ENDPOINTS=0 (or unset it) to disable.
     @app.post(
         "/ingest/hermes_proposal",
         response_model=HermesProposalResponse,
@@ -1319,8 +1335,15 @@ def create_app() -> FastAPI:
         for observability. Sophia will process the proposal and decide what
         semantic nodes to create based on her cognitive evaluation.
 
-        Note: Authentication is disabled for local development.
+        This endpoint is intentionally unauthenticated. It is gated behind
+        the ``SOPHIA_ENABLE_DEV_ENDPOINTS`` environment variable (must be
+        set to ``1``) for safety outside of local development.
         """
+        if os.environ.get("SOPHIA_ENABLE_DEV_ENDPOINTS", "1") != "1":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Dev endpoints are disabled (set SOPHIA_ENABLE_DEV_ENDPOINTS=1 to enable)",
+            )
         span = get_current_span()
         span.update_name("sophia.ingest.hermes_proposal")
         span.set_attribute("ingest.proposal_id", str(request.proposal_id))
@@ -1348,17 +1371,21 @@ def create_app() -> FastAPI:
 
         # Process through ProposalProcessor if available
         stored_node_ids: List[str] = []
+        stored_edge_ids: List[str] = []
         relevant_context: List[Dict[str, Any]] = []
 
         if _proposal_processor:
             try:
                 result = _proposal_processor.process(request.model_dump())
                 stored_node_ids = result.get("stored_node_ids", [])
+                stored_edge_ids = result.get("stored_edge_ids", [])
                 relevant_context = result.get("relevant_context", [])
                 span.set_attribute("ingest.stored_count", len(stored_node_ids))
+                span.set_attribute("ingest.stored_edge_count", len(stored_edge_ids))
                 span.set_attribute("ingest.context_count", len(relevant_context))
                 logger.info(
                     f"Proposal {request.proposal_id}: stored {len(stored_node_ids)} nodes, "
+                    f"{len(stored_edge_ids)} edges, "
                     f"found {len(relevant_context)} context items"
                 )
             except Exception as e:
@@ -1379,6 +1406,7 @@ def create_app() -> FastAPI:
                         outcome="accepted",
                         reason=f"Processed proposal {request.proposal_id}: "
                         f"{len(stored_node_ids)} nodes stored, "
+                        f"{len(stored_edge_ids)} edges stored, "
                         f"{len(relevant_context)} context items",
                     )
                 )
@@ -1388,6 +1416,7 @@ def create_app() -> FastAPI:
         return HermesProposalResponse(
             proposal_id=request.proposal_id,
             stored_node_ids=stored_node_ids,
+            stored_edge_ids=stored_edge_ids,
             relevant_context=relevant_context,
             status="accepted",
         )

@@ -1,120 +1,15 @@
-"""Utilities for seeding HCG with test data.
+"""Utilities for seeding HCG with demo/test data.
 
-Type hierarchy is expressed through IS_A edge nodes in the reified-edge
-model, not stored as node properties.
+The foundry (logos_hcg.seeder) owns the type hierarchy and bootstrap
+ontology.  This module provides demo data functions only.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List
 from sophia.hcg_client.client import HCGClient
 
 
 logger = logging.getLogger(__name__)
-
-# Type hierarchy expressed as parent -> children mapping.
-# Each entry maps a type name to its parent type.
-# These relationships will be created as IS_A edge nodes.
-TYPE_HIERARCHY: Dict[str, str] = {
-    # Core pick-and-place types
-    "location": "spatial_entity",
-    "spatial_entity": "entity",
-    "object": "physical_entity",
-    "physical_entity": "entity",
-    "action": "process",
-    "goal": "intention",
-    "intention": "entity",
-    "state": "cognition",
-    # API and planning types
-    "plan": "process",
-    "imagined_state": "cognition",
-    "imagined_process": "process",
-    "simulation": "abstraction",
-    "abstraction": "entity",
-    # Execution container types (parallel to simulation for observed)
-    "execution": "abstraction",
-    "process": "entity",
-    # Hermes ingestion types
-    "hermes_proposal": "intention",
-    "proposed_plan_step": "process",
-    "proposed_imagined_state": "cognition",
-    "proposed_tool_call": "process",
-    # Media types
-    "media_sample": "data",
-    "data": "entity",
-    # CWM types
-    "cwm_a": "cwm",
-    "cwm_g": "cwm",
-    "cwm_e": "cwm",
-    "cwm": "cognition",
-    "cognition": "entity",
-}
-
-# Types required by sophia API endpoints
-REQUIRED_TYPES = [
-    "simulation",
-    "imagined_process",
-    "imagined_state",
-    "execution",
-    "process",
-]
-
-
-def seed_type_definitions(hcg_client: HCGClient) -> None:
-    """Seed Neo4j with type definition nodes and IS_A edge hierarchy.
-
-    Creates a type node for each type and connects them via IS_A edges
-    to express the type hierarchy.
-
-    Args:
-        hcg_client: HCG client instance
-    """
-    logger.info("Seeding type definitions into Neo4j...")
-
-    # First pass: create all type nodes
-    created_types = set()
-    all_types = set(TYPE_HIERARCHY.keys()) | set(TYPE_HIERARCHY.values())
-
-    for type_name in all_types:
-        if type_name not in created_types:
-            hcg_client.add_node(
-                uuid=f"type_{type_name}",
-                name=type_name,
-                node_type="type",
-                source="bootstrap",
-                derivation="observed",
-            )
-            created_types.add(type_name)
-
-    # Second pass: create IS_A edges for the hierarchy
-    for child_type, parent_type in TYPE_HIERARCHY.items():
-        hcg_client.add_edge(
-            edge_uuid=f"edge_is_a_{child_type}_{parent_type}",
-            source_uuid=f"type_{child_type}",
-            target_uuid=f"type_{parent_type}",
-            relation="IS_A",
-        )
-
-    logger.info(
-        f"Seeded {len(created_types)} type nodes with {len(TYPE_HIERARCHY)} IS_A edges"
-    )
-
-
-def verify_required_types(hcg_client: HCGClient) -> List[str]:
-    """Verify that all required type definition nodes exist in Neo4j.
-
-    Args:
-        hcg_client: HCG client instance
-
-    Returns:
-        List of missing type names (empty if all exist)
-    """
-    missing = []
-    for type_name in REQUIRED_TYPES:
-        node = hcg_client.get_node(f"type_{type_name}")
-        if not node:
-            missing.append(type_name)
-    return missing
 
 
 def seed_pick_and_place_data(hcg_client: HCGClient) -> None:

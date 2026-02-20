@@ -9,11 +9,24 @@ for Hermes's benefit when context is returned.
 """
 
 import logging
-from typing import Any
+import uuid as uuid_mod
+from typing import Any, Literal, Tuple
 
 logger = logging.getLogger(__name__)
 
 ENTITY_MATCH_THRESHOLD = 0.5
+
+# Node/collection type literal shared with logos_hcg.
+NodeType = Literal["Entity", "Concept", "State", "Process", "Edge"]
+
+# All Milvus collections used by proposal processing.
+ALL_MILVUS_COLLECTIONS: Tuple[NodeType, ...] = (
+    "Entity",
+    "Concept",
+    "State",
+    "Process",
+    "Edge",
+)
 
 # Milvus collection types to search for context.
 SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")
@@ -25,6 +38,20 @@ _NODE_TYPE_TO_COLLECTION = {
     "state": "State",
     "process": "Process",
 }
+
+# Keys that must not be overwritten by untrusted proposal properties.
+_RESERVED_EDGE_KEYS = frozenset(
+    {
+        "uuid",
+        "source",
+        "target",
+        "relation",
+        "type",
+        "bidirectional",
+        "created_at",
+        "updated_at",
+    }
+)
 
 
 def _collection_for(node_type: str) -> str:
@@ -43,6 +70,8 @@ class ProposalProcessor:
         """Process a proposal: search for context, decide what to ingest."""
         stored_ids: list[str] = []
         relevant_context: list[dict] = []
+        # Track entity name -> node uuid for edge resolution.
+        name_to_uuid: dict[str, str] = {}
 
         # 1. Search for relevant existing context using document embedding
         doc_emb = proposal.get("document_embedding")
@@ -66,6 +95,16 @@ class ProposalProcessor:
                                     "score": match["score"],
                                 }
                             )
+                            if node.get("name"):
+                                if node["name"] in name_to_uuid:
+                                    logger.warning(
+                                        "Name collision in context: '%s' already mapped "
+                                        "to %s, overwriting with %s",
+                                        node["name"],
+                                        name_to_uuid[node["name"]],
+                                        match["uuid"],
+                                    )
+                                name_to_uuid[node["name"]] = match["uuid"]
                 except Exception as e:
                     logger.debug(f"Search in {collection} failed: {e}")
 
@@ -99,6 +138,7 @@ class ProposalProcessor:
                                 f"'{existing_node.get('name')}' "
                                 f"(L2={existing[0]['score']:.3f}), skipping creation"
                             )
+                            name_to_uuid[name] = existing[0]["uuid"]
                             if not any(
                                 c["node_uuid"] == existing[0]["uuid"]
                                 for c in relevant_context
@@ -132,11 +172,35 @@ class ProposalProcessor:
                     },
                 )
                 stored_ids.append(node_uuid)
+                name_to_uuid[name] = node_uuid
             except Exception as e:
                 logger.error(f"Failed to create node '{name}': {e}")
                 continue
 
-            # 2c. Store embedding in Milvus
+            # 2c. Connect to type definition via IS_A edge.
+            # Ensure the type-definition node exists (MERGE is idempotent).
+            type_def_uuid = f"type_{node_type}"
+            try:
+                self._hcg.add_node(
+                    uuid=type_def_uuid,
+                    name=node_type,
+                    node_type="type_definition",
+                    source="sophia",
+                    derivation="observed",
+                )
+                self._hcg.add_edge(
+                    source_uuid=node_uuid,
+                    target_uuid=type_def_uuid,
+                    relation="IS_A",
+                )
+            except Exception as e:
+                logger.warning(
+                    "Could not create IS_A edge to type '%s': %s",
+                    node_type,
+                    e,
+                )
+
+            # 2d. Store embedding in Milvus
             if embedding:
                 try:
                     self._milvus.upsert_embedding(
@@ -148,7 +212,179 @@ class ProposalProcessor:
                 except Exception as e:
                     logger.warning(f"Embedding storage failed for '{name}': {e}")
 
+        # 3. Ingest proposed edges
+        stored_edge_ids: list[str] = []
+        for edge in proposal.get("proposed_edges") or []:
+            src_name = edge.get("source_name", "")
+            tgt_name = edge.get("target_name", "")
+            src_uuid = name_to_uuid.get(src_name)
+            tgt_uuid = name_to_uuid.get(tgt_name)
+
+            # Fallback: look up unresolved names in Neo4j
+            if not src_uuid:
+                try:
+                    found = self._hcg.find_node_by_name(src_name)
+                    if found:
+                        src_uuid = found.get("uuid")
+                except Exception as e:
+                    logger.debug(
+                        "Neo4j fallback lookup failed for '%s': %s", src_name, e
+                    )
+            if not tgt_uuid:
+                try:
+                    found = self._hcg.find_node_by_name(tgt_name)
+                    if found:
+                        tgt_uuid = found.get("uuid")
+                except Exception as e:
+                    logger.debug(
+                        "Neo4j fallback lookup failed for '%s': %s", tgt_name, e
+                    )
+
+            if not src_uuid or not tgt_uuid:
+                logger.debug(
+                    "Skipping edge %s -> %s: missing node UUID (available: %s)",
+                    src_name,
+                    tgt_name,
+                    list(name_to_uuid.keys()),
+                )
+                continue
+
+            relation = edge.get("relation", "RELATED_TO")
+            bidirectional = edge.get("bidirectional", False)
+            properties = dict(edge.get("properties") or {})
+            properties["confidence"] = edge.get("confidence", 0.5)
+            # Strip reserved keys so untrusted input cannot overwrite them
+            for key in _RESERVED_EDGE_KEYS:
+                properties.pop(key, None)
+
+            try:
+                edge_uuid = self._hcg.add_edge(
+                    source_uuid=src_uuid,
+                    target_uuid=tgt_uuid,
+                    relation=relation,
+                    bidirectional=bidirectional,
+                    properties=properties,
+                )
+                stored_edge_ids.append(edge_uuid)
+            except Exception as e:
+                logger.error(
+                    "Failed to create edge %s -[%s]-> %s: %s",
+                    src_name,
+                    relation,
+                    tgt_name,
+                    e,
+                )
+                continue
+
+            # Store edge embedding in Milvus
+            embedding = edge.get("embedding")
+            model = edge.get("model", "unknown")
+            if embedding:
+                try:
+                    self._milvus.upsert_embedding(
+                        node_type="Edge",
+                        uuid=edge_uuid,
+                        embedding=embedding,
+                        model=model,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Edge embedding storage failed for %s: %s",
+                        edge_uuid,
+                        e,
+                    )
+
+        # 4. Create experiment_run node if pipeline metadata is present
+        experiment_run_id: str | None = None
+        pipeline = (proposal.get("metadata") or {}).get("pipeline")
+        if pipeline and (stored_ids or stored_edge_ids):
+            experiment_run_id = self._create_experiment_run(
+                proposal=proposal,
+                pipeline=pipeline,
+                stored_node_ids=stored_ids,
+                stored_edge_ids=stored_edge_ids,
+            )
+
         return {
             "stored_node_ids": stored_ids,
+            "stored_edge_ids": stored_edge_ids,
             "relevant_context": relevant_context,
+            "experiment_run_id": experiment_run_id,
         }
+
+    def _create_experiment_run(
+        self,
+        proposal: dict,
+        pipeline: dict,
+        stored_node_ids: list[str],
+        stored_edge_ids: list[str],
+    ) -> str | None:
+        """Create an experiment_run node and PRODUCED edges to outputs.
+
+        Returns the experiment_run uuid or None on failure.
+        """
+        run_uuid = str(uuid_mod.uuid4())
+        metadata = proposal.get("metadata") or {}
+        tags = list(metadata.get("experiment_tags", []))
+
+        try:
+            self._hcg.add_node(
+                name=f"run_{run_uuid[:8]}",
+                node_type="experiment_run",
+                uuid=run_uuid,
+                source="sophia",
+                derivation="observed",
+                confidence=1.0,
+                properties={
+                    "proposal_id": proposal.get("proposal_id", ""),
+                    "correlation_id": proposal.get("correlation_id", ""),
+                    "ner_provider": pipeline.get("ner_provider", ""),
+                    "embedding_provider": pipeline.get("embedding_provider", ""),
+                    "ner_duration_ms": pipeline.get("ner_duration_ms", 0),
+                    "relation_duration_ms": pipeline.get("relation_duration_ms", 0),
+                    "embedding_duration_ms": pipeline.get("embedding_duration_ms", 0),
+                    "total_duration_ms": pipeline.get("total_duration_ms", 0),
+                    "entity_count": pipeline.get("entity_count", 0),
+                    "edge_count": pipeline.get("edge_count", 0),
+                    "experiment_tags": tags,
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to create experiment_run node: %s", e)
+            return None
+
+        # Link to produced nodes
+        for node_uuid in stored_node_ids:
+            try:
+                self._hcg.add_edge(
+                    source_uuid=run_uuid,
+                    target_uuid=node_uuid,
+                    relation="PRODUCED",
+                )
+            except Exception as e:
+                logger.debug(
+                    "Failed to link experiment_run to node %s: %s", node_uuid, e
+                )
+
+        # Link to produced edges
+        for edge_uuid in stored_edge_ids:
+            try:
+                self._hcg.add_edge(
+                    source_uuid=run_uuid,
+                    target_uuid=edge_uuid,
+                    relation="PRODUCED",
+                )
+            except Exception as e:
+                logger.debug(
+                    "Failed to link experiment_run to edge %s: %s", edge_uuid, e
+                )
+
+        logger.info(
+            "Created experiment_run %s: %d nodes, %d edges, ner=%s, emb=%s",
+            run_uuid[:8],
+            len(stored_node_ids),
+            len(stored_edge_ids),
+            pipeline.get("ner_provider"),
+            pipeline.get("embedding_provider"),
+        )
+        return run_uuid

@@ -1,6 +1,7 @@
 // Test data for pick-and-place scenario
 // This cypher file defines the Hierarchical Cognitive Graph (HCG) for a simple pick-and-place task
 // Uses logos flexible ontology: :Node label with uuid, name, type, is_type_definition, ancestors
+// Flat hierarchy: all types are direct children of root
 
 // Create spatial entities (locations)
 CREATE (table:Node {
@@ -8,7 +9,7 @@ CREATE (table:Node {
     name: 'Table',
     type: 'location',
     is_type_definition: false,
-    ancestors: ['spatial_entity', 'entity'],
+    ancestors: ['root'],
     location_type: 'surface'
 })
 CREATE (bin:Node {
@@ -16,7 +17,7 @@ CREATE (bin:Node {
     name: 'Bin',
     type: 'location',
     is_type_definition: false,
-    ancestors: ['spatial_entity', 'entity'],
+    ancestors: ['root'],
     location_type: 'container'
 })
 
@@ -26,7 +27,7 @@ CREATE (red_block:Node {
     name: 'Red Block',
     type: 'object',
     is_type_definition: false,
-    ancestors: ['physical_entity', 'entity'],
+    ancestors: ['root'],
     color: 'red',
     object_type: 'block'
 })
@@ -35,7 +36,7 @@ CREATE (blue_block:Node {
     name: 'Blue Block',
     type: 'object',
     is_type_definition: false,
-    ancestors: ['physical_entity', 'entity'],
+    ancestors: ['root'],
     color: 'blue',
     object_type: 'block'
 })
@@ -50,7 +51,7 @@ CREATE (move1:Node {
     name: 'Move to Red Block',
     type: 'action',
     is_type_definition: false,
-    ancestors: ['process', 'entity'],
+    ancestors: ['root'],
     action_type: 'MOVE',
     target: 'red_block'
 })
@@ -59,7 +60,7 @@ CREATE (grasp1:Node {
     name: 'Grasp Red Block',
     type: 'action',
     is_type_definition: false,
-    ancestors: ['process', 'entity'],
+    ancestors: ['root'],
     action_type: 'GRASP',
     target: 'red_block'
 })
@@ -68,7 +69,7 @@ CREATE (move2:Node {
     name: 'Move to Bin',
     type: 'action',
     is_type_definition: false,
-    ancestors: ['process', 'entity'],
+    ancestors: ['root'],
     action_type: 'MOVE',
     target: 'bin'
 })
@@ -77,7 +78,7 @@ CREATE (release1:Node {
     name: 'Release Red Block',
     type: 'action',
     is_type_definition: false,
-    ancestors: ['process', 'entity'],
+    ancestors: ['root'],
     action_type: 'RELEASE',
     target: 'red_block'
 })
@@ -94,7 +95,7 @@ CREATE (goal:Node {
     name: 'Goal: Red Block in Bin',
     type: 'goal',
     is_type_definition: false,
-    ancestors: ['intention', 'entity'],
+    ancestors: ['root'],
     description: 'red block in bin',
     target_state: 'red_block_in_bin'
 })

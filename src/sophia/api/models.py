@@ -447,6 +447,27 @@ class SimulateResponse(BaseModel):
     )
 
 
+class ProposedEdge(BaseModel):
+    """Structured model for a proposed relationship between entities."""
+
+    source_name: str = Field(..., description="Name of the source entity")
+    target_name: str = Field(..., description="Name of the target entity")
+    relation: str = Field(default="RELATED_TO", description="Relationship type")
+    confidence: float = Field(
+        default=0.5, ge=0.0, le=1.0, description="Edge confidence score"
+    )
+    bidirectional: bool = Field(
+        default=False, description="Whether the edge is bidirectional"
+    )
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional edge properties"
+    )
+    embedding: Optional[List[float]] = Field(
+        default=None, description="Edge embedding vector"
+    )
+    model: str = Field(default="unknown", description="Embedding model used")
+
+
 class HermesProposalRequest(BaseModel):
     """Request model for Hermes LLM proposal ingestion."""
 
@@ -538,6 +559,10 @@ class HermesProposalRequest(BaseModel):
         default=None,
         description="Embedding of the full document text",
     )
+    proposed_edges: Optional[List[ProposedEdge]] = Field(
+        default=None,
+        description="Proposed relationships between entities",
+    )
 
 
 class HermesProposalResponse(BaseModel):
@@ -546,6 +571,10 @@ class HermesProposalResponse(BaseModel):
     proposal_id: str = Field(..., description="The ingested proposal identifier")
     stored_node_ids: List[str] = Field(
         ..., description="Node IDs created in Neo4j for this proposal"
+    )
+    stored_edge_ids: List[str] = Field(
+        default_factory=list,
+        description="Edge IDs created in Neo4j for this proposal",
     )
     status: str = Field(
         ...,
