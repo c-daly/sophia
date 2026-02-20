@@ -778,7 +778,7 @@ def create_app() -> FastAPI:
     async def get_cwm_persisted(
         types: Optional[str] = Query(
             default=None,
-            description="Comma-separated subsystem filters (abstract, grounded, emotional)",
+            description="Comma-separated CWM types to filter (cwm_a, cwm_g, cwm_e)",
         ),
         after_timestamp: Optional[str] = Query(
             default=None,
@@ -806,10 +806,13 @@ def create_app() -> FastAPI:
             )
 
         try:
-            # Parse subsystem filter
-            subsystem_tags: list[str] | None = None
+            from typing import cast
+            from sophia.cwm.persistence import CWMType
+
+            # Parse types filter
+            type_list: list[CWMType] | None = None
             if types:
-                subsystem_tags = [f"subsystem:{t.strip()}" for t in types.split(",")]
+                type_list = cast(list[CWMType], [t.strip() for t in types.split(",")])
 
             # Parse timestamp filter with RFC3339 support
             parsed_timestamp = None
@@ -826,7 +829,7 @@ def create_app() -> FastAPI:
 
             # Query Neo4j
             cwm_states = _cwm_persistence.find_states(
-                subsystems=subsystem_tags,
+                types=type_list,
                 after_timestamp=parsed_timestamp,
                 limit=limit,
             )
@@ -2233,7 +2236,7 @@ def create_app() -> FastAPI:
 
         # Fetch more than needed to account for filtering
         raw_states = _cwm_persistence.find_states(
-            subsystems=["subsystem:emotional"],
+            types=["cwm_e"],
             after_timestamp=after_timestamp,
             limit=limit * 3 + offset,
         )

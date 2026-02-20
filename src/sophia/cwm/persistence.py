@@ -2,11 +2,10 @@
 
 Handles persisting Causal World Model (CWM) states to Neo4j via logos_hcg.
 
-All CWM states are stored as ``type = "state"`` nodes with tags:
-- ``"cwm"`` — marks the node as a CWM state
-- ``"subsystem:abstract"``  (CWM-A) — entities, relations, causal rules
-- ``"subsystem:grounded"``  (CWM-G) — JEPA outputs, sensor predictions, physics
-- ``"subsystem:emotional"`` (CWM-E) — persona state, sentiment, reflections
+CWM Types:
+- cwm_a: Abstract reasoning - entities, relations, causal rules
+- cwm_g: Grounded - JEPA outputs, sensor predictions, physics
+- cwm_e: Emotional - persona state, sentiment, reflections
 """
 
 from __future__ import annotations
@@ -23,17 +22,17 @@ from sophia.cwm_a.state_service import CWMState
 
 logger = logging.getLogger(__name__)
 
-CWMType = Literal["state"]
+CWMType = Literal["cwm_a", "cwm_g", "cwm_e"]
 
-# Map SDK model_type to subsystem tag
-MODEL_TYPE_TO_SUBSYSTEM = {
-    "CWM_A": "subsystem:abstract",
-    "CWM_G": "subsystem:grounded",
-    "CWM_E": "subsystem:emotional",
+# Map SDK model_type to internal type
+MODEL_TYPE_MAP = {
+    "CWM_A": "cwm_a",
+    "CWM_G": "cwm_g",
+    "CWM_E": "cwm_e",
 }
 
-# Reverse mapping (subsystem tag → SDK model_type)
-SUBSYSTEM_TO_MODEL_TYPE = {v: k for k, v in MODEL_TYPE_TO_SUBSYSTEM.items()}
+# Reverse mapping
+TYPE_MODEL_MAP = {v: k for k, v in MODEL_TYPE_MAP.items()}
 
 
 class CWMPersistence:
@@ -58,22 +57,16 @@ class CWMPersistence:
         Returns:
             The state_id of the persisted state
         """
-        # Determine subsystem tag from model_type
-        subsystem_tag = MODEL_TYPE_TO_SUBSYSTEM.get(state.model_type)
+        # Map model_type to internal type
+        cwm_type = MODEL_TYPE_MAP.get(state.model_type, state.model_type.lower())
 
         # Extract provenance from data (simplified CWMState has provenance in data)
         data = state.data or {}
         source = data.get("source", "unknown")
         derivation = data.get("derivation", "observed")
         confidence = data.get("confidence")
-        tags = list(data.get("tags", []))
+        tags = data.get("tags", [])
         links = data.get("links", {})
-
-        # Ensure CWM marker and subsystem tags are present
-        if "cwm" not in tags:
-            tags.append("cwm")
-        if subsystem_tag and subsystem_tag not in tags:
-            tags.append(subsystem_tag)
 
         # Serialize data payload (full data including provenance)
         data_json = json.dumps(data) if data else "{}"
@@ -84,8 +77,8 @@ class CWMPersistence:
         query = HCGQueries.create_cwm_state()
         params = {
             "uuid": state.state_id,
-            "name": f"cwm_{state.timestamp.strftime('%Y%m%d_%H%M%S')}",
-            "type": "state",
+            "name": f"{cwm_type}_{state.timestamp.strftime('%Y%m%d_%H%M%S')}",
+            "type": cwm_type,
             "timestamp": state.timestamp.isoformat(),
             "source": source,
             "confidence": confidence if confidence is not None else 1.0,
@@ -103,34 +96,32 @@ class CWMPersistence:
             if not record:
                 raise RuntimeError(f"Failed to persist CWM state: {state.state_id}")
 
-            subsystem = subsystem_tag or "unknown"
-            logger.info(f"Persisted CWM state: {subsystem} id={state.state_id}")
+            logger.info(f"Persisted CWM state: {cwm_type} id={state.state_id}")
 
         return state.state_id
 
     def find_states(
         self,
-        subsystems: list[str] | None = None,
+        types: list[CWMType] | None = None,
         after_timestamp: datetime | None = None,
         limit: int = 20,
     ) -> list[CWMState]:
         """Find CWM states with optional filters.
 
         Args:
-            subsystems: List of subsystem tags to filter by
-                       (e.g. ["subsystem:abstract", "subsystem:emotional"]).
-                       If None, returns all CWM states.
+            types: List of CWM types to include (default: all)
             after_timestamp: Only return states after this time
             limit: Max results to return
 
         Returns:
             List of CWMState envelopes ordered by timestamp desc
         """
-        subsystem_tags = subsystems or []
+        if types is None:
+            types = ["cwm_a", "cwm_g", "cwm_e"]
 
         query = HCGQueries.find_cwm_states()
         params = {
-            "subsystem_tags": subsystem_tags,
+            "types": types,
             "after_timestamp": after_timestamp.isoformat() if after_timestamp else None,
             "limit": limit,
         }
@@ -156,13 +147,8 @@ class CWMPersistence:
             CWMState envelope (simplified: provenance in data) or None if conversion fails
         """
         try:
-            # Determine model_type from subsystem tag
-            tags = node.get("tags", [])
-            model_type = "CWM_A"  # default
-            for tag in tags:
-                if tag in SUBSYSTEM_TO_MODEL_TYPE:
-                    model_type = SUBSYSTEM_TO_MODEL_TYPE[tag]
-                    break
+            cwm_type = node.get("type", "cwm_a")
+            model_type = TYPE_MODEL_MAP.get(cwm_type, "CWM_A")
 
             # Parse payload
             payload_str = node.get("payload", "{}")
