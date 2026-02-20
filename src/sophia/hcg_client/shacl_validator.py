@@ -124,38 +124,10 @@ class SHACLValidator:
         g.add((confidence_prop, SH.minInclusive, Literal(0.0, datatype=XSD.double)))
         g.add((confidence_prop, SH.maxInclusive, Literal(1.0, datatype=XSD.double)))
 
-        # Proposed Plan Step shape
-        plan_step_shape = ex.ProposedPlanStepShape
-        g.add((plan_step_shape, RDF.type, SH.NodeShape))
-        g.add((plan_step_shape, SH.targetClass, ex.ProposedPlanStep))
-        g.add((plan_step_shape, SH.property, ex.PlanStepSourceProperty))
-
-        step_source_prop = ex.PlanStepSourceProperty
-        g.add((step_source_prop, RDF.type, SH.PropertyShape))
-        g.add((step_source_prop, SH.path, ex.source_proposal))
-        g.add((step_source_prop, SH.minCount, Literal(1)))
-
-        # Proposed Imagined State shape
-        imagined_state_shape = ex.ProposedImaginedStateShape
-        g.add((imagined_state_shape, RDF.type, SH.NodeShape))
-        g.add((imagined_state_shape, SH.targetClass, ex.ProposedImaginedState))
-        g.add((imagined_state_shape, SH.property, ex.ImaginedStateSourceProperty))
-
-        state_source_prop = ex.ImaginedStateSourceProperty
-        g.add((state_source_prop, RDF.type, SH.PropertyShape))
-        g.add((state_source_prop, SH.path, ex.source_proposal))
-        g.add((state_source_prop, SH.minCount, Literal(1)))
-
-        # Proposed Tool Call shape
-        tool_call_shape = ex.ProposedToolCallShape
-        g.add((tool_call_shape, RDF.type, SH.NodeShape))
-        g.add((tool_call_shape, SH.targetClass, ex.ProposedToolCall))
-        g.add((tool_call_shape, SH.property, ex.ToolCallSourceProperty))
-
-        tool_source_prop = ex.ToolCallSourceProperty
-        g.add((tool_source_prop, RDF.type, SH.PropertyShape))
-        g.add((tool_source_prop, SH.path, ex.source_proposal))
-        g.add((tool_source_prop, SH.minCount, Literal(1)))
+        # NOTE: Provenance-encoded type shapes (ProposedPlanStep,
+        # ProposedImaginedState, ProposedToolCall) were removed in the
+        # hierarchy redesign. These are now base types (process, state)
+        # with derivation/source properties distinguishing provenance.
 
         return g
 
@@ -230,12 +202,6 @@ class SHACLValidator:
             # Add specific type class for SHACL validation
             if node_type == "hermes_proposal":
                 g.add((node_uri, RDF.type, ex.HermesProposal))
-            elif node_type == "proposed_plan_step":
-                g.add((node_uri, RDF.type, ex.ProposedPlanStep))
-            elif node_type == "proposed_imagined_state":
-                g.add((node_uri, RDF.type, ex.ProposedImaginedState))
-            elif node_type == "proposed_tool_call":
-                g.add((node_uri, RDF.type, ex.ProposedToolCall))
 
         if "properties" in node_data:
             for key, value in node_data["properties"].items():

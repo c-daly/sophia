@@ -317,12 +317,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 seed_pick_and_place_data,
                 seed_plan_data,
                 seed_persona_entries,
-                seed_type_definitions,
             )
 
             logger.info("Seeding test data into Neo4j...")
             try:
-                seed_type_definitions(_hcg_client)
                 seed_pick_and_place_data(_hcg_client)
                 seed_plan_data(_hcg_client)
                 seed_persona_entries(_hcg_client)
@@ -450,6 +448,11 @@ def create_app() -> FastAPI:
 
     # Request ID middleware for tracing
     app.add_middleware(RequestIDMiddleware)
+
+    # Include experiment tracking routes
+    from sophia.api.experiment_routes import router as experiment_router
+
+    app.include_router(experiment_router)
 
     # Health check endpoint (no auth required)
     @app.get("/health", response_model=LogosHealthResponse, tags=["health"])
@@ -767,7 +770,7 @@ def create_app() -> FastAPI:
     async def get_cwm_persisted(
         types: Optional[str] = Query(
             default=None,
-            description="Comma-separated CWM types to filter (cwm_a, cwm_g, cwm_e)",
+            description="Comma-separated subsystem filters (abstract, grounded, emotional)",
         ),
         after_timestamp: Optional[str] = Query(
             default=None,
@@ -795,13 +798,10 @@ def create_app() -> FastAPI:
             )
 
         try:
-            from typing import cast
-            from sophia.cwm.persistence import CWMType
-
-            # Parse types filter
-            type_list: list[CWMType] | None = None
+            # Parse subsystem filter
+            subsystem_tags: list[str] | None = None
             if types:
-                type_list = cast(list[CWMType], [t.strip() for t in types.split(",")])
+                subsystem_tags = [f"subsystem:{t.strip()}" for t in types.split(",")]
 
             # Parse timestamp filter with RFC3339 support
             parsed_timestamp = None
@@ -818,7 +818,7 @@ def create_app() -> FastAPI:
 
             # Query Neo4j
             cwm_states = _cwm_persistence.find_states(
-                types=type_list,
+                subsystems=subsystem_tags,
                 after_timestamp=parsed_timestamp,
                 limit=limit,
             )
@@ -1042,7 +1042,7 @@ def create_app() -> FastAPI:
                 _hcg_client.add_node(
                     uuid=state_id,
                     name=f"Imagined State {i + 1}",
-                    node_type="imagined_state",
+                    node_type="state",
                     properties={
                         "description": state.description,
                         "model_version": request.model_version,
@@ -1187,7 +1187,7 @@ def create_app() -> FastAPI:
                         if process.description
                         else f"Process {process.process_id[:8]}"
                     ),
-                    node_type="imagined_process",
+                    node_type="process",
                     properties={
                         "description": process.description,
                         "model_version": process.model_version,
@@ -1212,7 +1212,7 @@ def create_app() -> FastAPI:
                         if state.description
                         else f"State {state.state_id[:8]}"
                     ),
-                    node_type="imagined_state",
+                    node_type="state",
                     properties={
                         "step": state.step,
                         "description": state.description,
@@ -2216,7 +2216,7 @@ def create_app() -> FastAPI:
 
         # Fetch more than needed to account for filtering
         raw_states = _cwm_persistence.find_states(
-            types=["cwm_e"],
+            subsystems=["subsystem:emotional"],
             after_timestamp=after_timestamp,
             limit=limit * 3 + offset,
         )
