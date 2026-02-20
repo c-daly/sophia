@@ -15,39 +15,53 @@ logger = logging.getLogger(__name__)
 # Type hierarchy expressed as parent -> children mapping.
 # Each entry maps a type name to its parent type.
 # These relationships will be created as IS_A edge nodes.
+# Source of truth: logos_hcg.seeder.TYPE_PARENTS (logos foundry).
 TYPE_HIERARCHY: Dict[str, str] = {
-    # Core pick-and-place types
-    "location": "spatial_entity",
-    "spatial_entity": "entity",
-    "object": "physical_entity",
+    # --- thing sub-tree (root) ---
+    "entity": "thing",
+    # Physical entities
     "physical_entity": "entity",
-    "action": "process",
-    "goal": "intention",
-    "intention": "entity",
-    "state": "cognition",
-    # API and planning types
-    "plan": "process",
-    "imagined_state": "cognition",
-    "imagined_process": "process",
-    "simulation": "abstraction",
-    "abstraction": "entity",
-    # Execution container types (parallel to simulation for observed)
-    "execution": "abstraction",
+    "agent": "physical_entity",
+    "object": "physical_entity",
+    "manipulator": "physical_entity",
+    "sensor": "physical_entity",
+    # Spatial entities
+    "spatial_entity": "entity",
+    "location": "spatial_entity",
+    "workspace": "spatial_entity",
+    "zone": "spatial_entity",
+    # Processes
     "process": "entity",
-    # Hermes ingestion types
-    "hermes_proposal": "intention",
+    "action": "process",
+    "step": "process",
+    "imagined_process": "process",
     "proposed_plan_step": "process",
-    "proposed_imagined_state": "cognition",
     "proposed_tool_call": "process",
-    # Media types
-    "media_sample": "data",
+    # Intentions
+    "intention": "entity",
+    "goal": "intention",
+    "plan": "intention",
+    "hermes_proposal": "intention",
+    # Abstractions
+    "abstraction": "entity",
+    "simulation": "abstraction",
+    "execution": "abstraction",
+    # Data
     "data": "entity",
+    "media_sample": "data",
+    "capability": "data",
+    # --- concept sub-tree ---
+    "constraint": "concept",
+    # --- cognition sub-tree ---
+    "cognition": "entity",
+    "state": "cognition",
+    "imagined_state": "state",
+    "proposed_imagined_state": "imagined_state",
     # CWM types
+    "cwm": "cognition",
     "cwm_a": "cwm",
     "cwm_g": "cwm",
     "cwm_e": "cwm",
-    "cwm": "cognition",
-    "cognition": "entity",
 }
 
 # Types required by sophia API endpoints

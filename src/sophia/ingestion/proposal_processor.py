@@ -142,7 +142,22 @@ class ProposalProcessor:
                 logger.error(f"Failed to create node '{name}': {e}")
                 continue
 
-            # 2c. Store embedding in Milvus
+            # 2c. Connect to type definition via IS_A edge
+            type_def_uuid = f"type_{node_type}"
+            try:
+                self._hcg.add_edge(
+                    source_uuid=node_uuid,
+                    target_uuid=type_def_uuid,
+                    relation="IS_A",
+                )
+            except Exception as e:
+                logger.debug(
+                    "Could not create IS_A edge to type '%s': %s",
+                    node_type,
+                    e,
+                )
+
+            # 2d. Store embedding in Milvus
             if embedding:
                 try:
                     self._milvus.upsert_embedding(
