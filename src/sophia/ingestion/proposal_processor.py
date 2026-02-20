@@ -10,14 +10,23 @@ for Hermes's benefit when context is returned.
 
 import logging
 import uuid as uuid_mod
-from typing import Any
+from typing import Any, Literal, Tuple
 
 logger = logging.getLogger(__name__)
 
 ENTITY_MATCH_THRESHOLD = 0.5
 
+# Node/collection type literal shared with logos_hcg.
+NodeType = Literal["Entity", "Concept", "State", "Process", "Edge"]
+
 # All Milvus collections used by proposal processing.
-ALL_MILVUS_COLLECTIONS = ("Entity", "Concept", "State", "Process", "Edge")
+ALL_MILVUS_COLLECTIONS: Tuple[NodeType, ...] = (
+    "Entity",
+    "Concept",
+    "State",
+    "Process",
+    "Edge",
+)
 
 # Milvus collection types to search for context.
 SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")

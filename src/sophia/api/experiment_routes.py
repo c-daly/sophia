@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _hcg_client_getter = None
 
 
-def set_hcg_client_getter(getter):
+def set_hcg_client_getter(getter: Any) -> None:
     """Set the callable that returns the HCG client instance."""
     global _hcg_client_getter
     _hcg_client_getter = getter
@@ -27,7 +27,7 @@ def set_hcg_client_getter(getter):
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
 
-def _get_hcg():
+def _get_hcg() -> Any:
     """Get the HCG client from app state.
 
     Uses a module-level reference set during router inclusion to avoid

@@ -387,7 +387,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _milvus_sync.connect()
             # Ensure HCG collections exist for proposal processing
             for _nt in ALL_MILVUS_COLLECTIONS:
-                _milvus_sync.ensure_collection(_nt)
+                _milvus_sync.ensure_collection(_nt)  # type: ignore[attr-defined]
             _proposal_processor = ProposalProcessor(
                 hcg_client=_hcg_client,
                 milvus_sync=_milvus_sync,
