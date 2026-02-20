@@ -179,8 +179,7 @@ class ProposalProcessor:
 
             if not src_uuid or not tgt_uuid:
                 logger.debug(
-                    "Skipping edge %s -> %s: missing node UUID "
-                    "(available: %s)",
+                    "Skipping edge %s -> %s: missing node UUID " "(available: %s)",
                     src_name,
                     tgt_name,
                     list(name_to_uuid.keys()),
