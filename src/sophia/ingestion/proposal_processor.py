@@ -43,6 +43,8 @@ class ProposalProcessor:
         """Process a proposal: search for context, decide what to ingest."""
         stored_ids: list[str] = []
         relevant_context: list[dict] = []
+        # Track entity name -> node uuid for edge resolution.
+        name_to_uuid: dict[str, str] = {}
 
         # 1. Search for relevant existing context using document embedding
         doc_emb = proposal.get("document_embedding")
@@ -66,6 +68,8 @@ class ProposalProcessor:
                                     "score": match["score"],
                                 }
                             )
+                            if node.get("name"):
+                                name_to_uuid[node["name"]] = match["uuid"]
                 except Exception as e:
                     logger.debug(f"Search in {collection} failed: {e}")
 
@@ -99,6 +103,7 @@ class ProposalProcessor:
                                 f"'{existing_node.get('name')}' "
                                 f"(L2={existing[0]['score']:.3f}), skipping creation"
                             )
+                            name_to_uuid[name] = existing[0]["uuid"]
                             if not any(
                                 c["node_uuid"] == existing[0]["uuid"]
                                 for c in relevant_context
@@ -132,6 +137,7 @@ class ProposalProcessor:
                     },
                 )
                 stored_ids.append(node_uuid)
+                name_to_uuid[name] = node_uuid
             except Exception as e:
                 logger.error(f"Failed to create node '{name}': {e}")
                 continue
@@ -148,7 +154,68 @@ class ProposalProcessor:
                 except Exception as e:
                     logger.warning(f"Embedding storage failed for '{name}': {e}")
 
+        # 3. Ingest proposed edges
+        stored_edge_ids: list[str] = []
+        for edge in proposal.get("proposed_edges") or []:
+            src_name = edge.get("source_name", "")
+            tgt_name = edge.get("target_name", "")
+            src_uuid = name_to_uuid.get(src_name)
+            tgt_uuid = name_to_uuid.get(tgt_name)
+
+            if not src_uuid or not tgt_uuid:
+                logger.debug(
+                    "Skipping edge %s -> %s: missing node UUID "
+                    "(available: %s)",
+                    src_name,
+                    tgt_name,
+                    list(name_to_uuid.keys()),
+                )
+                continue
+
+            relation = edge.get("relation", "RELATED_TO")
+            bidirectional = edge.get("bidirectional", False)
+            properties = dict(edge.get("properties", {}))
+            properties.setdefault("confidence", edge.get("confidence", 0.5))
+
+            try:
+                edge_uuid = self._hcg.add_edge(
+                    source_uuid=src_uuid,
+                    target_uuid=tgt_uuid,
+                    relation=relation,
+                    bidirectional=bidirectional,
+                    properties=properties,
+                )
+                stored_edge_ids.append(edge_uuid)
+            except Exception as e:
+                logger.error(
+                    "Failed to create edge %s -[%s]-> %s: %s",
+                    src_name,
+                    relation,
+                    tgt_name,
+                    e,
+                )
+                continue
+
+            # Store edge embedding in Milvus
+            embedding = edge.get("embedding")
+            model = edge.get("model", "unknown")
+            if embedding:
+                try:
+                    self._milvus.upsert_embedding(
+                        node_type="Edge",
+                        uuid=edge_uuid,
+                        embedding=embedding,
+                        model=model,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Edge embedding storage failed for %s: %s",
+                        edge_uuid,
+                        e,
+                    )
+
         return {
             "stored_node_ids": stored_ids,
+            "stored_edge_ids": stored_edge_ids,
             "relevant_context": relevant_context,
         }

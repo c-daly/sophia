@@ -538,6 +538,10 @@ class HermesProposalRequest(BaseModel):
         default=None,
         description="Embedding of the full document text",
     )
+    proposed_edges: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Proposed relationships between entities",
+    )
 
 
 class HermesProposalResponse(BaseModel):
@@ -546,6 +550,10 @@ class HermesProposalResponse(BaseModel):
     proposal_id: str = Field(..., description="The ingested proposal identifier")
     stored_node_ids: List[str] = Field(
         ..., description="Node IDs created in Neo4j for this proposal"
+    )
+    stored_edge_ids: List[str] = Field(
+        default_factory=list,
+        description="Edge IDs created in Neo4j for this proposal",
     )
     status: str = Field(
         ...,

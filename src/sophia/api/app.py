@@ -383,6 +383,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 milvus_port=str(milvus_config.port),
             )
             _milvus_sync.connect()
+            # Ensure HCG collections exist for proposal processing
+            for _nt in ("Entity", "Concept", "State", "Process", "Edge"):
+                _milvus_sync.ensure_collection(_nt)
             _proposal_processor = ProposalProcessor(
                 hcg_client=_hcg_client,
                 milvus_sync=_milvus_sync,
@@ -1348,17 +1351,21 @@ def create_app() -> FastAPI:
 
         # Process through ProposalProcessor if available
         stored_node_ids: List[str] = []
+        stored_edge_ids: List[str] = []
         relevant_context: List[Dict[str, Any]] = []
 
         if _proposal_processor:
             try:
                 result = _proposal_processor.process(request.model_dump())
                 stored_node_ids = result.get("stored_node_ids", [])
+                stored_edge_ids = result.get("stored_edge_ids", [])
                 relevant_context = result.get("relevant_context", [])
                 span.set_attribute("ingest.stored_count", len(stored_node_ids))
+                span.set_attribute("ingest.stored_edge_count", len(stored_edge_ids))
                 span.set_attribute("ingest.context_count", len(relevant_context))
                 logger.info(
                     f"Proposal {request.proposal_id}: stored {len(stored_node_ids)} nodes, "
+                    f"{len(stored_edge_ids)} edges, "
                     f"found {len(relevant_context)} context items"
                 )
             except Exception as e:
@@ -1379,6 +1386,7 @@ def create_app() -> FastAPI:
                         outcome="accepted",
                         reason=f"Processed proposal {request.proposal_id}: "
                         f"{len(stored_node_ids)} nodes stored, "
+                        f"{len(stored_edge_ids)} edges stored, "
                         f"{len(relevant_context)} context items",
                     )
                 )
@@ -1388,6 +1396,7 @@ def create_app() -> FastAPI:
         return HermesProposalResponse(
             proposal_id=request.proposal_id,
             stored_node_ids=stored_node_ids,
+            stored_edge_ids=stored_edge_ids,
             relevant_context=relevant_context,
             status="accepted",
         )
