@@ -40,10 +40,18 @@ _NODE_TYPE_TO_COLLECTION = {
 }
 
 # Keys that must not be overwritten by untrusted proposal properties.
-_RESERVED_EDGE_KEYS = frozenset({
-    "uuid", "source", "target", "relation",
-    "type", "bidirectional", "created_at", "updated_at",
-})
+_RESERVED_EDGE_KEYS = frozenset(
+    {
+        "uuid",
+        "source",
+        "target",
+        "relation",
+        "type",
+        "bidirectional",
+        "created_at",
+        "updated_at",
+    }
+)
 
 
 def _collection_for(node_type: str) -> str:
