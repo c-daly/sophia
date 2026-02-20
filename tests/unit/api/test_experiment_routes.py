@@ -166,8 +166,8 @@ class TestGetExperimentEntities:
 
         mock_hcg = MagicMock()
         mock_hcg.query_edges_from.return_value = [
-            {"relation": "PRODUCED", "target_uuid": "node-1"},
-            {"relation": "IS_A", "target_uuid": "type-def"},
+            {"relation": "PRODUCED", "target": "node-1"},
+            {"relation": "IS_A", "target": "type-def"},
         ]
         mock_hcg.get_node.return_value = {
             "uuid": "node-1",

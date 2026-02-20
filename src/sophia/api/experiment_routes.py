@@ -153,7 +153,7 @@ async def get_experiment_entities(
     for edge in edges:
         if edge.get("relation") != "PRODUCED":
             continue
-        target_uuid = edge.get("target_uuid")
+        target_uuid = edge.get("target")
         if target_uuid:
             node = hcg.get_node(target_uuid)
             if node:
