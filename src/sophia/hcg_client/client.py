@@ -369,6 +369,33 @@ class HCGClient(LogosHCGClient):
             "properties": props,
         }
 
+    def find_node_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Find a content node by exact name match.
+
+        Returns the first matching node or None.
+        """
+        query = """
+        MATCH (n:Node {name: $name})
+        WHERE n.relation IS NULL
+        RETURN n.uuid as uuid, n.name as name, n.type as type,
+               properties(n) as props
+        LIMIT 1
+        """
+        records = self._execute_read(query, {"name": name})
+        if not records:
+            return None
+
+        props = dict(records[0]["props"])
+        for key in ["uuid", "name", "type"]:
+            props.pop(key, None)
+        props = self._decode_properties(props)
+        return {
+            "uuid": records[0]["uuid"],
+            "name": records[0]["name"],
+            "type": records[0]["type"],
+            "properties": props,
+        }
+
     def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
         """Fetch a reified edge node by UUID.
 

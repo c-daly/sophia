@@ -41,7 +41,8 @@ class TestProposalProcessor:
         )
 
         assert len(result["stored_node_ids"]) == 1
-        mock_hcg.add_node.assert_called_once()
+        # add_node called twice: once for entity, once for type_definition
+        assert mock_hcg.add_node.call_count == 2
         mock_milvus.upsert_embedding.assert_called()
 
     def test_returns_relevant_context(self):
@@ -185,10 +186,10 @@ class TestProposalProcessor:
         )
 
         assert result["experiment_run_id"] is not None
-        # add_node called twice: once for entity, once for experiment_run
-        assert mock_hcg.add_node.call_count == 2
-        # Second call should be the experiment_run node
-        run_call = mock_hcg.add_node.call_args_list[1]
+        # add_node called 3 times: entity, type_definition, experiment_run
+        assert mock_hcg.add_node.call_count == 3
+        # Last call should be the experiment_run node
+        run_call = mock_hcg.add_node.call_args_list[2]
         assert (
             run_call.kwargs.get("node_type")
             or run_call[1].get("node_type") == "experiment_run"
@@ -227,8 +228,8 @@ class TestProposalProcessor:
         )
 
         assert result["experiment_run_id"] is None
-        # Only one add_node call (for entity), no experiment_run
-        assert mock_hcg.add_node.call_count == 1
+        # add_node called twice: entity + type_definition, no experiment_run
+        assert mock_hcg.add_node.call_count == 2
 
     def test_skips_empty_name_nodes(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor

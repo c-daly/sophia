@@ -177,9 +177,17 @@ class ProposalProcessor:
                 logger.error(f"Failed to create node '{name}': {e}")
                 continue
 
-            # 2c. Connect to type definition via IS_A edge
+            # 2c. Connect to type definition via IS_A edge.
+            # Ensure the type-definition node exists (MERGE is idempotent).
             type_def_uuid = f"type_{node_type}"
             try:
+                self._hcg.add_node(
+                    uuid=type_def_uuid,
+                    name=node_type,
+                    node_type="type_definition",
+                    source="sophia",
+                    derivation="observed",
+                )
                 self._hcg.add_edge(
                     source_uuid=node_uuid,
                     target_uuid=type_def_uuid,
