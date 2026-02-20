@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 # These relationships will be created as IS_A edge nodes.
 # Source of truth: logos_hcg.seeder.TYPE_PARENTS (logos foundry).
 TYPE_HIERARCHY: Dict[str, str] = {
-    # --- thing sub-tree (root) ---
-    "entity": "thing",
+    # --- entity sub-tree (root) ---
     # Physical entities
     "physical_entity": "entity",
     "agent": "physical_entity",
