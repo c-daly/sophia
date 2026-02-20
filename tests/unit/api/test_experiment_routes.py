@@ -31,7 +31,9 @@ class TestListExperiments:
 
         with patch("sophia.api.experiment_routes._get_hcg", return_value=mock_hcg):
             result = asyncio.get_event_loop().run_until_complete(
-                list_experiments(ner_provider=None, embedding_provider=None, tag=None, limit=50)
+                list_experiments(
+                    ner_provider=None, embedding_provider=None, tag=None, limit=50
+                )
             )
 
         assert len(result) == 1
@@ -59,7 +61,9 @@ class TestListExperiments:
 
         with patch("sophia.api.experiment_routes._get_hcg", return_value=mock_hcg):
             result = asyncio.get_event_loop().run_until_complete(
-                list_experiments(ner_provider="spacy", embedding_provider=None, tag=None, limit=50)
+                list_experiments(
+                    ner_provider="spacy", embedding_provider=None, tag=None, limit=50
+                )
             )
 
         assert len(result) == 1
@@ -87,7 +91,9 @@ class TestListExperiments:
 
         with patch("sophia.api.experiment_routes._get_hcg", return_value=mock_hcg):
             result = asyncio.get_event_loop().run_until_complete(
-                list_experiments(ner_provider=None, embedding_provider=None, tag="v2-ner", limit=50)
+                list_experiments(
+                    ner_provider=None, embedding_provider=None, tag="v2-ner", limit=50
+                )
             )
 
         assert len(result) == 1

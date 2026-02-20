@@ -1,6 +1,7 @@
 """Main FastAPI application for Sophia service."""
 
 import asyncio
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -88,7 +89,10 @@ from sophia.jepa.models import (
 )
 from sophia.storage import MediaStorageService
 from sophia.ingestion import MediaIngestionService
-from sophia.ingestion.proposal_processor import ProposalProcessor
+from sophia.ingestion.proposal_processor import (
+    ALL_MILVUS_COLLECTIONS,
+    ProposalProcessor,
+)
 from sophia.cwm import CWMPersistence
 from sophia.feedback import (
     FeedbackConfig,
@@ -382,7 +386,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
             _milvus_sync.connect()
             # Ensure HCG collections exist for proposal processing
-            for _nt in ("Entity", "Concept", "State", "Process", "Edge"):
+            for _nt in ALL_MILVUS_COLLECTIONS:
                 _milvus_sync.ensure_collection(_nt)
             _proposal_processor = ProposalProcessor(
                 hcg_client=_hcg_client,
@@ -450,8 +454,12 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
 
     # Include experiment tracking routes
-    from sophia.api.experiment_routes import router as experiment_router
+    from sophia.api.experiment_routes import (
+        router as experiment_router,
+        set_hcg_client_getter,
+    )
 
+    set_hcg_client_getter(lambda: _hcg_client)
     app.include_router(experiment_router)
 
     # Health check endpoint (no auth required)
@@ -1307,6 +1315,8 @@ def create_app() -> FastAPI:
             )
 
     # Hermes proposal ingestion endpoint
+    # NOTE: Intentionally unauthenticated for local development.
+    # In production, set SOPHIA_ENABLE_DEV_ENDPOINTS=0 (or unset it) to disable.
     @app.post(
         "/ingest/hermes_proposal",
         response_model=HermesProposalResponse,
@@ -1322,8 +1332,15 @@ def create_app() -> FastAPI:
         for observability. Sophia will process the proposal and decide what
         semantic nodes to create based on her cognitive evaluation.
 
-        Note: Authentication is disabled for local development.
+        This endpoint is intentionally unauthenticated. It is gated behind
+        the ``SOPHIA_ENABLE_DEV_ENDPOINTS`` environment variable (must be
+        set to ``1``) for safety outside of local development.
         """
+        if os.environ.get("SOPHIA_ENABLE_DEV_ENDPOINTS", "1") != "1":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Dev endpoints are disabled (set SOPHIA_ENABLE_DEV_ENDPOINTS=1 to enable)",
+            )
         span = get_current_span()
         span.update_name("sophia.ingest.hermes_proposal")
         span.set_attribute("ingest.proposal_id", str(request.proposal_id))

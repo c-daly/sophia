@@ -13,22 +13,40 @@ from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
+# Lazy reference to the HCG client getter, set by app.py during router
+# inclusion to avoid circular imports.
+_hcg_client_getter = None
+
+
+def set_hcg_client_getter(getter):
+    """Set the callable that returns the HCG client instance."""
+    global _hcg_client_getter
+    _hcg_client_getter = getter
+
+
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
 
 def _get_hcg():
-    """Get the HCG client from app state."""
-    from sophia.api.app import _hcg_client
+    """Get the HCG client from app state.
 
-    if _hcg_client is None:
+    Uses a module-level reference set during router inclusion to avoid
+    importing from app (which would create a circular dependency risk).
+    """
+    if _hcg_client_getter is None:
         raise HTTPException(status_code=503, detail="HCG client not initialized")
-    return _hcg_client
+    client = _hcg_client_getter()
+    if client is None:
+        raise HTTPException(status_code=503, detail="HCG client not initialized")
+    return client
 
 
 @router.get("", response_model=List[Dict[str, Any]])
 async def list_experiments(
     ner_provider: Optional[str] = Query(None, description="Filter by NER provider"),
-    embedding_provider: Optional[str] = Query(None, description="Filter by embedding provider"),
+    embedding_provider: Optional[str] = Query(
+        None, description="Filter by embedding provider"
+    ),
     tag: Optional[str] = Query(None, description="Filter by experiment tag"),
     limit: int = Query(50, ge=1, le=500, description="Max results"),
 ) -> List[Dict[str, Any]]:
@@ -91,25 +109,27 @@ async def compare_experiments(
     result = []
     for provider, group_runs in groups.items():
         n = len(group_runs)
-        result.append({
-            "provider": provider,
-            "run_count": n,
-            "avg_duration_ms": round(
-                sum(r.get("total_duration_ms", 0) for r in group_runs) / n, 1
-            ),
-            "avg_entities": round(
-                sum(r.get("entity_count", 0) for r in group_runs) / n, 1
-            ),
-            "avg_edges": round(
-                sum(r.get("edge_count", 0) for r in group_runs) / n, 1
-            ),
-            "avg_ner_ms": round(
-                sum(r.get("ner_duration_ms", 0) for r in group_runs) / n, 1
-            ),
-            "avg_emb_ms": round(
-                sum(r.get("embedding_duration_ms", 0) for r in group_runs) / n, 1
-            ),
-        })
+        result.append(
+            {
+                "provider": provider,
+                "run_count": n,
+                "avg_duration_ms": round(
+                    sum(r.get("total_duration_ms", 0) for r in group_runs) / n, 1
+                ),
+                "avg_entities": round(
+                    sum(r.get("entity_count", 0) for r in group_runs) / n, 1
+                ),
+                "avg_edges": round(
+                    sum(r.get("edge_count", 0) for r in group_runs) / n, 1
+                ),
+                "avg_ner_ms": round(
+                    sum(r.get("ner_duration_ms", 0) for r in group_runs) / n, 1
+                ),
+                "avg_emb_ms": round(
+                    sum(r.get("embedding_duration_ms", 0) for r in group_runs) / n, 1
+                ),
+            }
+        )
 
     result.sort(key=lambda x: x["run_count"], reverse=True)
     return result

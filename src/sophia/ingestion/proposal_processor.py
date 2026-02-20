@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 ENTITY_MATCH_THRESHOLD = 0.5
 
+# All Milvus collections used by proposal processing.
+ALL_MILVUS_COLLECTIONS = ("Entity", "Concept", "State", "Process", "Edge")
+
 # Milvus collection types to search for context.
 SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")
 
@@ -26,6 +29,9 @@ _NODE_TYPE_TO_COLLECTION = {
     "state": "State",
     "process": "Process",
 }
+
+# Keys that must not be overwritten by untrusted proposal properties.
+_RESERVED_EDGE_KEYS = frozenset({"uuid", "source", "target", "relation"})
 
 
 def _collection_for(node_type: str) -> str:
@@ -70,6 +76,14 @@ class ProposalProcessor:
                                 }
                             )
                             if node.get("name"):
+                                if node["name"] in name_to_uuid:
+                                    logger.warning(
+                                        "Name collision in context: '%s' already mapped "
+                                        "to %s, overwriting with %s",
+                                        node["name"],
+                                        name_to_uuid[node["name"]],
+                                        match["uuid"],
+                                    )
                                 name_to_uuid[node["name"]] = match["uuid"]
                 except Exception as e:
                     logger.debug(f"Search in {collection} failed: {e}")
@@ -152,7 +166,7 @@ class ProposalProcessor:
                     relation="IS_A",
                 )
             except Exception as e:
-                logger.debug(
+                logger.warning(
                     "Could not create IS_A edge to type '%s': %s",
                     node_type,
                     e,
@@ -178,9 +192,29 @@ class ProposalProcessor:
             src_uuid = name_to_uuid.get(src_name)
             tgt_uuid = name_to_uuid.get(tgt_name)
 
+            # Fallback: look up unresolved names in Neo4j
+            if not src_uuid:
+                try:
+                    found = self._hcg.find_node_by_name(src_name)
+                    if found:
+                        src_uuid = found.get("uuid")
+                except Exception as e:
+                    logger.debug(
+                        "Neo4j fallback lookup failed for '%s': %s", src_name, e
+                    )
+            if not tgt_uuid:
+                try:
+                    found = self._hcg.find_node_by_name(tgt_name)
+                    if found:
+                        tgt_uuid = found.get("uuid")
+                except Exception as e:
+                    logger.debug(
+                        "Neo4j fallback lookup failed for '%s': %s", tgt_name, e
+                    )
+
             if not src_uuid or not tgt_uuid:
                 logger.debug(
-                    "Skipping edge %s -> %s: missing node UUID " "(available: %s)",
+                    "Skipping edge %s -> %s: missing node UUID (available: %s)",
                     src_name,
                     tgt_name,
                     list(name_to_uuid.keys()),
@@ -189,8 +223,11 @@ class ProposalProcessor:
 
             relation = edge.get("relation", "RELATED_TO")
             bidirectional = edge.get("bidirectional", False)
-            properties = dict(edge.get("properties", {}))
-            properties.setdefault("confidence", edge.get("confidence", 0.5))
+            properties = dict(edge.get("properties") or {})
+            properties["confidence"] = edge.get("confidence", 0.5)
+            # Strip reserved keys so untrusted input cannot overwrite them
+            for key in _RESERVED_EDGE_KEYS:
+                properties.pop(key, None)
 
             try:
                 edge_uuid = self._hcg.add_edge(
@@ -297,7 +334,9 @@ class ProposalProcessor:
                     relation="PRODUCED",
                 )
             except Exception as e:
-                logger.debug("Failed to link experiment_run to node %s: %s", node_uuid, e)
+                logger.debug(
+                    "Failed to link experiment_run to node %s: %s", node_uuid, e
+                )
 
         # Link to produced edges
         for edge_uuid in stored_edge_ids:
@@ -308,7 +347,9 @@ class ProposalProcessor:
                     relation="PRODUCED",
                 )
             except Exception as e:
-                logger.debug("Failed to link experiment_run to edge %s: %s", edge_uuid, e)
+                logger.debug(
+                    "Failed to link experiment_run to edge %s: %s", edge_uuid, e
+                )
 
         logger.info(
             "Created experiment_run %s: %d nodes, %d edges, ner=%s, emb=%s",
