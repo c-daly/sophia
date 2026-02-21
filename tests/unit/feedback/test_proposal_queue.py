@@ -130,7 +130,6 @@ class TestProposalWorker:
             "relevant_context": [
                 {"node_uuid": "n-1", "name": "Alice", "type": "Entity", "score": 0.1},
             ],
-            "experiment_run_id": None,
         }
         return processor
 

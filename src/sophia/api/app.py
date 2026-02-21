@@ -485,15 +485,6 @@ def create_app() -> FastAPI:
     # Request ID middleware for tracing
     app.add_middleware(RequestIDMiddleware)
 
-    # Include experiment tracking routes
-    from sophia.api.experiment_routes import (
-        router as experiment_router,
-        set_hcg_client_getter,
-    )
-
-    set_hcg_client_getter(lambda: _hcg_client)
-    app.include_router(experiment_router)
-
     # Health check endpoint (no auth required)
     @app.get("/health", response_model=LogosHealthResponse, tags=["health"])
     async def health_check() -> LogosHealthResponse:

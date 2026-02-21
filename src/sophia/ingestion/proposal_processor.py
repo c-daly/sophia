@@ -9,7 +9,6 @@ for Hermes's benefit when context is returned.
 """
 
 import logging
-import uuid as uuid_mod
 from typing import Any, Literal, Tuple
 
 logger = logging.getLogger(__name__)
@@ -79,12 +78,9 @@ class ProposalProcessor:
         self,
         hcg_client: Any,
         milvus_sync: Any,
-        *,
-        track_experiments: bool = False,
     ) -> None:
         self._hcg = hcg_client
         self._milvus = milvus_sync
-        self._track_experiments = track_experiments
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
@@ -323,101 +319,8 @@ class ProposalProcessor:
                                 e,
                             )
 
-            # 4. Create experiment_run node if pipeline metadata is present
-            # Disabled by default -- experiment tracking generates PRODUCED edges
-            # that drown out semantic knowledge.  Enable via constructor flag when
-            # running controlled experiments.
-            experiment_run_id: str | None = None
-            if self._track_experiments:
-                pipeline = (proposal.get("metadata") or {}).get("pipeline")
-                if pipeline and (stored_ids or stored_edge_ids):
-                    experiment_run_id = self._create_experiment_run(
-                        proposal=proposal,
-                        pipeline=pipeline,
-                        stored_node_ids=stored_ids,
-                        stored_edge_ids=stored_edge_ids,
-                    )
-
             return {
                 "stored_node_ids": stored_ids,
                 "stored_edge_ids": stored_edge_ids,
                 "relevant_context": relevant_context,
-                "experiment_run_id": experiment_run_id,
             }
-
-    def _create_experiment_run(
-        self,
-        proposal: dict,
-        pipeline: dict,
-        stored_node_ids: list[str],
-        stored_edge_ids: list[str],
-    ) -> str | None:
-        """Create an experiment_run node and PRODUCED edges to outputs.
-
-        Returns the experiment_run uuid or None on failure.
-        """
-        run_uuid = str(uuid_mod.uuid4())
-        metadata = proposal.get("metadata") or {}
-        tags = list(metadata.get("experiment_tags", []))
-
-        try:
-            self._hcg.add_node(
-                name=f"run_{run_uuid[:8]}",
-                node_type="experiment_run",
-                uuid=run_uuid,
-                source="sophia",
-                derivation="observed",
-                confidence=1.0,
-                properties={
-                    "proposal_id": proposal.get("proposal_id", ""),
-                    "correlation_id": proposal.get("correlation_id", ""),
-                    "ner_provider": pipeline.get("ner_provider", ""),
-                    "embedding_provider": pipeline.get("embedding_provider", ""),
-                    "ner_duration_ms": pipeline.get("ner_duration_ms", 0),
-                    "relation_duration_ms": pipeline.get("relation_duration_ms", 0),
-                    "embedding_duration_ms": pipeline.get("embedding_duration_ms", 0),
-                    "total_duration_ms": pipeline.get("total_duration_ms", 0),
-                    "entity_count": pipeline.get("entity_count", 0),
-                    "edge_count": pipeline.get("edge_count", 0),
-                    "experiment_tags": tags,
-                },
-            )
-        except Exception as e:
-            logger.warning("Failed to create experiment_run node: %s", e)
-            return None
-
-        # Link to produced nodes
-        for node_uuid in stored_node_ids:
-            try:
-                self._hcg.add_edge(
-                    source_uuid=run_uuid,
-                    target_uuid=node_uuid,
-                    relation="PRODUCED",
-                )
-            except Exception as e:
-                logger.debug(
-                    "Failed to link experiment_run to node %s: %s", node_uuid, e
-                )
-
-        # Link to produced edges
-        for edge_uuid in stored_edge_ids:
-            try:
-                self._hcg.add_edge(
-                    source_uuid=run_uuid,
-                    target_uuid=edge_uuid,
-                    relation="PRODUCED",
-                )
-            except Exception as e:
-                logger.debug(
-                    "Failed to link experiment_run to edge %s: %s", edge_uuid, e
-                )
-
-        logger.info(
-            "Created experiment_run %s: %d nodes, %d edges, ner=%s, emb=%s",
-            run_uuid[:8],
-            len(stored_node_ids),
-            len(stored_edge_ids),
-            pipeline.get("ner_provider"),
-            pipeline.get("embedding_provider"),
-        )
-        return run_uuid
