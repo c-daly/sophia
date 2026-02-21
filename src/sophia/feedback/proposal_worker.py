@@ -47,8 +47,9 @@ class ProposalWorker:
             relevant_context = result.get("relevant_context", [])
 
             if conversation_id and relevant_context:
-                self.queue.store_context(
-                    conversation_id, relevant_context, ttl=self.context_ttl
+                await asyncio.to_thread(
+                    self.queue.store_context,
+                    conversation_id, relevant_context, self.context_ttl
                 )
 
             logger.info(
