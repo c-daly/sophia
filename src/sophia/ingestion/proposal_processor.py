@@ -62,9 +62,16 @@ def _collection_for(node_type: str) -> str:
 class ProposalProcessor:
     """Processes proposals from Hermes into graph knowledge."""
 
-    def __init__(self, hcg_client: Any, milvus_sync: Any) -> None:
+    def __init__(
+        self,
+        hcg_client: Any,
+        milvus_sync: Any,
+        *,
+        track_experiments: bool = False,
+    ) -> None:
         self._hcg = hcg_client
         self._milvus = milvus_sync
+        self._track_experiments = track_experiments
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
@@ -295,15 +302,19 @@ class ProposalProcessor:
                     )
 
         # 4. Create experiment_run node if pipeline metadata is present
+        # Disabled by default -- experiment tracking generates PRODUCED edges
+        # that drown out semantic knowledge.  Enable via constructor flag when
+        # running controlled experiments.
         experiment_run_id: str | None = None
-        pipeline = (proposal.get("metadata") or {}).get("pipeline")
-        if pipeline and (stored_ids or stored_edge_ids):
-            experiment_run_id = self._create_experiment_run(
-                proposal=proposal,
-                pipeline=pipeline,
-                stored_node_ids=stored_ids,
-                stored_edge_ids=stored_edge_ids,
-            )
+        if self._track_experiments:
+            pipeline = (proposal.get("metadata") or {}).get("pipeline")
+            if pipeline and (stored_ids or stored_edge_ids):
+                experiment_run_id = self._create_experiment_run(
+                    proposal=proposal,
+                    pipeline=pipeline,
+                    stored_node_ids=stored_ids,
+                    stored_edge_ids=stored_edge_ids,
+                )
 
         return {
             "stored_node_ids": stored_ids,
