@@ -2,8 +2,7 @@
 
 import json
 import logging
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
 
 import redis
 
@@ -20,13 +19,13 @@ class ProposalQueue:
         self.redis = redis.from_url(redis_url)
 
     def enqueue(self, proposal: dict, conversation_id: str | None = None) -> str:
-        message_id = f"pq-{datetime.utcnow().timestamp()}"
+        message_id = f"pq-{datetime.now(timezone.utc).timestamp()}"
         message = {
             "id": message_id,
             "payload": proposal,
             "conversation_id": conversation_id,
             "attempts": 0,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
         self.redis.lpush(self.QUEUE_KEY, json.dumps(message))
         return message_id

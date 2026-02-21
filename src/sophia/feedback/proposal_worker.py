@@ -43,7 +43,7 @@ class ProposalWorker:
         conversation_id = message.get("conversation_id")
 
         try:
-            result = self.processor.process(proposal)
+            result = await asyncio.to_thread(self.processor.process, proposal)
             relevant_context = result.get("relevant_context", [])
 
             if conversation_id and relevant_context:

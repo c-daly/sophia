@@ -1,6 +1,5 @@
 """Unit tests for ProposalQueue and ProposalWorker."""
 
-import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
