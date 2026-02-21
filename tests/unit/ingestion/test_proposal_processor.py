@@ -1,5 +1,6 @@
 """Tests for ProposalProcessor -- cognitive intake of Hermes proposals."""
 
+import pytest
 from unittest.mock import MagicMock
 
 
@@ -140,6 +141,7 @@ class TestProposalProcessor:
             c["node_uuid"] == "existing-paris" for c in result["relevant_context"]
         )
 
+    @pytest.mark.skip(reason="experiment tracking disabled by default (61589d7)")
     def test_creates_experiment_run_when_pipeline_present(self):
         """experiment_run node created when metadata.pipeline exists."""
         from sophia.ingestion.proposal_processor import ProposalProcessor
