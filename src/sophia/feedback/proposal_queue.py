@@ -36,7 +36,9 @@ class ProposalQueue:
             return json.loads(result[1])
         return None
 
-    def store_context(self, conversation_id: str, context: list[dict], ttl: int = 3600) -> None:
+    def store_context(
+        self, conversation_id: str, context: list[dict], ttl: int = 3600
+    ) -> None:
         key = f"{self.CONTEXT_PREFIX}{conversation_id}"
         self.redis.setex(key, ttl, json.dumps(context))
 

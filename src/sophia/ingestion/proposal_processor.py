@@ -96,9 +96,7 @@ class ProposalProcessor:
             # 1. Search for relevant existing context using document embedding
             doc_emb = proposal.get("document_embedding")
             if doc_emb and doc_emb.get("embedding"):
-                with tracer.start_as_current_span(
-                    "proposal_processor.context_search"
-                ):
+                with tracer.start_as_current_span("proposal_processor.context_search"):
                     for collection in SEARCHABLE_COLLECTIONS:
                         try:
                             matches = self._milvus.search_similar(
@@ -154,7 +152,10 @@ class ProposalProcessor:
                                 query_embedding=embedding,
                                 top_k=1,
                             )
-                            if existing and existing[0]["score"] < ENTITY_MATCH_THRESHOLD:
+                            if (
+                                existing
+                                and existing[0]["score"] < ENTITY_MATCH_THRESHOLD
+                            ):
                                 existing_node = self._hcg.get_node(existing[0]["uuid"])
                                 if existing_node:
                                     logger.info(
@@ -180,7 +181,9 @@ class ProposalProcessor:
                                         )
                                     continue
                         except Exception as e:
-                            logger.debug(f"Entity match search failed for '{name}': {e}")
+                            logger.debug(
+                                f"Entity match search failed for '{name}': {e}"
+                            )
 
                     # 2b. No match -- create the node
                     try:
@@ -234,7 +237,9 @@ class ProposalProcessor:
                                 model=model,
                             )
                         except Exception as e:
-                            logger.warning(f"Embedding storage failed for '{name}': {e}")
+                            logger.warning(
+                                f"Embedding storage failed for '{name}': {e}"
+                            )
 
             # 3. Ingest proposed edges
             with tracer.start_as_current_span("proposal_processor.ingest_edges"):
