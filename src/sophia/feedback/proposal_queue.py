@@ -34,7 +34,8 @@ class ProposalQueue:
     def dequeue(self, timeout: int = 5) -> dict | None:
         result = self.redis.brpop(self.QUEUE_KEY, timeout=timeout)
         if result:
-            return json.loads(result[1])
+            parsed: dict = json.loads(result[1])
+            return parsed
         return None
 
     def store_context(
@@ -47,8 +48,10 @@ class ProposalQueue:
         key = f"{self.CONTEXT_PREFIX}{conversation_id}"
         data = self.redis.get(key)
         if data:
-            return json.loads(data)
+            parsed: list[dict] = json.loads(data)
+            return parsed
         return []
 
     def pending_count(self) -> int:
-        return self.redis.llen(self.QUEUE_KEY)
+        count: int = self.redis.llen(self.QUEUE_KEY)
+        return count

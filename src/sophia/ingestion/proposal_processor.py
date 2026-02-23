@@ -21,10 +21,10 @@ except ImportError:
     from contextlib import nullcontext
 
     class _NoopTracer:
-        def start_as_current_span(self, name, **kw):
+        def start_as_current_span(self, name: str, **kw: Any) -> nullcontext:  # type: ignore[type-arg]
             return nullcontext()
 
-    tracer = _NoopTracer()
+    tracer: Any = _NoopTracer()  # type: ignore[no-redef]
 
 ENTITY_MATCH_THRESHOLD = 0.5
 
