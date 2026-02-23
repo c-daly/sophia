@@ -238,12 +238,17 @@ _feedback_dispatcher: Optional[FeedbackDispatcher] = None
 _feedback_worker: Optional[FeedbackWorker] = None
 _feedback_worker_task: Optional[Any] = None
 _proposal_processor: Optional[ProposalProcessor] = None
+_proposal_worker: Optional[Any] = None
+_proposal_worker_task: Optional[Any] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task, _proposal_processor
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg
+    global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
+    global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
+    global _proposal_processor, _proposal_worker, _proposal_worker_task
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -398,12 +403,42 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # Processor not available without Milvus — endpoint will skip cognitive processing
             _proposal_processor = None
 
+    # Initialize proposal processing worker (requires feedback + processor)
+    _proposal_worker = None
+    _proposal_worker_task = None
+    if feedback_config.enabled and _proposal_processor:
+        try:
+            from sophia.feedback.proposal_queue import ProposalQueue
+            from sophia.feedback.proposal_worker import ProposalWorker
+
+            proposal_queue = ProposalQueue(feedback_config.redis_url)
+            proposal_queue.pending_count()  # Test connection
+            _proposal_worker = ProposalWorker(
+                queue=proposal_queue,
+                processor=_proposal_processor,
+            )
+            _proposal_worker_task = asyncio.create_task(_proposal_worker.start())
+            logger.info("Proposal processing worker initialized")
+        except Exception as e:
+            logger.warning(f"Proposal worker unavailable: {e}")
+
     logger.info("Sophia API service started successfully")
 
     yield
 
     # Shutdown
     logger.info("Shutting down Sophia API service...")
+
+    # Stop proposal worker
+    if _proposal_worker:
+        _proposal_worker.stop()
+    if _proposal_worker_task:
+        _proposal_worker_task.cancel()
+        try:
+            await _proposal_worker_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Proposal worker stopped")
 
     # Stop feedback worker
     if _feedback_worker:
@@ -452,15 +487,6 @@ def create_app() -> FastAPI:
 
     # Request ID middleware for tracing
     app.add_middleware(RequestIDMiddleware)
-
-    # Include experiment tracking routes
-    from sophia.api.experiment_routes import (
-        router as experiment_router,
-        set_hcg_client_getter,
-    )
-
-    set_hcg_client_getter(lambda: _hcg_client)
-    app.include_router(experiment_router)
 
     # Health check endpoint (no auth required)
     @app.get("/health", response_model=LogosHealthResponse, tags=["health"])
