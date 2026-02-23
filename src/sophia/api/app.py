@@ -245,7 +245,10 @@ _proposal_worker_task: Optional[Any] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager."""
-    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg, _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence, _feedback_dispatcher, _feedback_worker, _feedback_worker_task, _proposal_processor, _proposal_worker, _proposal_worker_task
+    global _planner, _executor, _hcg_client, _cwm_g, _cwm_a, _cwm_a_state, _kg
+    global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
+    global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
+    global _proposal_processor, _proposal_worker, _proposal_worker_task
 
     # Startup
     logger.info("Starting Sophia API service...")

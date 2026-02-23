@@ -2,6 +2,7 @@
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 
 import redis
@@ -19,7 +20,7 @@ class ProposalQueue:
         self.redis = redis.from_url(redis_url)
 
     def enqueue(self, proposal: dict, conversation_id: str | None = None) -> str:
-        message_id = f"pq-{datetime.now(timezone.utc).timestamp()}"
+        message_id = f"pq-{uuid.uuid4()}"
         message = {
             "id": message_id,
             "payload": proposal,

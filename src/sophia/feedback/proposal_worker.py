@@ -1,10 +1,15 @@
 """Background worker that processes proposals from the Redis queue."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sophia.feedback.proposal_queue import ProposalQueue
+
+if TYPE_CHECKING:
+    from sophia.ingestion.proposal_processor import ProposalProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +20,7 @@ class ProposalWorker:
     def __init__(
         self,
         queue: ProposalQueue,
-        processor: Any,
+        processor: ProposalProcessor,
         context_ttl: int = 3600,
     ):
         self.queue = queue
