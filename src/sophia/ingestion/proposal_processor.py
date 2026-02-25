@@ -218,7 +218,9 @@ class ProposalProcessor:
                         }
                         if classification:
                             node_props["type_confidence"] = classification.confidence
-                            node_props["needs_reclassification"] = classification.needs_reclassification
+                            node_props["needs_reclassification"] = (
+                                classification.needs_reclassification
+                            )
 
                         node_uuid = self._hcg.add_node(
                             name=name,
@@ -275,9 +277,15 @@ class ProposalProcessor:
                     if classification and embedding:
                         try:
                             type_node = self._hcg.get_node(classification.type_uuid)
-                            if type_node and isinstance(type_node.get("properties"), dict):
-                                member_count = type_node["properties"].get("member_count", 0)
-                                current_centroid = type_node["properties"].get("centroid")
+                            if type_node and isinstance(
+                                type_node.get("properties"), dict
+                            ):
+                                member_count = type_node["properties"].get(
+                                    "member_count", 0
+                                )
+                                current_centroid = type_node["properties"].get(
+                                    "centroid"
+                                )
                                 if isinstance(member_count, int) and current_centroid:
                                     self._classifier.update_centroid_for_assignment(
                                         type_uuid=classification.type_uuid,

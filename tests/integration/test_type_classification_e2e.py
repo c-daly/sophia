@@ -163,9 +163,7 @@ class TestTypeClassificationE2E:
         assert node is not None, f"Node {node_uuid} not found in Neo4j"
 
         node_type = node.get("type", "")
-        logger.info(
-            "Dublin_e2e_test classified as: %s (Hermes said: state)", node_type
-        )
+        logger.info("Dublin_e2e_test classified as: %s (Hermes said: state)", node_type)
         assert node_type == "location", (
             f"Expected 'location' but got '{node_type}'. "
             "Sophia should override Hermes type hint using centroid proximity."
@@ -212,9 +210,9 @@ class TestTypeClassificationE2E:
 
         node = hcg_client.get_node(node_uuid)
         assert node is not None
-        assert node.get("type") == "concept", (
-            f"Expected 'concept' but got '{node.get('type')}'"
-        )
+        assert (
+            node.get("type") == "concept"
+        ), f"Expected 'concept' but got '{node.get('type')}'"
 
     def test_general_entity_not_assigned_reserved_type(
         self, processor, hcg_client, milvus_sync
@@ -259,6 +257,7 @@ class TestTypeClassificationE2E:
         node = hcg_client.get_node(node_uuid)
         assert node is not None
         node_type = node.get("type", "")
-        assert node_type not in ("reserved_state", "reserved_process"), (
-            f"General knowledge should not be assigned reserved type '{node_type}'"
-        )
+        assert node_type not in (
+            "reserved_state",
+            "reserved_process",
+        ), f"General knowledge should not be assigned reserved type '{node_type}'"

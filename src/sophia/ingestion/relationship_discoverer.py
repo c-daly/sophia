@@ -69,9 +69,7 @@ class RelationshipDiscoverer:
                         if query_distance >= centroid_distance:
                             continue
                 except Exception as e:
-                    logger.debug(
-                        "Centroid check failed for %s: %s", hit["uuid"], e
-                    )
+                    logger.debug("Centroid check failed for %s: %s", hit["uuid"], e)
 
                 candidates.append(
                     {

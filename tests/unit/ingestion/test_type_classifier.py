@@ -1,6 +1,5 @@
 """Tests for Sophia's embedding-based type classifier."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from sophia.ingestion.type_classifier import TypeClassifier
@@ -79,6 +78,10 @@ class TestTypeClassifier:
 
         mock_milvus.update_centroid.assert_called_once()
         call_args = mock_milvus.update_centroid.call_args
-        new_centroid = call_args.kwargs.get("centroid") or call_args[1].get("centroid") or call_args[0][1]
+        new_centroid = (
+            call_args.kwargs.get("centroid")
+            or call_args[1].get("centroid")
+            or call_args[0][1]
+        )
         # (0.0 * 10 + 1.0) / 11 ≈ 0.0909
         assert abs(new_centroid[0] - (1.0 / 11)) < 0.001

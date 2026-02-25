@@ -40,7 +40,9 @@ def _variance(vectors: list[list[float]], centroid: list[float]) -> float:
     return sum(_euclidean_distance_sq(v, centroid) for v in vectors) / len(vectors)
 
 
-def _kmeans_2(embeddings: list[list[float]]) -> tuple[list[list[float]], list[list[float]]]:
+def _kmeans_2(
+    embeddings: list[list[float]],
+) -> tuple[list[list[float]], list[list[float]]]:
     """Simple k-means with k=2.
 
     Returns two clusters as lists of embeddings.
