@@ -44,8 +44,7 @@ class TestRelationshipDiscoverer:
 
         # Entity was skipped, so only Concept/State/Process were searched
         called_types = [
-            c.kwargs["node_type"]
-            for c in mock_milvus.search_similar.call_args_list
+            c.kwargs["node_type"] for c in mock_milvus.search_similar.call_args_list
         ]
         assert "Entity" not in called_types
         assert len(called_types) == 3
