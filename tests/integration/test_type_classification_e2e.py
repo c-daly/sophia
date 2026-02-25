@@ -48,16 +48,18 @@ def _make_near(centroid: list[float], noise: float = 0.05) -> list[float]:
 # Centroids for each type (placed at distinct directions in embedding space)
 LOCATION_CENTROID = _make_centroid(0)
 CONCEPT_CENTROID = _make_centroid(50)
-STATE_CENTROID = _make_centroid(100)
-PROCESS_CENTROID = _make_centroid(150)
 ENTITY_CENTROID = _make_centroid(200)
+
+# Reserved internal types — centroids placed far from general knowledge
+RESERVED_STATE_CENTROID = _make_centroid(300)  # CWM states only
+RESERVED_PROCESS_CENTROID = _make_centroid(350)  # Plan execution only
 
 SEED_TYPES = {
     "type_location": LOCATION_CENTROID,
     "type_concept": CONCEPT_CENTROID,
-    "type_state": STATE_CENTROID,
-    "type_process": PROCESS_CENTROID,
     "type_entity": ENTITY_CENTROID,
+    "type_reserved_state": RESERVED_STATE_CENTROID,
+    "type_reserved_process": RESERVED_PROCESS_CENTROID,
 }
 
 
@@ -214,9 +216,15 @@ class TestTypeClassificationE2E:
             f"Expected 'concept' but got '{node.get('type')}'"
         )
 
-    def test_process_classified_correctly(self, processor, hcg_client, milvus_sync):
-        """An embedding near the process centroid gets classified as process."""
-        process_embedding = _make_near(PROCESS_CENTROID)
+    def test_general_entity_not_assigned_reserved_type(
+        self, processor, hcg_client, milvus_sync
+    ):
+        """An entity embedding near 'entity' centroid should NOT land in reserved types.
+
+        Photosynthesis is a real-world process but 'reserved_process' is for
+        Sophia plan execution only. General knowledge goes to Entity/Concept.
+        """
+        entity_embedding = _make_near(ENTITY_CENTROID)
 
         proposal = {
             "proposal_id": "e2e-type-class-3",
@@ -226,8 +234,8 @@ class TestTypeClassificationE2E:
             "proposed_nodes": [
                 {
                     "name": "Photosynthesis_e2e_test",
-                    "type": "concept",  # Hermes says concept
-                    "embedding": process_embedding,
+                    "type": "process",  # Hermes says process
+                    "embedding": entity_embedding,
                     "embedding_id": "emb-photo-e2e",
                     "dimension": DIM,
                     "model": "synthetic-test",
@@ -236,7 +244,7 @@ class TestTypeClassificationE2E:
             ],
             "proposed_edges": [],
             "document_embedding": {
-                "embedding": process_embedding,
+                "embedding": entity_embedding,
                 "embedding_id": "doc-e2e-3",
                 "dimension": DIM,
                 "model": "synthetic-test",
@@ -250,6 +258,7 @@ class TestTypeClassificationE2E:
 
         node = hcg_client.get_node(node_uuid)
         assert node is not None
-        assert node.get("type") == "process", (
-            f"Expected 'process' but got '{node.get('type')}'"
+        node_type = node.get("type", "")
+        assert node_type not in ("reserved_state", "reserved_process"), (
+            f"General knowledge should not be assigned reserved type '{node_type}'"
         )

@@ -49,8 +49,13 @@ SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")
 _NODE_TYPE_TO_COLLECTION = {
     "entity": "Entity",
     "concept": "Concept",
-    "state": "State",
-    "process": "Process",
+    "state": "Entity",  # General "state" → Entity. CWM states use reserved_state.
+    "process": "Entity",  # General "process" → Entity. Execution uses reserved_process.
+    "reserved_state": "State",  # Internal: Sophia CWM states only
+    "reserved_process": "Process",  # Internal: Sophia plan execution only
+    "location": "Entity",
+    "object": "Entity",
+    "agent": "Entity",
 }
 
 # Keys that must not be overwritten by untrusted proposal properties.
