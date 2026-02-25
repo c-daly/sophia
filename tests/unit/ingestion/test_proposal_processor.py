@@ -347,7 +347,7 @@ class TestProposalProcessor:
             },
         }
 
-        result = processor.process(proposal)
+        processor.process(proposal)
 
         # Verify add_node was called with Sophia's classification, not Hermes's
         add_node_call = mock_hcg.add_node.call_args_list[0]
