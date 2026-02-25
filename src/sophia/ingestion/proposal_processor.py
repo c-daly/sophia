@@ -277,23 +277,34 @@ class ProposalProcessor:
                     if classification and embedding:
                         try:
                             type_node = self._hcg.get_node(classification.type_uuid)
-                            if type_node and isinstance(
-                                type_node.get("properties"), dict
+                            props = (
+                                type_node.get("properties", {})
+                                if type_node
+                                and isinstance(type_node.get("properties"), dict)
+                                else {}
+                            )
+                            member_count = props.get("member_count", 0)
+                            current_centroid = props.get("centroid")
+
+                            if (
+                                isinstance(member_count, int)
+                                and isinstance(current_centroid, list)
+                                and current_centroid
                             ):
-                                member_count = type_node["properties"].get(
-                                    "member_count", 0
+                                self._classifier.update_centroid_for_assignment(
+                                    type_uuid=classification.type_uuid,
+                                    new_embedding=embedding,
+                                    current_centroid=current_centroid,
+                                    member_count=member_count,
+                                    model=model,
                                 )
-                                current_centroid = type_node["properties"].get(
-                                    "centroid"
+                            elif not current_centroid:
+                                # First node of this type — initialize centroid
+                                self._milvus.update_centroid(
+                                    type_uuid=classification.type_uuid,
+                                    centroid=embedding,
+                                    model=model,
                                 )
-                                if isinstance(member_count, int) and current_centroid:
-                                    self._classifier.update_centroid_for_assignment(
-                                        type_uuid=classification.type_uuid,
-                                        new_embedding=embedding,
-                                        current_centroid=current_centroid,
-                                        member_count=member_count,
-                                        model=model,
-                                    )
                         except Exception as e:
                             logger.debug(
                                 "Centroid update skipped for type '%s': %s",

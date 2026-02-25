@@ -28,15 +28,11 @@ class TestRelationshipDiscoverer:
         assert len(candidates) >= 1
         assert candidates[0]["uuid"] == "node-in-other-cluster"
 
-    def test_filter_boundary_nodes(self):
-        """Nodes closer to their own centroid than to query are filtered out."""
+    def test_skips_own_type_cluster(self):
+        """Nodes from the query's own type cluster are excluded."""
         mock_milvus = MagicMock()
-        # Node is close to query but also very close to its own centroid
         mock_milvus.search_similar.return_value = [
-            {"uuid": "boundary-node", "score": 0.4},
-        ]
-        mock_milvus.find_nearest_types.return_value = [
-            {"uuid": "type_concept", "score": 0.1},  # very close to own centroid
+            {"uuid": "same-cluster-node", "score": 0.1},
         ]
 
         discoverer = RelationshipDiscoverer(milvus=mock_milvus)
@@ -46,4 +42,10 @@ class TestRelationshipDiscoverer:
             top_k=5,
         )
 
-        assert len(candidates) == 0  # filtered out
+        # Entity was skipped, so only Concept/State/Process were searched
+        called_types = [
+            c.kwargs["node_type"]
+            for c in mock_milvus.search_similar.call_args_list
+        ]
+        assert "Entity" not in called_types
+        assert len(called_types) == 3

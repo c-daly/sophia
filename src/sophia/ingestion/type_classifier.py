@@ -78,7 +78,7 @@ class TypeClassifier:
         needs_reclass = False
         if len(results) >= 2:
             runner_up_distance = results[1]["score"]
-            gap = runner_up_distance - best_distance
+            gap = max(runner_up_distance - best_distance, 0.0)
             if gap < AMBIGUITY_RATIO * best_distance:
                 confidence *= 0.5
                 needs_reclass = True

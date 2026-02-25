@@ -27,9 +27,12 @@ class RelationshipDiscoverer:
     ) -> list[dict]:
         """Find nodes in other type clusters that are close to the embedding.
 
-        For each hit in a foreign cluster, checks whether the hit is closer
-        to the query than to its own type centroid. If so, it's a relationship
-        candidate; if not, it's a well-placed member of its own cluster.
+        Searches all type collections except *own_type* and returns the
+        closest hits as relationship candidates, sorted by distance.
+
+        Note: A future refinement could filter hits by comparing each hit's
+        distance to its own centroid vs. the query, but that requires
+        fetching hit embeddings from Milvus (not returned by search).
 
         Args:
             embedding: The query node's embedding vector.
@@ -37,7 +40,7 @@ class RelationshipDiscoverer:
             top_k: Max candidates per collection.
 
         Returns:
-            Filtered candidates sorted by score (closest first).
+            Candidates sorted by score (closest first).
         """
         candidates = []
 
@@ -56,22 +59,6 @@ class RelationshipDiscoverer:
                 continue
 
             for hit in hits:
-                # Check if this node is closer to our query than to its
-                # own type centroid (meaning it's a boundary node).
-                try:
-                    nearest_types = self._milvus.find_nearest_types(
-                        query_embedding=embedding,
-                        top_k=1,
-                    )
-                    if nearest_types:
-                        centroid_distance = nearest_types[0]["score"]
-                        query_distance = hit["score"]
-                        # Keep only if closer to query than to own centroid
-                        if query_distance >= centroid_distance:
-                            continue
-                except Exception as e:
-                    logger.debug("Centroid check failed for %s: %s", hit["uuid"], e)
-
                 candidates.append(
                     {
                         "uuid": hit["uuid"],
