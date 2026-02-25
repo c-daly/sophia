@@ -6,6 +6,7 @@ Sophia owns the type vocabulary — Hermes type hints are ignored.
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class TypeAssignment:
 class TypeClassifier:
     """Assigns HCG node types using embedding-space centroid proximity."""
 
-    def __init__(self, milvus, hcg):
+    def __init__(self, milvus: Any, hcg: Any) -> None:
         self._milvus = milvus
         self._hcg = hcg
 

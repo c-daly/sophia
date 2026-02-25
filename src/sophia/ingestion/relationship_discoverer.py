@@ -5,6 +5,7 @@ suggesting potential relationships between nodes of different types.
 """
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ _SEARCHABLE_TYPES = ("Entity", "Concept", "State", "Process")
 class RelationshipDiscoverer:
     """Discovers relationship candidates across type clusters."""
 
-    def __init__(self, milvus):
+    def __init__(self, milvus: Any) -> None:
         self._milvus = milvus
 
     def find_candidates(

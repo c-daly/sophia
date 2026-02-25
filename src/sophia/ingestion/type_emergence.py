@@ -7,6 +7,7 @@ two sub-types.
 
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ def _kmeans_2(
 class TypeEmergenceDetector:
     """Detects when a type should split into sub-types."""
 
-    def __init__(self, milvus, hcg, variance_threshold: float = 0.5):
+    def __init__(self, milvus: Any, hcg: Any, variance_threshold: float = 0.5) -> None:
         self._milvus = milvus
         self._hcg = hcg
         self._variance_threshold = variance_threshold
