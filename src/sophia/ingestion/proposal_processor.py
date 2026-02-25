@@ -11,6 +11,8 @@ for Hermes's benefit when context is returned.
 import logging
 from typing import Any, Literal, Tuple
 
+from sophia.ingestion.type_classifier import TypeClassifier
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -81,6 +83,7 @@ class ProposalProcessor:
     ) -> None:
         self._hcg = hcg_client
         self._milvus = milvus_sync
+        self._classifier = TypeClassifier(milvus=milvus_sync, hcg=hcg_client)
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
@@ -139,9 +142,17 @@ class ProposalProcessor:
                     if not name:
                         continue
 
-                    node_type = proposed.get("type", "unknown")
                     embedding = proposed.get("embedding")
                     model = proposed.get("model", "unknown")
+
+                    # Classify using embedding-space centroids (Hermes type hint ignored)
+                    if embedding:
+                        classification = self._classifier.classify(embedding)
+                        node_type = classification.type_name
+                    else:
+                        classification = None
+                        node_type = proposed.get("type", "entity")
+
                     collection = _collection_for(node_type)
 
                     # 2a. Search for existing node with similar embedding
@@ -187,16 +198,21 @@ class ProposalProcessor:
 
                     # 2b. No match -- create the node
                     try:
+                        node_props = {
+                            "raw_text": proposal.get("raw_text", ""),
+                            **proposed.get("properties", {}),
+                        }
+                        if classification:
+                            node_props["type_confidence"] = classification.confidence
+                            node_props["needs_reclassification"] = classification.needs_reclassification
+
                         node_uuid = self._hcg.add_node(
                             name=name,
                             node_type=node_type,
                             source=proposal.get("source_service", "hermes"),
                             derivation="observed",
                             confidence=proposal.get("confidence", 0.7),
-                            properties={
-                                "raw_text": proposal.get("raw_text", ""),
-                                **proposed.get("properties", {}),
-                            },
+                            properties=node_props,
                         )
                         stored_ids.append(node_uuid)
                         name_to_uuid[name] = node_uuid
@@ -239,6 +255,28 @@ class ProposalProcessor:
                         except Exception as e:
                             logger.warning(
                                 f"Embedding storage failed for '{name}': {e}"
+                            )
+
+                    # 2e. Incrementally update the type centroid
+                    if classification and embedding:
+                        try:
+                            type_node = self._hcg.get_node(classification.type_uuid)
+                            if type_node and isinstance(type_node.get("properties"), dict):
+                                member_count = type_node["properties"].get("member_count", 0)
+                                current_centroid = type_node["properties"].get("centroid")
+                                if isinstance(member_count, int) and current_centroid:
+                                    self._classifier.update_centroid_for_assignment(
+                                        type_uuid=classification.type_uuid,
+                                        new_embedding=embedding,
+                                        current_centroid=current_centroid,
+                                        member_count=member_count,
+                                        model=model,
+                                    )
+                        except Exception as e:
+                            logger.debug(
+                                "Centroid update skipped for type '%s': %s",
+                                node_type,
+                                e,
                             )
 
             # 3. Ingest proposed edges
