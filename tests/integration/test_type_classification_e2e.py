@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 # Mark all tests as integration
 pytestmark = pytest.mark.integration
 
-# Embedding dimension — must match LOGOS_EMBEDDING_DIM (sophia .env sets 1536)
-DIM = int(os.getenv("LOGOS_EMBEDDING_DIM", "1536"))
+# Embedding dimension — must match logos_hcg default (384)
+DIM = int(os.getenv("LOGOS_EMBEDDING_DIM", "384"))
 
 # --- Synthetic embedding helpers ---
-# We create centroids as unit-ish vectors pointing in different directions
-# in the 384-dim space, then create test embeddings close to specific centroids.
+# We create centroids as unit-ish vectors pointing in different directions,
+# then create test embeddings close to specific centroids.
 
 
 def _make_centroid(index: int) -> list[float]:
