@@ -36,7 +36,7 @@ class TestRelationshipDiscoverer:
         ]
 
         discoverer = RelationshipDiscoverer(milvus=mock_milvus)
-        candidates = discoverer.find_candidates(
+        discoverer.find_candidates(
             embedding=[0.1] * 384,
             own_type="Entity",
             top_k=5,
