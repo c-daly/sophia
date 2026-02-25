@@ -47,15 +47,24 @@ SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")
 
 # Map proposed node types to the Milvus collection used for dedup/storage.
 _NODE_TYPE_TO_COLLECTION = {
+    # General knowledge types — classifier assigns these
     "entity": "Entity",
     "concept": "Concept",
-    "state": "Entity",  # General "state" → Entity. CWM states use reserved_state.
-    "process": "Entity",  # General "process" → Entity. Execution uses reserved_process.
-    "reserved_state": "State",  # Internal: Sophia CWM states only
-    "reserved_process": "Process",  # Internal: Sophia plan execution only
     "location": "Entity",
     "object": "Entity",
+    "state": "Entity",
+    "process": "Entity",
     "agent": "Entity",
+    # Reserved internal types — only Sophia subsystems assign these
+    "reserved_state": "State",
+    "reserved_process": "Process",
+    "reserved_agent": "Process",
+    "reserved_action": "Process",
+    "reserved_goal": "Process",
+    "reserved_plan": "Process",
+    "reserved_simulation": "Process",
+    "reserved_execution": "Process",
+    "reserved_media_sample": "Entity",
 }
 
 # Keys that must not be overwritten by untrusted proposal properties.
