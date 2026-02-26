@@ -72,7 +72,7 @@ class TestCentroidMemberCount:
             }
         }
 
-        proc = self._make_processor(mock_hcg, mock_milvus)
+        self._make_processor(mock_hcg, mock_milvus)
 
         embedding = [0.0, 1.0, 0.0]
         model = "test-model"
