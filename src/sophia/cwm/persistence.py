@@ -65,8 +65,15 @@ class CWMPersistence:
         source = data.get("source", "unknown")
         derivation = data.get("derivation", "observed")
         confidence = data.get("confidence")
-        tags = data.get("tags", [])
+        tags = list(data.get("tags", []))
         links = data.get("links", {})
+
+        # Ensure CWM-required tags are present
+        if "cwm" not in tags:
+            tags.append("cwm")
+        subsystem_tag = f"subsystem:{cwm_type}"
+        if subsystem_tag not in tags:
+            tags.append(subsystem_tag)
 
         # Serialize data payload (full data including provenance)
         data_json = json.dumps(data) if data else "{}"
@@ -78,7 +85,7 @@ class CWMPersistence:
         params = {
             "uuid": state.state_id,
             "name": f"{cwm_type}_{state.timestamp.strftime('%Y%m%d_%H%M%S')}",
-            "type": cwm_type,
+            "type": "reserved_state",
             "timestamp": state.timestamp.isoformat(),
             "source": source,
             "confidence": confidence if confidence is not None else 1.0,
@@ -119,9 +126,12 @@ class CWMPersistence:
         if types is None:
             types = ["cwm_a", "cwm_g", "cwm_e"]
 
+        # Convert type names to subsystem tag format expected by the query
+        subsystem_tags = [f"subsystem:{t}" for t in types] if types else []
+
         query = HCGQueries.find_cwm_states()
         params = {
-            "subsystem_tags": types if types else [],
+            "subsystem_tags": subsystem_tags,
             "after_timestamp": after_timestamp.isoformat() if after_timestamp else None,
             "limit": limit,
         }
@@ -147,7 +157,12 @@ class CWMPersistence:
             CWMState envelope (simplified: provenance in data) or None if conversion fails
         """
         try:
-            cwm_type = node.get("type", "cwm_a")
+            # Extract cwm_type from subsystem tag (e.g. "subsystem:cwm_e" -> "cwm_e")
+            cwm_type = "cwm_a"  # default
+            for tag in node.get("tags", []):
+                if tag.startswith("subsystem:"):
+                    cwm_type = tag.removeprefix("subsystem:")
+                    break
             model_type = TYPE_MODEL_MAP.get(cwm_type, "CWM_A")
 
             # Parse payload
