@@ -112,9 +112,18 @@ class HCGClient(LogosHCGClient):
         if not node_type:
             raise ValueError("node_type cannot be empty")
 
-        # Generate UUID if not provided, reject empty string
+        # Generate UUID if not provided, reject empty string.
+        # When no uuid is given, check for an existing node with the same
+        # name+type to avoid creating duplicates on repeated ingestion.
         if uuid is None:
-            uuid = str(uuid4())
+            existing = self._execute_query(
+                "MATCH (n:Node {name: $name, type: $type}) RETURN n.uuid AS uuid LIMIT 1",
+                {"name": name, "type": node_type},
+            )
+            if existing:
+                uuid = existing[0]["uuid"]
+            else:
+                uuid = str(uuid4())
         elif uuid == "":
             raise ValueError("uuid cannot be empty")
 

@@ -251,7 +251,12 @@ def test_add_node_generates_uuid_when_not_provided(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
     """UUID is auto-generated when not provided."""
-    mock_execute = MagicMock(return_value=[{"uuid": "auto-generated"}])
+    mock_execute = MagicMock(
+        side_effect=[
+            [],  # dedup lookup returns no existing node
+            [{"uuid": "auto-generated"}],  # MERGE query
+        ]
+    )
     monkeypatch.setattr(client, "_execute_query", mock_execute)
 
     client.add_node(
@@ -259,8 +264,9 @@ def test_add_node_generates_uuid_when_not_provided(
         node_type="test_type",
     )
 
-    call_args = mock_execute.call_args
-    params = call_args[0][1]
+    # Second call is the MERGE — check that a proper uuid was generated
+    merge_call = mock_execute.call_args_list[1]
+    params = merge_call[0][1]
     assert len(params["uuid"]) == 36
     assert params["uuid"].count("-") == 4
 

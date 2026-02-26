@@ -11,6 +11,9 @@ class TestProposalProcessor:
         mock_hcg.add_node.return_value = "new-uuid"
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
         result = processor.process(
@@ -103,6 +106,9 @@ class TestProposalProcessor:
                 {"uuid": "existing-paris", "score": 0.2}
             ],  # entity match (below threshold)
         ]
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
         result = processor.process(
@@ -184,6 +190,9 @@ class TestProposalProcessor:
         mock_hcg.find_node_by_name.return_value = {"uuid": "neo4j-target-uuid"}
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
         result = processor.process(
@@ -229,6 +238,9 @@ class TestProposalProcessor:
         mock_hcg.add_edge.return_value = "edge-uuid"
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
         result = processor.process(
@@ -294,3 +306,49 @@ class TestProposalProcessor:
         assert "target" not in props
         assert "relation" not in props
         assert props.get("safe_key") == "safe_value"
+
+    def test_process_uses_type_classifier(self):
+        """Sophia classifies node type via centroid, ignoring Hermes type hint."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-1"
+        mock_hcg.get_node.return_value = None
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []  # no dedup match
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        proposal = {
+            "proposal_id": "test-1",
+            "source_service": "hermes",
+            "confidence": 0.8,
+            "raw_text": "Dublin is a city",
+            "proposed_nodes": [
+                {
+                    "name": "Dublin",
+                    "type": "state",  # Hermes says state — should be ignored
+                    "embedding": [0.1] * 384,
+                    "embedding_id": "emb-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {"start": 0, "end": 6},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {
+                "embedding": [0.2] * 384,
+                "embedding_id": "doc-1",
+                "dimension": 384,
+                "model": "all-MiniLM-L6-v2",
+            },
+        }
+
+        processor.process(proposal)
+
+        # Verify add_node was called with Sophia's classification, not Hermes's
+        add_node_call = mock_hcg.add_node.call_args_list[0]
+        assert add_node_call.kwargs.get("node_type") == "location"  # NOT "state"

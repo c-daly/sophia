@@ -121,7 +121,7 @@ class CWMPersistence:
 
         query = HCGQueries.find_cwm_states()
         params = {
-            "types": types,
+            "subsystem_tags": types if types else [],
             "after_timestamp": after_timestamp.isoformat() if after_timestamp else None,
             "limit": limit,
         }
