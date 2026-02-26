@@ -11,10 +11,6 @@ import uuid
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.xfail(
-        reason="CWM query expects type='reserved_state' but persona stores type='cwm_e' — pre-existing on main",
-        strict=False,
-    ),
 ]
 
 
