@@ -298,12 +298,20 @@ class ProposalProcessor:
                                     member_count=member_count,
                                     model=model,
                                 )
+                                self._hcg.update_node(
+                                    classification.type_uuid,
+                                    {"member_count": member_count + 1},
+                                )
                             elif not current_centroid:
                                 # First node of this type — initialize centroid
                                 self._milvus.update_centroid(
                                     type_uuid=classification.type_uuid,
                                     centroid=embedding,
                                     model=model,
+                                )
+                                self._hcg.update_node(
+                                    classification.type_uuid,
+                                    {"member_count": 1},
                                 )
                         except Exception as e:
                             logger.debug(
