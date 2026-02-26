@@ -50,8 +50,11 @@ class TypeClassifier:
         """
         results = self._milvus.find_nearest_types(
             query_embedding=embedding,
-            top_k=top_k,
+            top_k=top_k + 5,  # fetch extra to compensate for filtering
         )
+
+        # Filter out reserved types — only Sophia subsystems assign those.
+        results = [r for r in results if not r["uuid"].startswith("type_reserved_")]
 
         if not results:
             return TypeAssignment(
