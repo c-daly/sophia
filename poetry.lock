@@ -744,8 +744,8 @@ uvicorn = {version = "^0.32.0", extras = ["standard"]}
 [package.source]
 type = "git"
 url = "https://github.com/c-daly/logos.git"
-reference = "feat/sophia-type-classification"
-resolved_reference = "e4ced839c339c9e192d44ae7c83cc0f3fab2faef"
+reference = "v0.6.0"
+resolved_reference = "f42150fd3ef56118b29a8fdf90d29a868fdae2e0"
 
 [[package]]
 name = "markupsafe"
@@ -3305,4 +3305,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "68768f706ecba874eac8bd0283cbd54eadda2e57f6c6e984f4e35811550d285d"
+content-hash = "ae0691d4079693065cbf5e67f3280af48626adeaa46f9e66cf86e542f0dd87ea"
