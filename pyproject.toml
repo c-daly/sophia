@@ -36,6 +36,7 @@ redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
 logos-foundry = {git = "https://github.com/c-daly/logos.git", tag = "v0.6.0"}
+openai = "^2.24.0"
 
 [tool.poetry.group.ml]
 optional = true
