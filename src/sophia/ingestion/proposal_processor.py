@@ -105,6 +105,7 @@ class ProposalProcessor:
         relevant_context: list[dict] = []
         # Track entity name -> node uuid for edge resolution.
         name_to_uuid: dict[str, str] = {}
+        pending_embeddings: dict[str, list[dict]] = {}
 
         with tracer.start_as_current_span(
             "proposal_processor.process",
@@ -259,19 +260,13 @@ class ProposalProcessor:
                             e,
                         )
 
-                    # 2d. Store embedding in Milvus
+                    # 2d. Collect embedding for batch upsert
                     if embedding:
-                        try:
-                            self._milvus.upsert_embedding(
-                                node_type=collection,
-                                uuid=node_uuid,
-                                embedding=embedding,
-                                model=model,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Embedding storage failed for '{name}': {e}"
-                            )
+                        pending_embeddings.setdefault(collection, []).append({
+                            'uuid': node_uuid,
+                            'embedding': embedding,
+                            'model': model,
+                        })
 
                     # 2e. Incrementally update the type centroid
                     if classification and embedding:
@@ -385,23 +380,29 @@ class ProposalProcessor:
                         )
                         continue
 
-                    # Store edge embedding in Milvus
+                    # Collect edge embedding for batch upsert
                     embedding = edge.get("embedding")
                     model = edge.get("model", "unknown")
                     if embedding:
-                        try:
-                            self._milvus.upsert_embedding(
-                                node_type="Edge",
-                                uuid=edge_uuid,
-                                embedding=embedding,
-                                model=model,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "Edge embedding storage failed for %s: %s",
-                                edge_uuid,
-                                e,
-                            )
+                        pending_embeddings.setdefault('Edge', []).append({
+                            'uuid': edge_uuid,
+                            'embedding': embedding,
+                            'model': model,
+                        })
+
+            # Flush all pending embeddings in batch
+            for collection_type, batch in pending_embeddings.items():
+                if batch:
+                    try:
+                        self._milvus.batch_upsert_embeddings(
+                            node_type=collection_type, embeddings=batch
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            'Batch embedding upsert failed for %s: %s',
+                            collection_type,
+                            e,
+                        )
 
             return {
                 "stored_node_ids": stored_ids,
