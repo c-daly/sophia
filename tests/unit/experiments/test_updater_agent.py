@@ -1,6 +1,11 @@
 import numpy as np
 from sophia.experiments.agents.matrix import MatrixAgent
-from sophia.experiments.agents.updater import MatrixUpdateAgent, make_update_agent
+from sophia.experiments.agents.updater import (
+    MatrixUpdateAgent,
+    OuterProductUpdateAgent,
+    make_outer_product_update_agent,
+    make_update_agent,
+)
 
 
 def test_update_modifies_one_column():
@@ -52,9 +57,6 @@ def test_factory():
     assert updater.alpha == 0.05
 
 
-from sophia.experiments.agents.updater import OuterProductUpdateAgent, make_outer_product_update_agent
-
-
 def test_outer_product_modifies_multiple_columns():
     matrix_agent = MatrixAgent(dim=4, std=0.0, seed=0)
     updater = OuterProductUpdateAgent(matrix_agent=matrix_agent, alpha=0.1)
@@ -91,10 +93,14 @@ def test_outer_product_proportional_to_embedding():
     state = matrix_agent.get_state()
     col1_change = np.abs(state[:, 1]).sum()
     col2_change = np.abs(state[:, 2]).sum()
-    assert col1_change > col2_change, "Higher embedding value should cause larger column change"
+    assert (
+        col1_change > col2_change
+    ), "Higher embedding value should cause larger column change"
 
 
 def test_outer_product_factory():
     matrix_agent = MatrixAgent(dim=4, std=0.0, seed=0)
-    updater = make_outer_product_update_agent({"alpha": 0.05}, matrix_agent=matrix_agent)
+    updater = make_outer_product_update_agent(
+        {"alpha": 0.05}, matrix_agent=matrix_agent
+    )
     assert updater.alpha == 0.05

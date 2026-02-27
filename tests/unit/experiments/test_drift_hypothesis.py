@@ -3,14 +3,15 @@
 No OpenAI API needed — uses controlled synthetic vectors to verify the
 matrix update + filter pipeline produces meaningful, directional drift.
 """
+
 import numpy as np
-import pytest
 from sophia.experiments.agents.matrix import MatrixAgent
 from sophia.experiments.agents.updater import MatrixUpdateAgent
-from sophia.experiments.agents.similarity import SimilarityAgent
 
 
-def make_cluster(center: np.ndarray, n: int, spread: float, rng: np.random.Generator) -> list[np.ndarray]:
+def make_cluster(
+    center: np.ndarray, n: int, spread: float, rng: np.random.Generator
+) -> list[np.ndarray]:
     """Generate n vectors clustered around center with given spread."""
     return [center + rng.normal(0, spread, center.shape) for _ in range(n)]
 
@@ -45,14 +46,18 @@ class TestDriftDirection:
         updater = MatrixUpdateAgent(matrix_agent=matrix, alpha=0.5)
 
         # Baseline similarities
-        baseline_sims = [cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs]
+        baseline_sims = [
+            cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs
+        ]
 
         # Update matrix with emotional vectors
         for e in emotional_vecs:
             updater.process(e)
 
         # Post-update similarities
-        updated_sims = [cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs]
+        updated_sims = [
+            cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs
+        ]
 
         baseline_mean = np.mean(baseline_sims)
         updated_mean = np.mean(updated_sims)
@@ -89,8 +94,14 @@ class TestDriftDirection:
         drift_toward_unrelated = []
         for n in neutral_vecs:
             filtered = matrix.process(n)
-            drift_toward_emotional.append(cosine_sim(filtered, emotional_centroid) - cosine_sim(n, emotional_centroid))
-            drift_toward_unrelated.append(cosine_sim(filtered, unrelated_centroid) - cosine_sim(n, unrelated_centroid))
+            drift_toward_emotional.append(
+                cosine_sim(filtered, emotional_centroid)
+                - cosine_sim(n, emotional_centroid)
+            )
+            drift_toward_unrelated.append(
+                cosine_sim(filtered, unrelated_centroid)
+                - cosine_sim(n, unrelated_centroid)
+            )
 
         mean_emotional_drift = np.mean(drift_toward_emotional)
         mean_unrelated_drift = np.mean(drift_toward_unrelated)
@@ -123,11 +134,15 @@ class TestDriftScaling:
             updater = MatrixUpdateAgent(matrix_agent=matrix, alpha=alpha)
             for e in emotional_vecs:
                 updater.process(e)
-            sims = [cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs]
+            sims = [
+                cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs
+            ]
             baseline_sims = [cosine_sim(n, emotional_centroid) for n in neutral_vecs]
             drifts.append(np.mean(sims) - np.mean(baseline_sims))
 
-        assert drifts[0] < drifts[1] < drifts[2], f"Drift should increase with alpha: {drifts}"
+        assert (
+            drifts[0] < drifts[1] < drifts[2]
+        ), f"Drift should increase with alpha: {drifts}"
 
     def test_more_training_more_drift(self):
         dim = 64
@@ -148,11 +163,15 @@ class TestDriftScaling:
             updater = MatrixUpdateAgent(matrix_agent=matrix, alpha=0.1)
             for e in all_emotional[:n_train]:
                 updater.process(e)
-            sims = [cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs]
+            sims = [
+                cosine_sim(matrix.process(n), emotional_centroid) for n in neutral_vecs
+            ]
             baseline_sims = [cosine_sim(n, emotional_centroid) for n in neutral_vecs]
             drifts.append(np.mean(sims) - np.mean(baseline_sims))
 
-        assert drifts[0] < drifts[2], f"More training should produce more drift: {drifts}"
+        assert (
+            drifts[0] < drifts[2]
+        ), f"More training should produce more drift: {drifts}"
 
 
 class TestReproducibility:

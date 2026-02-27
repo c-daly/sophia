@@ -74,8 +74,7 @@ def run_emotional_drift_experiment(
     # Baseline: filter neutral embeddings through initial matrix
     baseline_filtered = [matrix.process(e) for e in neutral_embeddings]
     baseline_similarities = [
-        similarity.process({"a": f, "b": emotion_centroid})
-        for f in baseline_filtered
+        similarity.process({"a": f, "b": emotion_centroid}) for f in baseline_filtered
     ]
 
     # Update matrix with emotional embeddings
@@ -88,8 +87,7 @@ def run_emotional_drift_experiment(
     # Filter neutral embeddings through updated matrix
     updated_filtered = [matrix.process(e) for e in neutral_embeddings]
     filtered_similarities = [
-        similarity.process({"a": f, "b": emotion_centroid})
-        for f in updated_filtered
+        similarity.process({"a": f, "b": emotion_centroid}) for f in updated_filtered
     ]
 
     return {

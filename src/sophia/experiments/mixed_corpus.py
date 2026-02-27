@@ -10,7 +10,6 @@ import numpy as np
 from sophia.experiments.agents.embedding import EmbeddingAgent
 from sophia.experiments.agents.matrix import MatrixAgent
 from sophia.experiments.agents.updater import OuterProductUpdateAgent
-from sophia.experiments.agents.similarity import SimilarityAgent
 
 
 # Diverse emotional texts — no labels used during training
@@ -68,7 +67,9 @@ TEXTS_BY_CATEGORY = {
 }
 
 
-def build_mixed_corpus(dominant: str, dominant_ratio: float, total: int, rng: np.random.Generator) -> list[str]:
+def build_mixed_corpus(
+    dominant: str, dominant_ratio: float, total: int, rng: np.random.Generator
+) -> list[str]:
     """Build a corpus where one emotion dominates at the given ratio.
 
     The rest is split evenly among other categories.
@@ -94,8 +95,8 @@ def build_mixed_corpus(dominant: str, dominant_ratio: float, total: int, rng: np
     return corpus
 
 
-def cosine(a, b):
-    n = np.linalg.norm(a) * np.linalg.norm(b)
+def cosine(a: np.ndarray, b: np.ndarray) -> float:
+    n = float(np.linalg.norm(a) * np.linalg.norm(b))
     return float(np.dot(a, b) / n) if n > 0 else 0.0
 
 
@@ -169,7 +170,7 @@ def run_mixed_corpus_experiment(
         drift_per_category[cat] = float(trained_mean - baseline_mean)
 
     # Which category had the most drift?
-    max_drift_cat = max(drift_per_category, key=drift_per_category.get)
+    max_drift_cat = max(drift_per_category, key=lambda k: drift_per_category[k])
 
     # Matrix characterization
     final_state = matrix.get_state()
@@ -191,43 +192,62 @@ def run_mixed_corpus_experiment(
     }
 
 
-def main():
+def main() -> None:
     print("Mixed Corpus Emotional State Experiment")
     print("=" * 70)
 
     # Test: does the matrix converge on the dominant emotion?
     print("\n=== DOMINANT EMOTION DETECTION ===")
     print("Train on mixed corpus, see which emotion the filter drifts toward.")
-    print(f"{'dominant':>10} {'ratio':>6} | {'angry':>10} {'curious':>10} {'joyful':>10} {'sad':>10} {'neutral':>10} | {'detected':>10} {'correct':>8}")
+    print(
+        f"{'dominant':>10} {'ratio':>6} | {'angry':>10} {'curious':>10} {'joyful':>10} {'sad':>10} {'neutral':>10} | {'detected':>10} {'correct':>8}"
+    )
 
     for dominant in ["angry", "curious", "joyful", "sad", "neutral"]:
         r = run_mixed_corpus_experiment(
-            dominant=dominant, dominant_ratio=0.5, corpus_size=40,
-            alpha=0.1, seed=42,
+            dominant=dominant,
+            dominant_ratio=0.5,
+            corpus_size=40,
+            alpha=0.1,
+            seed=42,
         )
         d = r["drift_per_category"]
-        print(f"{dominant:>10} {0.5:>6.1%} | {d['angry']:>+10.6f} {d['curious']:>+10.6f} {d['joyful']:>+10.6f} {d['sad']:>+10.6f} {d['neutral']:>+10.6f} | {r['max_drift_category']:>10} {'YES' if r['correct'] else 'NO':>8}")
+        print(
+            f"{dominant:>10} {0.5:>6.1%} | {d['angry']:>+10.6f} {d['curious']:>+10.6f} {d['joyful']:>+10.6f} {d['sad']:>+10.6f} {d['neutral']:>+10.6f} | {r['max_drift_category']:>10} {'YES' if r['correct'] else 'NO':>8}"
+        )
 
     # Test: does dominant ratio matter?
     print("\n=== RATIO SENSITIVITY (dominant=angry) ===")
-    print(f"{'ratio':>6} | {'angry':>10} {'curious':>10} {'joyful':>10} {'sad':>10} {'neutral':>10} | {'detected':>10}")
+    print(
+        f"{'ratio':>6} | {'angry':>10} {'curious':>10} {'joyful':>10} {'sad':>10} {'neutral':>10} | {'detected':>10}"
+    )
     for ratio in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
         r = run_mixed_corpus_experiment(
-            dominant="angry", dominant_ratio=ratio, corpus_size=40,
-            alpha=0.1, seed=42,
+            dominant="angry",
+            dominant_ratio=ratio,
+            corpus_size=40,
+            alpha=0.1,
+            seed=42,
         )
         d = r["drift_per_category"]
-        print(f"{ratio:>6.0%} | {d['angry']:>+10.6f} {d['curious']:>+10.6f} {d['joyful']:>+10.6f} {d['sad']:>+10.6f} {d['neutral']:>+10.6f} | {r['max_drift_category']:>10}")
+        print(
+            f"{ratio:>6.0%} | {d['angry']:>+10.6f} {d['curious']:>+10.6f} {d['joyful']:>+10.6f} {d['sad']:>+10.6f} {d['neutral']:>+10.6f} | {r['max_drift_category']:>10}"
+        )
 
     # Test: what about equal distribution?
     print("\n=== EQUAL DISTRIBUTION (no dominant emotion) ===")
     r = run_mixed_corpus_experiment(
-        dominant="angry", dominant_ratio=0.2, corpus_size=50,
-        alpha=0.1, seed=42,
+        dominant="angry",
+        dominant_ratio=0.2,
+        corpus_size=50,
+        alpha=0.1,
+        seed=42,
     )
     d = r["drift_per_category"]
     print(f"{'angry':>10} {'curious':>10} {'joyful':>10} {'sad':>10} {'neutral':>10}")
-    print(f"{d['angry']:>+10.6f} {d['curious']:>+10.6f} {d['joyful']:>+10.6f} {d['sad']:>+10.6f} {d['neutral']:>+10.6f}")
+    print(
+        f"{d['angry']:>+10.6f} {d['curious']:>+10.6f} {d['joyful']:>+10.6f} {d['sad']:>+10.6f} {d['neutral']:>+10.6f}"
+    )
     print(f"Detected: {r['max_drift_category']} (should be ambiguous/weak)")
 
     print("\n" + "=" * 70)

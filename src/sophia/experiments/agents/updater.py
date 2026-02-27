@@ -24,7 +24,9 @@ class MatrixUpdateAgent:
         return input_data
 
 
-def make_update_agent(config: dict, matrix_agent: MatrixAgent | None = None) -> MatrixUpdateAgent:
+def make_update_agent(
+    config: dict, matrix_agent: MatrixAgent | None = None
+) -> MatrixUpdateAgent:
     if matrix_agent is None:
         raise ValueError("matrix_agent required")
     return MatrixUpdateAgent(
@@ -47,11 +49,15 @@ class OuterProductUpdateAgent:
     def process(self, input_data: np.ndarray) -> np.ndarray:
         """Update the matrix with outer product and return the input unchanged."""
         matrix = self.matrix_agent._matrix
-        self.matrix_agent._matrix = np.tanh(matrix + self.alpha * np.outer(input_data, input_data))
+        self.matrix_agent._matrix = np.tanh(
+            matrix + self.alpha * np.outer(input_data, input_data)
+        )
         return input_data
 
 
-def make_outer_product_update_agent(config: dict, matrix_agent: MatrixAgent | None = None) -> OuterProductUpdateAgent:
+def make_outer_product_update_agent(
+    config: dict, matrix_agent: MatrixAgent | None = None
+) -> OuterProductUpdateAgent:
     if matrix_agent is None:
         raise ValueError("matrix_agent required")
     return OuterProductUpdateAgent(

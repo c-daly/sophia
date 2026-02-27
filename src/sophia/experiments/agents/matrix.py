@@ -18,10 +18,10 @@ class MatrixAgent:
 
     def process(self, input_data: np.ndarray) -> np.ndarray:
         """Filter embedding through emotional state: (M + I) * embedding."""
-        return (self._matrix + self._identity) @ input_data
+        return (self._matrix + self._identity) @ input_data  # type: ignore[no-any-return]
 
     def get_state(self) -> np.ndarray:
-        return self._matrix.copy()
+        return self._matrix.copy()  # type: ignore[no-any-return]
 
     def reset(self, state: Any = None) -> None:
         if state is not None:

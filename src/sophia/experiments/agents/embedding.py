@@ -8,7 +8,7 @@ class EmbeddingAgent:
     def __init__(self, model: str, dim: int):
         self.model = model
         self.dim = dim
-        self._client = None
+        self._client: OpenAI | None = None
 
     def process(self, input_data: str) -> np.ndarray:
         if self._client is None:
