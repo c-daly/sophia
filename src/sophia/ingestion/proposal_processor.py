@@ -150,6 +150,9 @@ class ProposalProcessor:
                     relevant_context = relevant_context[:10]
 
             # 2. Ingest proposed nodes
+            # Collect centroid updates to flush after the node loop.
+            centroid_updates: dict[str, list[tuple[list[float], str]]] = {}
+
             with tracer.start_as_current_span("proposal_processor.ingest_nodes"):
                 for proposed in proposal.get("proposed_nodes", []):
                     name = proposed.get("name", "").strip()
@@ -273,52 +276,57 @@ class ProposalProcessor:
                                 f"Embedding storage failed for '{name}': {e}"
                             )
 
-                    # 2e. Incrementally update the type centroid
+                    # 2e. Collect centroid update (deferred to after node loop)
                     if classification and embedding:
-                        try:
-                            type_node = self._hcg.get_node(classification.type_uuid)
-                            props = (
-                                type_node.get("properties", {})
-                                if type_node
-                                and isinstance(type_node.get("properties"), dict)
-                                else {}
-                            )
-                            member_count = props.get("member_count", 0)
-                            current_centroid = props.get("centroid")
+                        centroid_updates.setdefault(classification.type_uuid, []).append((embedding, model))
 
+            # 2f. Flush deferred centroid updates
+            with tracer.start_as_current_span('proposal_processor.centroid_updates'):
+                for type_uuid, assignments in centroid_updates.items():
+                    try:
+                        type_node = self._hcg.get_node(type_uuid)
+                        props = (
+                            type_node.get('properties', {})
+                            if type_node
+                            and isinstance(type_node.get('properties'), dict)
+                            else {}
+                        )
+                        member_count = props.get('member_count', 0)
+                        current_centroid = props.get('centroid')
+
+                        for embedding_val, model_val in assignments:
                             if (
                                 isinstance(member_count, int)
                                 and isinstance(current_centroid, list)
                                 and current_centroid
                             ):
                                 self._classifier.update_centroid_for_assignment(
-                                    type_uuid=classification.type_uuid,
-                                    new_embedding=embedding,
+                                    type_uuid=type_uuid,
+                                    new_embedding=embedding_val,
                                     current_centroid=current_centroid,
                                     member_count=member_count,
-                                    model=model,
+                                    model=model_val,
                                 )
-                                self._hcg.update_node(
-                                    classification.type_uuid,
-                                    {"member_count": member_count + 1},
-                                )
+                                new_count = member_count + 1
+                                current_centroid = [
+                                    (old * member_count + new) / new_count
+                                    for old, new in zip(current_centroid, embedding_val)
+                                ]
+                                member_count = new_count
                             elif not current_centroid:
-                                # First node of this type — initialize centroid
                                 self._milvus.update_centroid(
-                                    type_uuid=classification.type_uuid,
-                                    centroid=embedding,
-                                    model=model,
+                                    type_uuid=type_uuid,
+                                    centroid=embedding_val,
+                                    model=model_val,
                                 )
-                                self._hcg.update_node(
-                                    classification.type_uuid,
-                                    {"member_count": 1},
-                                )
-                        except Exception as e:
-                            logger.debug(
-                                "Centroid update skipped for type '%s': %s",
-                                node_type,
-                                e,
-                            )
+                                current_centroid = embedding_val
+                                member_count = 1
+
+                        self._hcg.update_node(type_uuid, {'member_count': member_count})
+                    except Exception as e:
+                        logger.debug(
+                            'Centroid update skipped for type %s: %s', type_uuid, e
+                        )
 
             # 3. Ingest proposed edges
             with tracer.start_as_current_span("proposal_processor.ingest_edges"):

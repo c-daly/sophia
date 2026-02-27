@@ -307,6 +307,185 @@ class TestProposalProcessor:
         assert "relation" not in props
         assert props.get("safe_key") == "safe_value"
 
+    # -- Deferred centroid update tests --
+
+    def test_centroid_updates_deferred(self):
+        """3 nodes sharing the same type -> get_node for the type called once,
+        update_node for the type called once (batched after node loop)."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        # add_node returns distinct uuids for the 3 entity nodes + type_definition merges
+        node_uuids = iter(["uuid-a", "uuid-b", "uuid-c"])
+        def add_node_side_effect(**kwargs):
+            if kwargs.get("node_type") == "type_definition":
+                return kwargs.get("uuid", "type_entity")
+            return next(node_uuids)
+        mock_hcg.add_node.side_effect = add_node_side_effect
+
+        # get_node is called during centroid flush -- return type node with existing centroid
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "type": "type_definition",
+            "properties": {
+                "member_count": 10,
+                "centroid": [0.5] * 384,
+            },
+        }
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []  # no dedup matches
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-batch",
+                "proposed_nodes": [
+                    {
+                        "name": f"Node{i}",
+                        "type": "entity",
+                        "embedding": [0.1 * i] * 384,
+                        "embedding_id": f"emb-{i}",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                    for i in range(1, 4)
+                ],
+                "proposed_edges": [],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        assert len(result["stored_node_ids"]) == 3
+
+        # get_node should be called exactly once for the type_uuid during centroid flush
+        # (not 3 times -- once per node as in the old code)
+        type_get_calls = [
+            c for c in mock_hcg.get_node.call_args_list
+            if c.args == ("type_entity",) or c.kwargs.get("uuid") == "type_entity"
+        ]
+        assert len(type_get_calls) == 1, (
+            f"Expected 1 get_node call for type_entity, got {len(type_get_calls)}"
+        )
+
+        # update_node for the type should be called once with the final member_count
+        type_update_calls = [
+            c for c in mock_hcg.update_node.call_args_list
+            if c.args[0] == "type_entity"
+        ]
+        assert len(type_update_calls) == 1, (
+            f"Expected 1 update_node call for type_entity, got {len(type_update_calls)}"
+        )
+        # Final member_count should be 10 + 3 = 13
+        assert type_update_calls[0].args[1]["member_count"] == 13
+
+    def test_centroid_first_node_initializes(self):
+        """When there is no current centroid, update_centroid should be called
+        to initialize it with the first embedding."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-new"
+        # Type node has no centroid yet
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "type": "type_definition",
+            "properties": {
+                "member_count": 0,
+            },
+        }
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        embedding = [0.3] * 384
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-init",
+                "proposed_nodes": [
+                    {
+                        "name": "FirstNode",
+                        "type": "entity",
+                        "embedding": embedding,
+                        "embedding_id": "emb-init",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        assert len(result["stored_node_ids"]) == 1
+        # update_centroid should be called to initialize the centroid
+        mock_milvus.update_centroid.assert_called_once_with(
+            type_uuid="type_entity",
+            centroid=embedding,
+            model="all-MiniLM-L6-v2",
+        )
+
+    def test_centroid_failure_does_not_block(self):
+        """A centroid update failure must not affect stored_node_ids."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-ok"
+        # Make get_node raise during centroid flush
+        mock_hcg.get_node.side_effect = RuntimeError("Neo4j down")
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-fail",
+                "proposed_nodes": [
+                    {
+                        "name": "SafeNode",
+                        "type": "entity",
+                        "embedding": [0.2] * 384,
+                        "embedding_id": "emb-safe",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Node should still be stored even though centroid update failed
+        assert result["stored_node_ids"] == ["uuid-ok"]
+
     def test_process_uses_type_classifier(self):
         """Sophia classifies node type via centroid, ignoring Hermes type hint."""
         from sophia.ingestion.proposal_processor import ProposalProcessor
@@ -330,7 +509,7 @@ class TestProposalProcessor:
             "proposed_nodes": [
                 {
                     "name": "Dublin",
-                    "type": "state",  # Hermes says state — should be ignored
+                    "type": "state",  # Hermes says state -- should be ignored
                     "embedding": [0.1] * 384,
                     "embedding_id": "emb-1",
                     "dimension": 384,
