@@ -9,6 +9,7 @@ for Hermes's benefit when context is returned.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal, Tuple
 
 from sophia.ingestion.type_classifier import TypeClassifier
@@ -105,6 +106,7 @@ class ProposalProcessor:
         relevant_context: list[dict] = []
         # Track entity name -> node uuid for edge resolution.
         name_to_uuid: dict[str, str] = {}
+        pending_embeddings: dict[str, list[dict]] = {}
 
         with tracer.start_as_current_span(
             "proposal_processor.process",
@@ -114,42 +116,68 @@ class ProposalProcessor:
             doc_emb = proposal.get("document_embedding")
             if doc_emb and doc_emb.get("embedding"):
                 with tracer.start_as_current_span("proposal_processor.context_search"):
-                    for collection in SEARCHABLE_COLLECTIONS:
+
+                    def _search_collection(
+                        coll: str,
+                    ) -> tuple[str, list[dict[str, Any]]]:
                         try:
-                            matches = self._milvus.search_similar(
-                                node_type=collection,
+                            return coll, self._milvus.search_similar(
+                                node_type=coll,
                                 query_embedding=doc_emb["embedding"],
                                 top_k=5,
                             )
-                            for match in matches:
-                                node = self._hcg.get_node(match["uuid"])
-                                if node:
-                                    relevant_context.append(
-                                        {
-                                            "node_uuid": match["uuid"],
-                                            "name": node.get("name", ""),
-                                            "type": node.get("type", ""),
-                                            "properties": node.get("properties", {}),
-                                            "score": match["score"],
-                                        }
-                                    )
-                                    if node.get("name"):
-                                        if node["name"] in name_to_uuid:
-                                            logger.warning(
-                                                "Name collision in context: '%s' already mapped "
-                                                "to %s, overwriting with %s",
-                                                node["name"],
-                                                name_to_uuid[node["name"]],
-                                                match["uuid"],
-                                            )
-                                        name_to_uuid[node["name"]] = match["uuid"]
                         except Exception as e:
-                            logger.debug(f"Search in {collection} failed: {e}")
+                            logger.debug(f"Search in {coll} failed: {e}")
+                            return coll, []
+
+                    all_matches = []
+                    with ThreadPoolExecutor(
+                        max_workers=len(SEARCHABLE_COLLECTIONS)
+                    ) as executor:
+                        futures = {
+                            executor.submit(_search_collection, c): c
+                            for c in SEARCHABLE_COLLECTIONS
+                        }
+                        for future in as_completed(futures):
+                            _coll, matches = future.result()
+                            all_matches.extend(matches)
+
+                    match_uuids = [m["uuid"] for m in all_matches]
+                    nodes_by_uuid = {}
+                    if match_uuids:
+                        batch_nodes = self._hcg.get_nodes_batch(match_uuids)
+                        nodes_by_uuid = {n["uuid"]: n for n in batch_nodes}
+
+                    for match in all_matches:
+                        node = nodes_by_uuid.get(match["uuid"])
+                        if node:
+                            relevant_context.append(
+                                {
+                                    "node_uuid": match["uuid"],
+                                    "name": node.get("name", ""),
+                                    "type": node.get("type", ""),
+                                    "properties": node.get("properties", {}),
+                                    "score": match["score"],
+                                }
+                            )
+                            if node.get("name"):
+                                if node["name"] in name_to_uuid:
+                                    logger.warning(
+                                        "Name collision in context: '%s' already mapped "
+                                        "to %s, overwriting with %s",
+                                        node["name"],
+                                        name_to_uuid[node["name"]],
+                                        match["uuid"],
+                                    )
+                                name_to_uuid[node["name"]] = match["uuid"]
 
                     relevant_context.sort(key=lambda x: x.get("score", float("inf")))
                     relevant_context = relevant_context[:10]
 
             # 2. Ingest proposed nodes
+            # Collect centroid updates to flush after the node loop.
+            centroid_updates: dict[str, list[tuple[list[float], str]]] = {}
+
             with tracer.start_as_current_span("proposal_processor.ingest_nodes"):
                 for proposed in proposal.get("proposed_nodes", []):
                     name = proposed.get("name", "").strip()
@@ -259,102 +287,108 @@ class ProposalProcessor:
                             e,
                         )
 
-                    # 2d. Store embedding in Milvus
+                    # 2d. Collect embedding for batch upsert
                     if embedding:
-                        try:
-                            self._milvus.upsert_embedding(
-                                node_type=collection,
-                                uuid=node_uuid,
-                                embedding=embedding,
-                                model=model,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Embedding storage failed for '{name}': {e}"
-                            )
+                        pending_embeddings.setdefault(collection, []).append(
+                            {
+                                "uuid": node_uuid,
+                                "embedding": embedding,
+                                "model": model,
+                            }
+                        )
 
-                    # 2e. Incrementally update the type centroid
+                    # 2e. Collect centroid update (deferred to after node loop)
                     if classification and embedding:
-                        try:
-                            type_node = self._hcg.get_node(classification.type_uuid)
-                            props = (
-                                type_node.get("properties", {})
-                                if type_node
-                                and isinstance(type_node.get("properties"), dict)
-                                else {}
-                            )
-                            member_count = props.get("member_count", 0)
-                            current_centroid = props.get("centroid")
+                        centroid_updates.setdefault(
+                            classification.type_uuid, []
+                        ).append((embedding, model))
 
+            # 2f. Flush deferred centroid updates
+            with tracer.start_as_current_span("proposal_processor.centroid_updates"):
+                for type_uuid, assignments in centroid_updates.items():
+                    try:
+                        type_node = self._hcg.get_node(type_uuid)
+                        props = (
+                            type_node.get("properties", {})
+                            if type_node
+                            and isinstance(type_node.get("properties"), dict)
+                            else {}
+                        )
+                        member_count = props.get("member_count", 0)
+                        current_centroid = props.get("centroid")
+
+                        for embedding_val, model_val in assignments:
                             if (
                                 isinstance(member_count, int)
                                 and isinstance(current_centroid, list)
                                 and current_centroid
                             ):
-                                self._classifier.update_centroid_for_assignment(
-                                    type_uuid=classification.type_uuid,
-                                    new_embedding=embedding,
-                                    current_centroid=current_centroid,
-                                    member_count=member_count,
-                                    model=model,
+                                current_centroid = (
+                                    self._classifier.update_centroid_for_assignment(
+                                        type_uuid=type_uuid,
+                                        new_embedding=embedding_val,
+                                        current_centroid=current_centroid,
+                                        member_count=member_count,
+                                        model=model_val,
+                                    )
                                 )
-                                self._hcg.update_node(
-                                    classification.type_uuid,
-                                    {"member_count": member_count + 1},
-                                )
+                                member_count += 1
                             elif not current_centroid:
-                                # First node of this type — initialize centroid
                                 self._milvus.update_centroid(
-                                    type_uuid=classification.type_uuid,
-                                    centroid=embedding,
-                                    model=model,
+                                    type_uuid=type_uuid,
+                                    centroid=embedding_val,
+                                    model=model_val,
                                 )
-                                self._hcg.update_node(
-                                    classification.type_uuid,
-                                    {"member_count": 1},
-                                )
-                        except Exception as e:
-                            logger.debug(
-                                "Centroid update skipped for type '%s': %s",
-                                node_type,
-                                e,
-                            )
+                                current_centroid = embedding_val
+                                member_count = 1
+
+                        self._hcg.update_node(
+                            type_uuid,
+                            {
+                                "member_count": member_count,
+                                "centroid": current_centroid,
+                            },
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            "Centroid update skipped for type %s: %s", type_uuid, e
+                        )
 
             # 3. Ingest proposed edges
             with tracer.start_as_current_span("proposal_processor.ingest_edges"):
                 stored_edge_ids: list[str] = []
-                for edge in proposal.get("proposed_edges") or []:
+                proposed_edges = proposal.get("proposed_edges") or []
+
+                # Pre-resolve unresolved edge names in batch
+                unresolved_names: set[str] = set()
+                for edge in proposed_edges:
+                    src_name = edge.get("source_name", "")
+                    tgt_name = edge.get("target_name", "")
+                    if src_name and src_name not in name_to_uuid:
+                        unresolved_names.add(src_name)
+                    if tgt_name and tgt_name not in name_to_uuid:
+                        unresolved_names.add(tgt_name)
+
+                if unresolved_names:
+                    try:
+                        resolved = self._hcg.find_nodes_by_names(list(unresolved_names))
+                        for name, node_data in resolved.items():
+                            if node_data and node_data.get("uuid"):
+                                name_to_uuid[name] = node_data["uuid"]
+                    except Exception as e:
+                        logger.debug("Batch name resolution failed: %s", e)
+
+                for edge in proposed_edges:
                     src_name = edge.get("source_name", "")
                     tgt_name = edge.get("target_name", "")
                     src_uuid = name_to_uuid.get(src_name)
                     tgt_uuid = name_to_uuid.get(tgt_name)
 
-                    # Fallback: look up unresolved names in Neo4j
-                    if not src_uuid:
-                        try:
-                            found = self._hcg.find_node_by_name(src_name)
-                            if found:
-                                src_uuid = found.get("uuid")
-                        except Exception as e:
-                            logger.debug(
-                                "Neo4j fallback lookup failed for '%s': %s", src_name, e
-                            )
-                    if not tgt_uuid:
-                        try:
-                            found = self._hcg.find_node_by_name(tgt_name)
-                            if found:
-                                tgt_uuid = found.get("uuid")
-                        except Exception as e:
-                            logger.debug(
-                                "Neo4j fallback lookup failed for '%s': %s", tgt_name, e
-                            )
-
                     if not src_uuid or not tgt_uuid:
                         logger.debug(
-                            "Skipping edge %s -> %s: missing node UUID (available: %s)",
+                            "Skipping edge %s -> %s: missing node UUID",
                             src_name,
                             tgt_name,
-                            list(name_to_uuid.keys()),
                         )
                         continue
 
@@ -385,23 +419,31 @@ class ProposalProcessor:
                         )
                         continue
 
-                    # Store edge embedding in Milvus
+                    # Collect edge embedding for batch upsert
                     embedding = edge.get("embedding")
                     model = edge.get("model", "unknown")
                     if embedding:
-                        try:
-                            self._milvus.upsert_embedding(
-                                node_type="Edge",
-                                uuid=edge_uuid,
-                                embedding=embedding,
-                                model=model,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "Edge embedding storage failed for %s: %s",
-                                edge_uuid,
-                                e,
-                            )
+                        pending_embeddings.setdefault("Edge", []).append(
+                            {
+                                "uuid": edge_uuid,
+                                "embedding": embedding,
+                                "model": model,
+                            }
+                        )
+
+            # Flush all pending embeddings in batch
+            for collection_type, batch in pending_embeddings.items():
+                if batch:
+                    try:
+                        self._milvus.batch_upsert_embeddings(
+                            node_type=collection_type, embeddings=batch
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Batch embedding upsert failed for %s: %s",
+                            collection_type,
+                            e,
+                        )
 
             return {
                 "stored_node_ids": stored_ids,

@@ -1,4 +1,7 @@
 import pytest
+
+pytest.importorskip("openai", reason="openai not installed")
+
 import numpy as np
 from sophia.experiments.emotional_drift import run_emotional_drift_experiment
 

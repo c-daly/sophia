@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("openai", reason="openai not installed")
+
 import numpy as np
 from unittest.mock import patch, MagicMock
 from sophia.experiments.agents.embedding import EmbeddingAgent, make_embedding_agent

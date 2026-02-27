@@ -46,18 +46,22 @@ class TestProposalProcessor:
         assert len(result["stored_node_ids"]) == 1
         # add_node called twice: once for entity, once for type_definition
         assert mock_hcg.add_node.call_count == 2
-        mock_milvus.upsert_embedding.assert_called()
+        # Embeddings should be batched, not individually upserted
+        mock_milvus.upsert_embedding.assert_not_called()
+        mock_milvus.batch_upsert_embeddings.assert_called()
 
     def test_returns_relevant_context(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
         mock_hcg = MagicMock()
-        mock_hcg.get_node.return_value = {
-            "uuid": "existing-uuid",
-            "name": "France",
-            "type": "entity",
-            "properties": {"capital": "Paris"},
-        }
+        mock_hcg.get_nodes_batch.return_value = [
+            {
+                "uuid": "existing-uuid",
+                "name": "France",
+                "type": "entity",
+                "properties": {"capital": "Paris"},
+            },
+        ]
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = [
             {"uuid": "existing-uuid", "score": 0.15},
@@ -95,6 +99,7 @@ class TestProposalProcessor:
             "type": "location",
             "properties": {},
         }
+        mock_hcg.get_nodes_batch.return_value = []
         mock_milvus = MagicMock()
         # Document-level search returns nothing, but entity-level returns a match
         mock_milvus.search_similar.side_effect = [
@@ -180,14 +185,16 @@ class TestProposalProcessor:
         mock_hcg.add_node.assert_not_called()
 
     def test_edge_neo4j_fallback_lookup(self):
-        """Edges should look up unresolved names in Neo4j before skipping."""
+        """Edges should batch-resolve unresolved names via find_nodes_by_names."""
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "new-uuid"
         mock_hcg.add_edge.return_value = "edge-uuid"
-        # find_node_by_name returns a match for the target
-        mock_hcg.find_node_by_name.return_value = {"uuid": "neo4j-target-uuid"}
+        # Batch resolution returns a match for "France"
+        mock_hcg.find_nodes_by_names.return_value = {
+            "France": {"uuid": "neo4j-target-uuid"},
+        }
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = []
         mock_milvus.find_nearest_types.return_value = [
@@ -225,9 +232,183 @@ class TestProposalProcessor:
             }
         )
 
-        # Should have resolved "France" via Neo4j fallback
+        # Should have resolved "France" via batch find_nodes_by_names
         assert len(result["stored_edge_ids"]) == 1
-        mock_hcg.find_node_by_name.assert_called_with("France")
+        mock_hcg.find_nodes_by_names.assert_called_once()
+        # Individual find_node_by_name should NOT be called
+        mock_hcg.find_node_by_name.assert_not_called()
+
+    def test_edge_batch_name_resolution(self):
+        """Unresolved names trigger find_nodes_by_names batch call, not individual find_node_by_name."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        # Batch resolves both "France" and "Europe"
+        mock_hcg.find_nodes_by_names.return_value = {
+            "France": {"uuid": "france-uuid"},
+            "Europe": {"uuid": "europe-uuid"},
+        }
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "Paris",
+                        "type": "location",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "emb-1",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "Paris",
+                        "target_name": "France",
+                        "relation": "LOCATED_IN",
+                        "confidence": 0.8,
+                    },
+                    {
+                        "source_name": "France",
+                        "target_name": "Europe",
+                        "relation": "PART_OF",
+                        "confidence": 0.7,
+                    },
+                ],
+                "document_embedding": None,
+                "raw_text": "Paris is in France, part of Europe",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Both edges should be created
+        assert len(result["stored_edge_ids"]) == 2
+        # Batch call made once with both unresolved names
+        mock_hcg.find_nodes_by_names.assert_called_once()
+        call_args = mock_hcg.find_nodes_by_names.call_args[0][0]
+        assert set(call_args) == {"France", "Europe"}
+        # No individual lookups
+        mock_hcg.find_node_by_name.assert_not_called()
+
+    def test_edge_batch_resolution_failure_graceful(self):
+        """Batch resolution failure should skip unresolved edges, not crash."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        # Batch resolution raises an exception
+        mock_hcg.find_nodes_by_names.side_effect = Exception("Neo4j connection failed")
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "Paris",
+                        "type": "location",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "emb-1",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "Paris",
+                        "target_name": "France",
+                        "relation": "LOCATED_IN",
+                        "confidence": 0.8,
+                    }
+                ],
+                "document_embedding": None,
+                "raw_text": "Paris is in France",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Edge should be skipped (France unresolved), but no crash
+        assert result["stored_edge_ids"] == []
+        # Nodes should still be processed fine
+        assert len(result["stored_node_ids"]) == 1
+
+    def test_edge_no_unresolved_names(self):
+        """When all edge names are already in name_to_uuid, find_nodes_by_names is not called."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "A",
+                        "type": "entity",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "e1",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                    {
+                        "name": "B",
+                        "type": "entity",
+                        "embedding": [0.2] * 384,
+                        "embedding_id": "e2",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "A",
+                        "target_name": "B",
+                        "relation": "KNOWS",
+                        "confidence": 0.9,
+                    }
+                ],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Both A and B were just created, so no batch resolution needed
+        assert len(result["stored_edge_ids"]) == 1
+        mock_hcg.find_nodes_by_names.assert_not_called()
 
     def test_edge_properties_cannot_overwrite_reserved_keys(self):
         """Untrusted properties must not overwrite uuid, source, target, relation."""
@@ -307,6 +488,187 @@ class TestProposalProcessor:
         assert "relation" not in props
         assert props.get("safe_key") == "safe_value"
 
+    # -- Deferred centroid update tests --
+
+    def test_centroid_updates_deferred(self):
+        """3 nodes sharing the same type -> get_node for the type called once,
+        update_node for the type called once (batched after node loop)."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        # add_node returns distinct uuids for the 3 entity nodes + type_definition merges
+        node_uuids = iter(["uuid-a", "uuid-b", "uuid-c"])
+
+        def add_node_side_effect(**kwargs):
+            if kwargs.get("node_type") == "type_definition":
+                return kwargs.get("uuid", "type_entity")
+            return next(node_uuids)
+
+        mock_hcg.add_node.side_effect = add_node_side_effect
+
+        # get_node is called during centroid flush -- return type node with existing centroid
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "type": "type_definition",
+            "properties": {
+                "member_count": 10,
+                "centroid": [0.5] * 384,
+            },
+        }
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []  # no dedup matches
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-batch",
+                "proposed_nodes": [
+                    {
+                        "name": f"Node{i}",
+                        "type": "entity",
+                        "embedding": [0.1 * i] * 384,
+                        "embedding_id": f"emb-{i}",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                    for i in range(1, 4)
+                ],
+                "proposed_edges": [],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        assert len(result["stored_node_ids"]) == 3
+
+        # get_node should be called exactly once for the type_uuid during centroid flush
+        # (not 3 times -- once per node as in the old code)
+        type_get_calls = [
+            c
+            for c in mock_hcg.get_node.call_args_list
+            if c.args == ("type_entity",) or c.kwargs.get("uuid") == "type_entity"
+        ]
+        assert (
+            len(type_get_calls) == 1
+        ), f"Expected 1 get_node call for type_entity, got {len(type_get_calls)}"
+
+        # update_node for the type should be called once with the final member_count
+        type_update_calls = [
+            c for c in mock_hcg.update_node.call_args_list if c.args[0] == "type_entity"
+        ]
+        assert (
+            len(type_update_calls) == 1
+        ), f"Expected 1 update_node call for type_entity, got {len(type_update_calls)}"
+        # Final member_count should be 10 + 3 = 13
+        assert type_update_calls[0].args[1]["member_count"] == 13
+
+    def test_centroid_first_node_initializes(self):
+        """When there is no current centroid, update_centroid should be called
+        to initialize it with the first embedding."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-new"
+        # Type node has no centroid yet
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "type": "type_definition",
+            "properties": {
+                "member_count": 0,
+            },
+        }
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        embedding = [0.3] * 384
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-init",
+                "proposed_nodes": [
+                    {
+                        "name": "FirstNode",
+                        "type": "entity",
+                        "embedding": embedding,
+                        "embedding_id": "emb-init",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        assert len(result["stored_node_ids"]) == 1
+        # update_centroid should be called to initialize the centroid
+        mock_milvus.update_centroid.assert_called_once_with(
+            type_uuid="type_entity",
+            centroid=embedding,
+            model="all-MiniLM-L6-v2",
+        )
+
+    def test_centroid_failure_does_not_block(self):
+        """A centroid update failure must not affect stored_node_ids."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-ok"
+        # Make get_node raise during centroid flush
+        mock_hcg.get_node.side_effect = RuntimeError("Neo4j down")
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-fail",
+                "proposed_nodes": [
+                    {
+                        "name": "SafeNode",
+                        "type": "entity",
+                        "embedding": [0.2] * 384,
+                        "embedding_id": "emb-safe",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Node should still be stored even though centroid update failed
+        assert result["stored_node_ids"] == ["uuid-ok"]
+
     def test_process_uses_type_classifier(self):
         """Sophia classifies node type via centroid, ignoring Hermes type hint."""
         from sophia.ingestion.proposal_processor import ProposalProcessor
@@ -330,7 +692,7 @@ class TestProposalProcessor:
             "proposed_nodes": [
                 {
                     "name": "Dublin",
-                    "type": "state",  # Hermes says state — should be ignored
+                    "type": "state",  # Hermes says state -- should be ignored
                     "embedding": [0.1] * 384,
                     "embedding_id": "emb-1",
                     "dimension": 384,
@@ -352,3 +714,413 @@ class TestProposalProcessor:
         # Verify add_node was called with Sophia's classification, not Hermes's
         add_node_call = mock_hcg.add_node.call_args_list[0]
         assert add_node_call.kwargs.get("node_type") == "location"  # NOT "state"
+
+
+class TestBatchEmbeddings:
+    """Tests for batch embedding upsert behavior in ProposalProcessor."""
+
+    def _make_processor(self, mock_hcg=None, mock_milvus=None):
+        """Helper to create a processor with sensible mock defaults."""
+        if mock_hcg is None:
+            mock_hcg = MagicMock()
+        if mock_milvus is None:
+            mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        return (
+            ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus),
+            mock_hcg,
+            mock_milvus,
+        )
+
+    def _make_node(
+        self, name, node_type="entity", embedding=None, model="all-MiniLM-L6-v2"
+    ):
+        """Helper to create a proposed node dict."""
+        return {
+            "name": name,
+            "type": node_type,
+            "embedding": embedding or [0.1] * 384,
+            "embedding_id": "emb-" + name,
+            "dimension": 384,
+            "model": model,
+            "properties": {},
+        }
+
+    def _make_proposal(self, nodes=None, edges=None, doc_embedding=None):
+        """Helper to create a proposal dict."""
+        return {
+            "proposal_id": "test-batch",
+            "proposed_nodes": nodes or [],
+            "proposed_edges": edges or [],
+            "document_embedding": doc_embedding,
+            "raw_text": "test text",
+            "source_service": "hermes",
+            "confidence": 0.7,
+            "metadata": {},
+        }
+
+    def test_node_embeddings_batched_not_individual(self):
+        """Individual upsert_embedding should never be called; batch_upsert_embeddings used instead."""
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-1"
+        processor, _, mock_milvus = self._make_processor(mock_hcg=mock_hcg)
+
+        proposal = self._make_proposal(nodes=[self._make_node("Alpha")])
+        processor.process(proposal)
+
+        mock_milvus.upsert_embedding.assert_not_called()
+        mock_milvus.batch_upsert_embeddings.assert_called()
+
+    def test_multiple_nodes_different_collections_get_separate_batches(self):
+        """Nodes classified into different collections should produce separate batch calls."""
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.side_effect = [
+            "uuid-entity",
+            "type-def-1",
+            "uuid-concept",
+            "type-def-2",
+        ]
+        mock_hcg.get_node.return_value = None
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.side_effect = [
+            [{"uuid": "type_entity", "score": 0.1}],
+            [{"uuid": "type_concept", "score": 0.1}],
+        ]
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+
+        proposal = self._make_proposal(
+            nodes=[
+                self._make_node("Alpha", node_type="entity"),
+                self._make_node("Beta", node_type="concept"),
+            ]
+        )
+        processor.process(proposal)
+
+        batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
+        called_collections = set()
+        for c in batch_calls:
+            nt = c.kwargs.get("node_type")
+            if nt is None and c.args:
+                nt = c.args[0]
+            called_collections.add(nt)
+        assert "Entity" in called_collections
+        assert "Concept" in called_collections
+
+    def test_edge_embeddings_batched_to_edge_collection(self):
+        """Edge embeddings should be batched into the Edge collection."""
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.side_effect = ["uuid-a", "type-def-a", "uuid-b", "type-def-b"]
+        mock_hcg.add_edge.return_value = "edge-uuid-1"
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+
+        proposal = self._make_proposal(
+            nodes=[
+                self._make_node("A"),
+                self._make_node("B"),
+            ],
+            edges=[
+                {
+                    "source_name": "A",
+                    "target_name": "B",
+                    "relation": "RELATED_TO",
+                    "confidence": 0.8,
+                    "embedding": [0.3] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+            ],
+        )
+        processor.process(proposal)
+
+        mock_milvus.upsert_embedding.assert_not_called()
+
+        batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
+        edge_calls = [
+            c
+            for c in batch_calls
+            if (c.kwargs.get("node_type") or (c.args[0] if c.args else None)) == "Edge"
+        ]
+        assert len(edge_calls) == 1
+        edge_batch = edge_calls[0].kwargs.get("embeddings")
+        if edge_batch is None and len(edge_calls[0].args) > 1:
+            edge_batch = edge_calls[0].args[1]
+        assert len(edge_batch) == 1
+        assert edge_batch[0]["uuid"] == "edge-uuid-1"
+        assert edge_batch[0]["model"] == "all-MiniLM-L6-v2"
+
+    def test_batch_upsert_failure_still_returns_results(self):
+        """If batch_upsert_embeddings raises, process() should still return stored IDs."""
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-1"
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+        mock_milvus.batch_upsert_embeddings.side_effect = RuntimeError(
+            "Milvus connection lost"
+        )
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+
+        proposal = self._make_proposal(nodes=[self._make_node("Gamma")])
+        result = processor.process(proposal)
+
+        assert "uuid-1" in result["stored_node_ids"]
+        assert "stored_edge_ids" in result
+
+    def test_no_embeddings_skips_batch_call(self):
+        """If no nodes have embeddings, batch_upsert_embeddings should not be called."""
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "uuid-1"
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+
+        node_no_embedding = {
+            "name": "NoEmbed",
+            "type": "entity",
+            "embedding": None,
+            "embedding_id": "e1",
+            "dimension": 384,
+            "model": "m",
+            "properties": {},
+        }
+        proposal = self._make_proposal(nodes=[node_no_embedding])
+        processor.process(proposal)
+
+        mock_milvus.batch_upsert_embeddings.assert_not_called()
+
+    def test_batch_contains_correct_embedding_data(self):
+        """Verify the batch payload has the right uuid, embedding, and model."""
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.side_effect = ["uuid-X", "type-def-X"]
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+
+        test_embedding = [0.42] * 384
+        proposal = self._make_proposal(
+            nodes=[
+                self._make_node("X", embedding=test_embedding, model="test-model"),
+            ]
+        )
+        processor.process(proposal)
+
+        batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
+        assert len(batch_calls) >= 1
+        found = False
+        for c in batch_calls:
+            node_type = c.kwargs.get("node_type")
+            if node_type is None and c.args:
+                node_type = c.args[0]
+            if node_type == "Entity":
+                embeddings_arg = c.kwargs.get("embeddings")
+                if embeddings_arg is None and len(c.args) > 1:
+                    embeddings_arg = c.args[1]
+                assert len(embeddings_arg) == 1
+                assert embeddings_arg[0]["uuid"] == "uuid-X"
+                assert embeddings_arg[0]["embedding"] == test_embedding
+                assert embeddings_arg[0]["model"] == "test-model"
+                found = True
+                break
+        assert found, "No batch_upsert_embeddings call found for Entity collection"
+
+    # -- Parallel context search + batch hydration tests --
+
+    def test_context_search_uses_batch_hydration(self):
+        """Context phase must call get_nodes_batch instead of per-match get_node."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.get_nodes_batch.return_value = [
+            {"uuid": "uuid-1", "name": "Alpha", "type": "entity", "properties": {}},
+            {"uuid": "uuid-2", "name": "Beta", "type": "concept", "properties": {}},
+        ]
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = [
+            {"uuid": "uuid-1", "score": 0.1},
+            {"uuid": "uuid-2", "score": 0.2},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-batch-hydrate",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # get_nodes_batch should have been called (not individual get_node calls
+        # for context hydration)
+        mock_hcg.get_nodes_batch.assert_called_once()
+        # The batch call should include all unique match uuids
+        call_args = mock_hcg.get_nodes_batch.call_args[0][0]
+        assert "uuid-1" in call_args
+        assert "uuid-2" in call_args
+        # Both nodes should appear in context
+        ctx_uuids = {c["node_uuid"] for c in result["relevant_context"]}
+        assert "uuid-1" in ctx_uuids
+        assert "uuid-2" in ctx_uuids
+
+    def test_context_search_parallel(self):
+        """All 4 searchable collections must be searched and all results appear."""
+        from sophia.ingestion.proposal_processor import (
+            ProposalProcessor,
+            SEARCHABLE_COLLECTIONS,
+        )
+
+        mock_hcg = MagicMock()
+        # Each collection returns 1 unique match
+        nodes = [
+            {
+                "uuid": f"uuid-{i}",
+                "name": f"Node{i}",
+                "type": coll.lower(),
+                "properties": {},
+            }
+            for i, coll in enumerate(SEARCHABLE_COLLECTIONS)
+        ]
+        mock_hcg.get_nodes_batch.return_value = nodes
+
+        mock_milvus = MagicMock()
+        # Each collection search returns 1 match with a unique uuid
+        mock_milvus.search_similar.side_effect = [
+            [{"uuid": f"uuid-{i}", "score": 0.1 * (i + 1)}]
+            for i in range(len(SEARCHABLE_COLLECTIONS))
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-parallel",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test parallel",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # All 4 collections should have been searched
+        assert mock_milvus.search_similar.call_count == len(SEARCHABLE_COLLECTIONS)
+        # All 4 results should appear in context
+        ctx_uuids = {c["node_uuid"] for c in result["relevant_context"]}
+        for i in range(len(SEARCHABLE_COLLECTIONS)):
+            assert (
+                f"uuid-{i}" in ctx_uuids
+            ), f"uuid-{i} missing from context: {ctx_uuids}"
+
+    def test_context_search_handles_collection_failure(self):
+        """If one collection search raises, others still return results."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.get_nodes_batch.return_value = [
+            {"uuid": "uuid-ok", "name": "OkNode", "type": "concept", "properties": {}},
+        ]
+
+        mock_milvus = MagicMock()
+        # Entity search raises, Concept returns a match, State/Process return empty
+        mock_milvus.search_similar.side_effect = [
+            RuntimeError("Milvus timeout"),  # Entity fails
+            [{"uuid": "uuid-ok", "score": 0.1}],  # Concept succeeds
+            [],  # State empty
+            [],  # Process empty
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-fail-one",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test failure",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Despite Entity collection failure, Concept result should appear
+        assert len(result["relevant_context"]) == 1
+        assert result["relevant_context"][0]["node_uuid"] == "uuid-ok"
+
+    def test_context_search_empty_matches(self):
+        """When no matches are found, get_nodes_batch should not be called."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []  # no matches in any collection
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-empty",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test empty",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # No matches -> get_nodes_batch should not be called
+        mock_hcg.get_nodes_batch.assert_not_called()
+        assert result["relevant_context"] == []
