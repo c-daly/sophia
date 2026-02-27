@@ -498,10 +498,12 @@ class TestProposalProcessor:
         mock_hcg = MagicMock()
         # add_node returns distinct uuids for the 3 entity nodes + type_definition merges
         node_uuids = iter(["uuid-a", "uuid-b", "uuid-c"])
+
         def add_node_side_effect(**kwargs):
             if kwargs.get("node_type") == "type_definition":
                 return kwargs.get("uuid", "type_entity")
             return next(node_uuids)
+
         mock_hcg.add_node.side_effect = add_node_side_effect
 
         # get_node is called during centroid flush -- return type node with existing centroid
@@ -551,21 +553,21 @@ class TestProposalProcessor:
         # get_node should be called exactly once for the type_uuid during centroid flush
         # (not 3 times -- once per node as in the old code)
         type_get_calls = [
-            c for c in mock_hcg.get_node.call_args_list
+            c
+            for c in mock_hcg.get_node.call_args_list
             if c.args == ("type_entity",) or c.kwargs.get("uuid") == "type_entity"
         ]
-        assert len(type_get_calls) == 1, (
-            f"Expected 1 get_node call for type_entity, got {len(type_get_calls)}"
-        )
+        assert (
+            len(type_get_calls) == 1
+        ), f"Expected 1 get_node call for type_entity, got {len(type_get_calls)}"
 
         # update_node for the type should be called once with the final member_count
         type_update_calls = [
-            c for c in mock_hcg.update_node.call_args_list
-            if c.args[0] == "type_entity"
+            c for c in mock_hcg.update_node.call_args_list if c.args[0] == "type_entity"
         ]
-        assert len(type_update_calls) == 1, (
-            f"Expected 1 update_node call for type_entity, got {len(type_update_calls)}"
-        )
+        assert (
+            len(type_update_calls) == 1
+        ), f"Expected 1 update_node call for type_entity, got {len(type_update_calls)}"
         # Final member_count should be 10 + 3 = 13
         assert type_update_calls[0].args[1]["member_count"] == 13
 
@@ -729,9 +731,15 @@ class TestBatchEmbeddings:
         ]
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
-        return ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus), mock_hcg, mock_milvus
+        return (
+            ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus),
+            mock_hcg,
+            mock_milvus,
+        )
 
-    def _make_node(self, name, node_type="entity", embedding=None, model="all-MiniLM-L6-v2"):
+    def _make_node(
+        self, name, node_type="entity", embedding=None, model="all-MiniLM-L6-v2"
+    ):
         """Helper to create a proposed node dict."""
         return {
             "name": name,
@@ -771,7 +779,12 @@ class TestBatchEmbeddings:
     def test_multiple_nodes_different_collections_get_separate_batches(self):
         """Nodes classified into different collections should produce separate batch calls."""
         mock_hcg = MagicMock()
-        mock_hcg.add_node.side_effect = ["uuid-entity", "type-def-1", "uuid-concept", "type-def-2"]
+        mock_hcg.add_node.side_effect = [
+            "uuid-entity",
+            "type-def-1",
+            "uuid-concept",
+            "type-def-2",
+        ]
         mock_hcg.get_node.return_value = None
 
         mock_milvus = MagicMock()
@@ -785,10 +798,12 @@ class TestBatchEmbeddings:
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
 
-        proposal = self._make_proposal(nodes=[
-            self._make_node("Alpha", node_type="entity"),
-            self._make_node("Beta", node_type="concept"),
-        ])
+        proposal = self._make_proposal(
+            nodes=[
+                self._make_node("Alpha", node_type="entity"),
+                self._make_node("Beta", node_type="concept"),
+            ]
+        )
         processor.process(proposal)
 
         batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
@@ -837,8 +852,11 @@ class TestBatchEmbeddings:
         mock_milvus.upsert_embedding.assert_not_called()
 
         batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
-        edge_calls = [c for c in batch_calls
-                      if (c.kwargs.get("node_type") or (c.args[0] if c.args else None)) == "Edge"]
+        edge_calls = [
+            c
+            for c in batch_calls
+            if (c.kwargs.get("node_type") or (c.args[0] if c.args else None)) == "Edge"
+        ]
         assert len(edge_calls) == 1
         edge_batch = edge_calls[0].kwargs.get("embeddings")
         if edge_batch is None and len(edge_calls[0].args) > 1:
@@ -856,7 +874,9 @@ class TestBatchEmbeddings:
         mock_milvus.find_nearest_types.return_value = [
             {"uuid": "type_entity", "score": 0.1},
         ]
-        mock_milvus.batch_upsert_embeddings.side_effect = RuntimeError("Milvus connection lost")
+        mock_milvus.batch_upsert_embeddings.side_effect = RuntimeError(
+            "Milvus connection lost"
+        )
 
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
@@ -908,9 +928,11 @@ class TestBatchEmbeddings:
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
 
         test_embedding = [0.42] * 384
-        proposal = self._make_proposal(nodes=[
-            self._make_node("X", embedding=test_embedding, model="test-model"),
-        ])
+        proposal = self._make_proposal(
+            nodes=[
+                self._make_node("X", embedding=test_embedding, model="test-model"),
+            ]
+        )
         processor.process(proposal)
 
         batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
@@ -931,6 +953,7 @@ class TestBatchEmbeddings:
                 found = True
                 break
         assert found, "No batch_upsert_embeddings call found for Entity collection"
+
     # -- Parallel context search + batch hydration tests --
 
     def test_context_search_uses_batch_hydration(self):
@@ -988,7 +1011,12 @@ class TestBatchEmbeddings:
         mock_hcg = MagicMock()
         # Each collection returns 1 unique match
         nodes = [
-            {"uuid": f"uuid-{i}", "name": f"Node{i}", "type": coll.lower(), "properties": {}}
+            {
+                "uuid": f"uuid-{i}",
+                "name": f"Node{i}",
+                "type": coll.lower(),
+                "properties": {},
+            }
             for i, coll in enumerate(SEARCHABLE_COLLECTIONS)
         ]
         mock_hcg.get_nodes_batch.return_value = nodes
@@ -1023,9 +1051,9 @@ class TestBatchEmbeddings:
         # All 4 results should appear in context
         ctx_uuids = {c["node_uuid"] for c in result["relevant_context"]}
         for i in range(len(SEARCHABLE_COLLECTIONS)):
-            assert f"uuid-{i}" in ctx_uuids, (
-                f"uuid-{i} missing from context: {ctx_uuids}"
-            )
+            assert (
+                f"uuid-{i}" in ctx_uuids
+            ), f"uuid-{i} missing from context: {ctx_uuids}"
 
     def test_context_search_handles_collection_failure(self):
         """If one collection search raises, others still return results."""
