@@ -117,7 +117,9 @@ class ProposalProcessor:
             if doc_emb and doc_emb.get("embedding"):
                 with tracer.start_as_current_span("proposal_processor.context_search"):
 
-                    def _search_collection(coll):
+                    def _search_collection(
+                        coll: str,
+                    ) -> tuple[str, list[dict[str, Any]]]:
                         try:
                             return coll, self._milvus.search_similar(
                                 node_type=coll,
