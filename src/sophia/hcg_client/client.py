@@ -405,6 +405,73 @@ class HCGClient(LogosHCGClient):
             "properties": props,
         }
 
+    def get_nodes_batch(self, uuids: list[str]) -> list[dict]:
+        """Fetch multiple content nodes by uuid in a single query.
+
+        Returns a list of node dicts with keys: uuid, name, type, properties.
+        Edge nodes (those with a ``relation`` property) are excluded.
+        Returns an empty list when *uuids* is empty.
+        """
+        if not uuids:
+            return []
+
+        query = """
+        MATCH (n:Node) WHERE n.uuid IN $uuids AND n.relation IS NULL
+        RETURN n.uuid as uuid, n.name as name, n.type as type,
+               properties(n) as props
+        """
+        records = self._execute_read(query, {"uuids": uuids})
+
+        results: list[dict] = []
+        for record in records:
+            props = dict(record["props"])
+            for key in ["uuid", "name", "type"]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            results.append(
+                {
+                    "uuid": record["uuid"],
+                    "name": record["name"],
+                    "type": record["type"],
+                    "properties": props,
+                }
+            )
+        return results
+
+    def find_nodes_by_names(self, names: list[str]) -> dict[str, dict]:
+        """Find multiple content nodes by exact name match in a single query.
+
+        Returns a dict mapping each name to its first matching node dict.
+        Edge nodes (those with a ``relation`` property) are excluded.
+        Returns an empty dict when *names* is empty.
+        """
+        if not names:
+            return {}
+
+        query = """
+        MATCH (n:Node) WHERE n.name IN $names AND n.relation IS NULL
+        RETURN n.uuid as uuid, n.name as name, n.type as type,
+               properties(n) as props
+        """
+        records = self._execute_read(query, {"names": names})
+
+        results: dict[str, dict] = {}
+        for record in records:
+            name = record["name"]
+            if name in results:
+                continue  # keep first match per name
+            props = dict(record["props"])
+            for key in ["uuid", "name", "type"]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            results[name] = {
+                "uuid": record["uuid"],
+                "name": name,
+                "type": record["type"],
+                "properties": props,
+            }
+        return results
+
     def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
         """Fetch a reified edge node by UUID.
 
