@@ -323,38 +323,38 @@ class ProposalProcessor:
             # 3. Ingest proposed edges
             with tracer.start_as_current_span("proposal_processor.ingest_edges"):
                 stored_edge_ids: list[str] = []
-                for edge in proposal.get("proposed_edges") or []:
+                proposed_edges = proposal.get("proposed_edges") or []
+
+                # Pre-resolve unresolved edge names in batch
+                unresolved_names: set[str] = set()
+                for edge in proposed_edges:
+                    src_name = edge.get("source_name", "")
+                    tgt_name = edge.get("target_name", "")
+                    if src_name and src_name not in name_to_uuid:
+                        unresolved_names.add(src_name)
+                    if tgt_name and tgt_name not in name_to_uuid:
+                        unresolved_names.add(tgt_name)
+
+                if unresolved_names:
+                    try:
+                        resolved = self._hcg.find_nodes_by_names(list(unresolved_names))
+                        for name, node_data in resolved.items():
+                            if node_data and node_data.get("uuid"):
+                                name_to_uuid[name] = node_data["uuid"]
+                    except Exception as e:
+                        logger.debug("Batch name resolution failed: %s", e)
+
+                for edge in proposed_edges:
                     src_name = edge.get("source_name", "")
                     tgt_name = edge.get("target_name", "")
                     src_uuid = name_to_uuid.get(src_name)
                     tgt_uuid = name_to_uuid.get(tgt_name)
 
-                    # Fallback: look up unresolved names in Neo4j
-                    if not src_uuid:
-                        try:
-                            found = self._hcg.find_node_by_name(src_name)
-                            if found:
-                                src_uuid = found.get("uuid")
-                        except Exception as e:
-                            logger.debug(
-                                "Neo4j fallback lookup failed for '%s': %s", src_name, e
-                            )
-                    if not tgt_uuid:
-                        try:
-                            found = self._hcg.find_node_by_name(tgt_name)
-                            if found:
-                                tgt_uuid = found.get("uuid")
-                        except Exception as e:
-                            logger.debug(
-                                "Neo4j fallback lookup failed for '%s': %s", tgt_name, e
-                            )
-
                     if not src_uuid or not tgt_uuid:
                         logger.debug(
-                            "Skipping edge %s -> %s: missing node UUID (available: %s)",
+                            "Skipping edge %s -> %s: missing node UUID",
                             src_name,
                             tgt_name,
-                            list(name_to_uuid.keys()),
                         )
                         continue
 

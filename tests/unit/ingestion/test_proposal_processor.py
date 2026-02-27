@@ -180,14 +180,16 @@ class TestProposalProcessor:
         mock_hcg.add_node.assert_not_called()
 
     def test_edge_neo4j_fallback_lookup(self):
-        """Edges should look up unresolved names in Neo4j before skipping."""
+        """Edges should batch-resolve unresolved names via find_nodes_by_names."""
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "new-uuid"
         mock_hcg.add_edge.return_value = "edge-uuid"
-        # find_node_by_name returns a match for the target
-        mock_hcg.find_node_by_name.return_value = {"uuid": "neo4j-target-uuid"}
+        # Batch resolution returns a match for "France"
+        mock_hcg.find_nodes_by_names.return_value = {
+            "France": {"uuid": "neo4j-target-uuid"},
+        }
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = []
         mock_milvus.find_nearest_types.return_value = [
@@ -225,9 +227,183 @@ class TestProposalProcessor:
             }
         )
 
-        # Should have resolved "France" via Neo4j fallback
+        # Should have resolved "France" via batch find_nodes_by_names
         assert len(result["stored_edge_ids"]) == 1
-        mock_hcg.find_node_by_name.assert_called_with("France")
+        mock_hcg.find_nodes_by_names.assert_called_once()
+        # Individual find_node_by_name should NOT be called
+        mock_hcg.find_node_by_name.assert_not_called()
+
+    def test_edge_batch_name_resolution(self):
+        """Unresolved names trigger find_nodes_by_names batch call, not individual find_node_by_name."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        # Batch resolves both "France" and "Europe"
+        mock_hcg.find_nodes_by_names.return_value = {
+            "France": {"uuid": "france-uuid"},
+            "Europe": {"uuid": "europe-uuid"},
+        }
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "Paris",
+                        "type": "location",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "emb-1",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "Paris",
+                        "target_name": "France",
+                        "relation": "LOCATED_IN",
+                        "confidence": 0.8,
+                    },
+                    {
+                        "source_name": "France",
+                        "target_name": "Europe",
+                        "relation": "PART_OF",
+                        "confidence": 0.7,
+                    },
+                ],
+                "document_embedding": None,
+                "raw_text": "Paris is in France, part of Europe",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Both edges should be created
+        assert len(result["stored_edge_ids"]) == 2
+        # Batch call made once with both unresolved names
+        mock_hcg.find_nodes_by_names.assert_called_once()
+        call_args = mock_hcg.find_nodes_by_names.call_args[0][0]
+        assert set(call_args) == {"France", "Europe"}
+        # No individual lookups
+        mock_hcg.find_node_by_name.assert_not_called()
+
+    def test_edge_batch_resolution_failure_graceful(self):
+        """Batch resolution failure should skip unresolved edges, not crash."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        # Batch resolution raises an exception
+        mock_hcg.find_nodes_by_names.side_effect = Exception("Neo4j connection failed")
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "Paris",
+                        "type": "location",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "emb-1",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "Paris",
+                        "target_name": "France",
+                        "relation": "LOCATED_IN",
+                        "confidence": 0.8,
+                    }
+                ],
+                "document_embedding": None,
+                "raw_text": "Paris is in France",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Edge should be skipped (France unresolved), but no crash
+        assert result["stored_edge_ids"] == []
+        # Nodes should still be processed fine
+        assert len(result["stored_node_ids"]) == 1
+
+    def test_edge_no_unresolved_names(self):
+        """When all edge names are already in name_to_uuid, find_nodes_by_names is not called."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "A",
+                        "type": "entity",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "e1",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                    {
+                        "name": "B",
+                        "type": "entity",
+                        "embedding": [0.2] * 384,
+                        "embedding_id": "e2",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "A",
+                        "target_name": "B",
+                        "relation": "KNOWS",
+                        "confidence": 0.9,
+                    }
+                ],
+                "document_embedding": None,
+                "raw_text": "",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Both A and B were just created, so no batch resolution needed
+        assert len(result["stored_edge_ids"]) == 1
+        mock_hcg.find_nodes_by_names.assert_not_called()
 
     def test_edge_properties_cannot_overwrite_reserved_keys(self):
         """Untrusted properties must not overwrite uuid, source, target, relation."""
@@ -330,7 +506,7 @@ class TestProposalProcessor:
             "proposed_nodes": [
                 {
                     "name": "Dublin",
-                    "type": "state",  # Hermes says state — should be ignored
+                    "type": "state",
                     "embedding": [0.1] * 384,
                     "embedding_id": "emb-1",
                     "dimension": 384,
