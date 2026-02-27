@@ -1,6 +1,6 @@
 """Tests for ProposalProcessor -- cognitive intake of Hermes proposals."""
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 
 class TestProposalProcessor:

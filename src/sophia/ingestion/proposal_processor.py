@@ -128,7 +128,7 @@ class ProposalProcessor:
                             return coll, []
 
                     all_matches = []
-                    with ThreadPoolExecutor(max_workers=4) as executor:
+                    with ThreadPoolExecutor(max_workers=len(SEARCHABLE_COLLECTIONS)) as executor:
                         futures = {executor.submit(_search_collection, c): c for c in SEARCHABLE_COLLECTIONS}
                         for future in as_completed(futures):
                             _coll, matches = future.result()
@@ -309,19 +309,14 @@ class ProposalProcessor:
                                 and isinstance(current_centroid, list)
                                 and current_centroid
                             ):
-                                self._classifier.update_centroid_for_assignment(
+                                current_centroid = self._classifier.update_centroid_for_assignment(
                                     type_uuid=type_uuid,
                                     new_embedding=embedding_val,
                                     current_centroid=current_centroid,
                                     member_count=member_count,
                                     model=model_val,
                                 )
-                                new_count = member_count + 1
-                                current_centroid = [
-                                    (old * member_count + new) / new_count
-                                    for old, new in zip(current_centroid, embedding_val)
-                                ]
-                                member_count = new_count
+                                member_count += 1
                             elif not current_centroid:
                                 self._milvus.update_centroid(
                                     type_uuid=type_uuid,
@@ -331,7 +326,7 @@ class ProposalProcessor:
                                 current_centroid = embedding_val
                                 member_count = 1
 
-                        self._hcg.update_node(type_uuid, {'member_count': member_count})
+                        self._hcg.update_node(type_uuid, {'member_count': member_count, 'centroid': current_centroid})
                     except Exception as e:
                         logger.debug(
                             'Centroid update skipped for type %s: %s', type_uuid, e
