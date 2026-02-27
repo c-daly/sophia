@@ -52,12 +52,14 @@ class TestProposalProcessor:
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
         mock_hcg = MagicMock()
-        mock_hcg.get_node.return_value = {
-            "uuid": "existing-uuid",
-            "name": "France",
-            "type": "entity",
-            "properties": {"capital": "Paris"},
-        }
+        mock_hcg.get_nodes_batch.return_value = [
+            {
+                "uuid": "existing-uuid",
+                "name": "France",
+                "type": "entity",
+                "properties": {"capital": "Paris"},
+            },
+        ]
         mock_milvus = MagicMock()
         mock_milvus.search_similar.return_value = [
             {"uuid": "existing-uuid", "score": 0.15},
@@ -95,6 +97,7 @@ class TestProposalProcessor:
             "type": "location",
             "properties": {},
         }
+        mock_hcg.get_nodes_batch.return_value = []
         mock_milvus = MagicMock()
         # Document-level search returns nothing, but entity-level returns a match
         mock_milvus.search_similar.side_effect = [
@@ -330,7 +333,7 @@ class TestProposalProcessor:
             "proposed_nodes": [
                 {
                     "name": "Dublin",
-                    "type": "state",  # Hermes says state — should be ignored
+                    "type": "state",  # Hermes says state -- should be ignored
                     "embedding": [0.1] * 384,
                     "embedding_id": "emb-1",
                     "dimension": 384,
@@ -352,3 +355,169 @@ class TestProposalProcessor:
         # Verify add_node was called with Sophia's classification, not Hermes's
         add_node_call = mock_hcg.add_node.call_args_list[0]
         assert add_node_call.kwargs.get("node_type") == "location"  # NOT "state"
+
+    # -- Parallel context search + batch hydration tests --
+
+    def test_context_search_uses_batch_hydration(self):
+        """Context phase must call get_nodes_batch instead of per-match get_node."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.get_nodes_batch.return_value = [
+            {"uuid": "uuid-1", "name": "Alpha", "type": "entity", "properties": {}},
+            {"uuid": "uuid-2", "name": "Beta", "type": "concept", "properties": {}},
+        ]
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = [
+            {"uuid": "uuid-1", "score": 0.1},
+            {"uuid": "uuid-2", "score": 0.2},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-batch-hydrate",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # get_nodes_batch should have been called (not individual get_node calls
+        # for context hydration)
+        mock_hcg.get_nodes_batch.assert_called_once()
+        # The batch call should include all unique match uuids
+        call_args = mock_hcg.get_nodes_batch.call_args[0][0]
+        assert "uuid-1" in call_args
+        assert "uuid-2" in call_args
+        # Both nodes should appear in context
+        ctx_uuids = {c["node_uuid"] for c in result["relevant_context"]}
+        assert "uuid-1" in ctx_uuids
+        assert "uuid-2" in ctx_uuids
+
+    def test_context_search_parallel(self):
+        """All 4 searchable collections must be searched and all results appear."""
+        from sophia.ingestion.proposal_processor import (
+            ProposalProcessor,
+            SEARCHABLE_COLLECTIONS,
+        )
+
+        mock_hcg = MagicMock()
+        # Each collection returns 1 unique match
+        nodes = [
+            {"uuid": f"uuid-{i}", "name": f"Node{i}", "type": coll.lower(), "properties": {}}
+            for i, coll in enumerate(SEARCHABLE_COLLECTIONS)
+        ]
+        mock_hcg.get_nodes_batch.return_value = nodes
+
+        mock_milvus = MagicMock()
+        # Each collection search returns 1 match with a unique uuid
+        mock_milvus.search_similar.side_effect = [
+            [{"uuid": f"uuid-{i}", "score": 0.1 * (i + 1)}]
+            for i in range(len(SEARCHABLE_COLLECTIONS))
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-parallel",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test parallel",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # All 4 collections should have been searched
+        assert mock_milvus.search_similar.call_count == len(SEARCHABLE_COLLECTIONS)
+        # All 4 results should appear in context
+        ctx_uuids = {c["node_uuid"] for c in result["relevant_context"]}
+        for i in range(len(SEARCHABLE_COLLECTIONS)):
+            assert f"uuid-{i}" in ctx_uuids, (
+                f"uuid-{i} missing from context: {ctx_uuids}"
+            )
+
+    def test_context_search_handles_collection_failure(self):
+        """If one collection search raises, others still return results."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.get_nodes_batch.return_value = [
+            {"uuid": "uuid-ok", "name": "OkNode", "type": "concept", "properties": {}},
+        ]
+
+        mock_milvus = MagicMock()
+        # Entity search raises, Concept returns a match, State/Process return empty
+        mock_milvus.search_similar.side_effect = [
+            RuntimeError("Milvus timeout"),  # Entity fails
+            [{"uuid": "uuid-ok", "score": 0.1}],  # Concept succeeds
+            [],  # State empty
+            [],  # Process empty
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-fail-one",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test failure",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # Despite Entity collection failure, Concept result should appear
+        assert len(result["relevant_context"]) == 1
+        assert result["relevant_context"][0]["node_uuid"] == "uuid-ok"
+
+    def test_context_search_empty_matches(self):
+        """When no matches are found, get_nodes_batch should not be called."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []  # no matches in any collection
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p-empty",
+                "proposed_nodes": [],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "test empty",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        # No matches -> get_nodes_batch should not be called
+        mock_hcg.get_nodes_batch.assert_not_called()
+        assert result["relevant_context"] == []

@@ -9,6 +9,7 @@ for Hermes's benefit when context is returned.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal, Tuple
 
 from sophia.ingestion.type_classifier import TypeClassifier
@@ -114,37 +115,50 @@ class ProposalProcessor:
             doc_emb = proposal.get("document_embedding")
             if doc_emb and doc_emb.get("embedding"):
                 with tracer.start_as_current_span("proposal_processor.context_search"):
-                    for collection in SEARCHABLE_COLLECTIONS:
+                    def _search_collection(coll):
                         try:
-                            matches = self._milvus.search_similar(
-                                node_type=collection,
-                                query_embedding=doc_emb["embedding"],
+                            return coll, self._milvus.search_similar(
+                                node_type=coll,
+                                query_embedding=doc_emb['embedding'],
                                 top_k=5,
                             )
-                            for match in matches:
-                                node = self._hcg.get_node(match["uuid"])
-                                if node:
-                                    relevant_context.append(
-                                        {
-                                            "node_uuid": match["uuid"],
-                                            "name": node.get("name", ""),
-                                            "type": node.get("type", ""),
-                                            "properties": node.get("properties", {}),
-                                            "score": match["score"],
-                                        }
-                                    )
-                                    if node.get("name"):
-                                        if node["name"] in name_to_uuid:
-                                            logger.warning(
-                                                "Name collision in context: '%s' already mapped "
-                                                "to %s, overwriting with %s",
-                                                node["name"],
-                                                name_to_uuid[node["name"]],
-                                                match["uuid"],
-                                            )
-                                        name_to_uuid[node["name"]] = match["uuid"]
                         except Exception as e:
-                            logger.debug(f"Search in {collection} failed: {e}")
+                            logger.debug(f'Search in {coll} failed: {e}')
+                            return coll, []
+
+                    all_matches = []
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        futures = {executor.submit(_search_collection, c): c for c in SEARCHABLE_COLLECTIONS}
+                        for future in as_completed(futures):
+                            _coll, matches = future.result()
+                            all_matches.extend(matches)
+
+                    match_uuids = [m['uuid'] for m in all_matches]
+                    nodes_by_uuid = {}
+                    if match_uuids:
+                        batch_nodes = self._hcg.get_nodes_batch(match_uuids)
+                        nodes_by_uuid = {n['uuid']: n for n in batch_nodes}
+
+                    for match in all_matches:
+                        node = nodes_by_uuid.get(match['uuid'])
+                        if node:
+                            relevant_context.append({
+                                'node_uuid': match['uuid'],
+                                'name': node.get('name', ''),
+                                'type': node.get('type', ''),
+                                'properties': node.get('properties', {}),
+                                'score': match['score'],
+                            })
+                            if node.get('name'):
+                                if node['name'] in name_to_uuid:
+                                    logger.warning(
+                                        "Name collision in context: '%s' already mapped "
+                                        "to %s, overwriting with %s",
+                                        node['name'],
+                                        name_to_uuid[node['name']],
+                                        match['uuid'],
+                                    )
+                                name_to_uuid[node['name']] = match['uuid']
 
                     relevant_context.sort(key=lambda x: x.get("score", float("inf")))
                     relevant_context = relevant_context[:10]
