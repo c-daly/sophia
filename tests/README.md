@@ -80,7 +80,7 @@ poetry run pytest tests/e2e/ -v
 
 ### Coverage Requirement
 
-All CI jobs enforce a **60% minimum coverage** threshold. Tests will fail if coverage drops below 60%.
+The **standard** CI job enforces a **50% minimum coverage** threshold. The nightly **ml-tests** job runs only `requires_torch` tests and does not enforce a coverage threshold.
 
 ### CI Jobs Overview
 
@@ -91,7 +91,7 @@ All CI jobs enforce a **60% minimum coverage** threshold. Tests will fail if cov
 The standard job:
 - Starts Neo4j and Milvus via docker-compose
 - Runs ALL tests including integration tests
-- Enforces 60% minimum coverage
+- Enforces 50% minimum coverage
 - Reports skip reasons with `-r sS`
 
 ### Weekly Scheduled Run

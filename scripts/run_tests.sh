@@ -159,7 +159,7 @@ function run_ci() {
   poetry run pytest tests/ \
     --cov=src/sophia \
     --cov-report=term-missing \
-    --cov-fail-under=00 \
+    --cov-fail-under=50 \
     -v --tb=short -r sS "$@"
 }
 

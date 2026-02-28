@@ -95,7 +95,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=sophia --cov-report=term-missing --cov-fail-under=00"
+addopts = "-v"
 markers = [
   "unit: marks tests as unit tests (no external services, fast)",
   "integration: marks tests as integration tests requiring live services (deselect with '-m \"not integration\"')",
