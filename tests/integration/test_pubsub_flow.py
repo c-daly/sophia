@@ -86,6 +86,7 @@ class TestPubSubFlow:
             ]
         finally:
             sub_bus.stop()
+            listener.join(timeout=2)
             sub_bus.close()
 
     def test_write_type_snapshot_writes_correct_format(self):
