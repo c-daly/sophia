@@ -172,6 +172,7 @@ class ProposalProcessor:
         # Track types and affected nodes for batch event.
         new_types: list[str] = []
         updated_types: list[str] = []
+        seen_type_uuids: set[str] = set()
         affected_node_uuids: list[str] = []
         pending_embeddings: dict[str, list[dict]] = {}
 
@@ -335,7 +336,8 @@ class ProposalProcessor:
                     # 2c. Connect to type definition via IS_A edge.
                     # Ensure the type-definition node exists (MERGE is idempotent).
                     type_def_uuid = f"type_{node_type}"
-                    _is_new_type = type_def_uuid not in name_to_uuid
+                    _is_new_type = type_def_uuid not in seen_type_uuids
+                    seen_type_uuids.add(type_def_uuid)
                     try:
                         self._hcg.add_node(
                             uuid=type_def_uuid,

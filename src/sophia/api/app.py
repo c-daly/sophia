@@ -242,6 +242,7 @@ _proposal_processor: Optional[ProposalProcessor] = None
 _proposal_worker: Optional[Any] = None
 _proposal_worker_task: Optional[Any] = None
 _event_bus: Optional[Any] = None
+_redis_direct: Optional[Any] = None
 
 
 @asynccontextmanager
@@ -251,7 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
     global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
     global _proposal_processor, _proposal_worker, _proposal_worker_task
-    global _event_bus
+    global _event_bus, _redis_direct
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -472,6 +473,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if _event_bus is not None:
         _event_bus.close()
         logger.info("EventBus closed")
+    if _redis_direct is not None:
+        _redis_direct.close()
+        logger.info("Redis direct connection closed")
 
     if _hcg_client:
         _hcg_client.close()
