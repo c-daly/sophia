@@ -168,7 +168,7 @@ def main() -> None:
     for i in range(len(sc["incremental_means"])):
         sc_d = sc["incremental_means"][i] - sc["baseline_mean"]
         op_d = op["incremental_means"][i] - op["baseline_mean"]
-        print(f"{i+1:>8} | {sc_d:>+18.6f} | {op_d:>+18.6f}")
+        print(f"{i + 1:>8} | {sc_d:>+18.6f} | {op_d:>+18.6f}")
 
     # Cross-emotion test: train on angry, measure drift toward curious
     print(
@@ -180,7 +180,9 @@ def main() -> None:
         ("outer_prod", OuterProductUpdateAgent),
     ]:
         matrix = MatrixAgent(dim=dim, std=0.0, seed=seed)
-        updater: MatrixUpdateAgent | OuterProductUpdateAgent = updater_cls(matrix_agent=matrix, alpha=0.1)  # type: ignore[assignment]
+        updater: MatrixUpdateAgent | OuterProductUpdateAgent = updater_cls(
+            matrix_agent=matrix, alpha=0.1
+        )  # type: ignore[assignment]
 
         # baseline similarities to both centroids
         angry_base = np.mean(

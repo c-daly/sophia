@@ -6,7 +6,6 @@ from sophia.ingestion.type_emergence import TypeEmergenceDetector
 
 
 class TestTypeEmergenceDetector:
-
     def test_no_split_when_variance_low(self):
         """Low variance type should not trigger a split."""
         mock_milvus = MagicMock()
