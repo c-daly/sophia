@@ -215,9 +215,14 @@ class TestDispatch:
     ) -> None:
         """_dispatch_job with unknown type should log a warning, not raise."""
         job = _make_job("unknown_type")
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.WARNING, logger="sophia.maintenance.scheduler"):
             await self.scheduler._dispatch_job(job)
-        assert "unknown_type" in caplog.text
+        warning_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert any(
+            "unknown_type" in m for m in warning_messages
+        ), f"Expected warning about unknown_type, got: {warning_messages}"
 
     @pytest.mark.asyncio
     async def test_dispatch_requeues_on_failure(self) -> None:
