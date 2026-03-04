@@ -130,21 +130,14 @@ class MaintenanceScheduler:
             logger.warning("threshold_crossed: no handler for job_type %s", job_type)
 
     def _check_thresholds(self, type_names: list[str]) -> None:
-        """Check if any types cross the member count threshold.
-
-        Args:
-            type_names: Type names to check against configured thresholds.
-        """
+        """Check if any types cross the member count threshold."""
         if self._hcg is None:
             return
-        _threshold = self._config.type_member_count_threshold  # noqa: F841
-        for type_name in type_names:
-            try:
-                # Placeholder: look up type node to check member count
-                # Implementation depends on HCGClient API
-                pass
-            except Exception:
-                logger.exception("Failed threshold check for type %s", type_name)
+        # TODO: Implement when HCGClient exposes member count queries
+        logger.debug(
+            "Threshold checking not yet implemented, skipping %d types",
+            len(type_names),
+        )
 
     async def start(self) -> None:
         """Start the scheduler: listener thread + dispatch loop + periodic timer.
@@ -172,13 +165,13 @@ class MaintenanceScheduler:
 
         await asyncio.gather(*tasks)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Signal the scheduler to stop."""
         self._running = False
         if self._event_bus is not None:
             self._event_bus.stop()
         if self._listener_thread is not None:
-            self._listener_thread.join(timeout=5)
+            await asyncio.to_thread(self._listener_thread.join, 5)
         logger.info("Maintenance scheduler stopping")
 
     async def _dispatch_loop(self) -> None:
@@ -189,12 +182,17 @@ class MaintenanceScheduler:
                 if job is None:
                     continue
                 assert self._semaphore is not None
-                async with self._semaphore:
-                    await self._dispatch_job(job)
+                asyncio.create_task(self._run_job_with_semaphore(job))
             except Exception:
                 if self._running:
                     logger.exception("Error in dispatch loop")
                     await asyncio.sleep(1)
+
+    async def _run_job_with_semaphore(self, job: MaintenanceJob) -> None:
+        """Run a job bounded by the concurrency semaphore."""
+        assert self._semaphore is not None
+        async with self._semaphore:
+            await self._dispatch_job(job)
 
     async def _periodic_loop(self) -> None:
         """Periodically enqueue full scan jobs."""

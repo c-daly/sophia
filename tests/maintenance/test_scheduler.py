@@ -181,7 +181,7 @@ class TestEventHandlers:
                 "updated_types": ["person"],
             },
         }
-        # _check_thresholds is a placeholder (pass), so just verify no error
+        # _check_thresholds logs and returns, so just verify no error
         scheduler._on_proposal_processed(event)
 
 
@@ -248,7 +248,8 @@ class TestStartStop:
         await scheduler.start()
         assert not scheduler._running
 
-    def test_stop_calls_event_bus_stop(self) -> None:
+    @pytest.mark.asyncio
+    async def test_stop_calls_event_bus_stop(self) -> None:
         """stop() should set _running=False and call event_bus.stop()."""
         config = MaintenanceConfig(enabled=True)
         scheduler = MaintenanceScheduler(
@@ -258,6 +259,6 @@ class TestStartStop:
             handlers=self.handlers,
         )
         scheduler._running = True
-        scheduler.stop()
+        await scheduler.stop()
         assert not scheduler._running
         self.mock_event_bus.stop.assert_called_once()

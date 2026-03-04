@@ -12,7 +12,7 @@ import pytest
 import redis as redis_lib
 
 from sophia.maintenance.config import MaintenanceConfig
-from sophia.maintenance.job_queue import MaintenanceQueue
+from sophia.maintenance.job_queue import MaintenanceQueue, PRIORITY_ORDER
 from sophia.maintenance.scheduler import MaintenanceScheduler
 
 REDIS_AVAILABLE = False
@@ -32,12 +32,14 @@ class TestMaintenanceSchedulerIntegration:
 
     def setup_method(self) -> None:
         self.redis = redis_lib.from_url("redis://localhost:6379/0")
-        # Clean up test keys before each test
-        self.redis.delete("sophia:maintenance:pending")
+        # Clean up all priority queue keys and failed key before each test
+        for key in PRIORITY_ORDER:
+            self.redis.delete(key)
         self.redis.delete("sophia:maintenance:failed")
 
     def teardown_method(self) -> None:
-        self.redis.delete("sophia:maintenance:pending")
+        for key in PRIORITY_ORDER:
+            self.redis.delete(key)
         self.redis.delete("sophia:maintenance:failed")
         self.redis.close()
 
@@ -170,9 +172,11 @@ class TestMaintenanceSchedulerIntegration:
         queue = MaintenanceQueue(self.redis)
         event_bus = self._make_mock_event_bus()
         results: list[dict] = []
+        job_processed = asyncio.Event()
 
         def mock_handler(**kwargs: object) -> None:
             results.append(kwargs)
+            job_processed.set()
 
         config = MaintenanceConfig(
             periodic_enabled=False,
@@ -194,7 +198,13 @@ class TestMaintenanceSchedulerIntegration:
         scheduler._running = True
         scheduler._semaphore = asyncio.Semaphore(2)
         task = asyncio.create_task(scheduler._dispatch_loop())
-        await asyncio.sleep(2)
+
+        # Wait for the job to be processed (with timeout fallback)
+        try:
+            await asyncio.wait_for(job_processed.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+
         scheduler._running = False
         task.cancel()
         try:
@@ -210,6 +220,14 @@ class TestMaintenanceSchedulerIntegration:
         """Dispatch loop skips jobs with no registered handler."""
         queue = MaintenanceQueue(self.redis)
         event_bus = self._make_mock_event_bus()
+        job_seen = asyncio.Event()
+
+        # Patch _dispatch_job to signal when a job has been seen
+        original_dispatch = MaintenanceScheduler._dispatch_job
+
+        async def signaling_dispatch(self_inner, job):  # type: ignore[no-untyped-def]
+            await original_dispatch(self_inner, job)
+            job_seen.set()
 
         config = MaintenanceConfig(
             periodic_enabled=False,
@@ -224,12 +242,21 @@ class TestMaintenanceSchedulerIntegration:
             handlers={},  # No handlers registered
         )
 
+        # Monkey-patch to detect when the job is dispatched
+        scheduler._dispatch_job = lambda job: signaling_dispatch(scheduler, job)  # type: ignore[assignment]
+
         queue.enqueue("unknown_job", params={"x": 1})
 
         scheduler._running = True
         scheduler._semaphore = asyncio.Semaphore(2)
         task = asyncio.create_task(scheduler._dispatch_loop())
-        await asyncio.sleep(2)
+
+        # Wait for the job to be seen (with timeout fallback)
+        try:
+            await asyncio.wait_for(job_seen.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+
         scheduler._running = False
         task.cancel()
         try:
@@ -260,3 +287,29 @@ class TestMaintenanceSchedulerIntegration:
         # (MAX_RETRIES - 1 requeues went to pending, last one went to failed)
         pending_count = queue.pending_count()
         assert pending_count == MaintenanceQueue.MAX_RETRIES - 1
+
+    def test_priority_ordering(self) -> None:
+        """Jobs are dequeued in priority order: high, normal, low."""
+        queue = MaintenanceQueue(self.redis)
+
+        # Enqueue in reverse priority order
+        queue.enqueue("low_job", priority="low", params={"p": "low"})
+        queue.enqueue("normal_job", priority="normal", params={"p": "normal"})
+        queue.enqueue("high_job", priority="high", params={"p": "high"})
+
+        assert queue.pending_count() == 3
+
+        # Dequeue should return high first, then normal, then low
+        job1 = queue.dequeue(timeout=1)
+        assert job1 is not None
+        assert job1.priority == "high"
+
+        job2 = queue.dequeue(timeout=1)
+        assert job2 is not None
+        assert job2.priority == "normal"
+
+        job3 = queue.dequeue(timeout=1)
+        assert job3 is not None
+        assert job3.priority == "low"
+
+        assert queue.pending_count() == 0

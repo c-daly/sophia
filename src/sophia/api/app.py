@@ -506,7 +506,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Stop Maintenance Scheduler
     if _maintenance_scheduler is not None:
-        _maintenance_scheduler.stop()
+        await _maintenance_scheduler.stop()
     if _maintenance_task is not None:
         _maintenance_task.cancel()
         try:

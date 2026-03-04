@@ -4,10 +4,23 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any
 from datetime import datetime, timezone
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+PRIORITY_KEYS = {
+    "high": "sophia:maintenance:queue:high",
+    "normal": "sophia:maintenance:queue:normal",
+    "low": "sophia:maintenance:queue:low",
+}
+
+# Ordered from highest to lowest priority for brpop
+PRIORITY_ORDER = [
+    PRIORITY_KEYS["high"],
+    PRIORITY_KEYS["normal"],
+    PRIORITY_KEYS["low"],
+]
 
 
 @dataclass
@@ -25,11 +38,13 @@ class MaintenanceJob:
 class MaintenanceQueue:
     """Redis-backed queue for maintenance jobs.
 
-    Follows the same pattern as FeedbackQueue: lpush to enqueue,
-    brpop to dequeue, with retry logic and a failed queue.
+    Uses separate Redis lists per priority level. brpop across the lists
+    in priority order ensures high-priority jobs are dequeued first.
     """
 
-    QUEUE_KEY = "sophia:maintenance:pending"
+    QUEUE_KEY_HIGH = PRIORITY_KEYS["high"]
+    QUEUE_KEY_NORMAL = PRIORITY_KEYS["normal"]
+    QUEUE_KEY_LOW = PRIORITY_KEYS["low"]
     FAILED_KEY = "sophia:maintenance:failed"
     MAX_RETRIES = 3
 
@@ -40,6 +55,17 @@ class MaintenanceQueue:
             redis_client: Redis client instance.
         """
         self.redis = redis_client
+
+    def _key_for_priority(self, priority: str) -> str:
+        """Return the Redis list key for the given priority.
+
+        Args:
+            priority: Job priority ("low", "normal", "high").
+
+        Returns:
+            Redis key string.
+        """
+        return PRIORITY_KEYS.get(priority, PRIORITY_KEYS["normal"])
 
     def enqueue(
         self,
@@ -66,12 +92,22 @@ class MaintenanceQueue:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "attempts": 0,
         }
-        self.redis.lpush(self.QUEUE_KEY, json.dumps(job_data))
-        logger.info("Enqueued maintenance job %s (type=%s)", job_id, job_type)
+        key = self._key_for_priority(priority)
+        self.redis.lpush(key, json.dumps(job_data))
+        logger.info(
+            "Enqueued maintenance job %s (type=%s, priority=%s)",
+            job_id,
+            job_type,
+            priority,
+        )
         return job_id
 
     def dequeue(self, timeout: int = 1) -> MaintenanceJob | None:
-        """Block-pop the next job from the queue.
+        """Block-pop the next job from the queue, respecting priority order.
+
+        High-priority jobs are dequeued before normal, which are dequeued
+        before low. This is achieved by passing the keys to brpop in order;
+        brpop returns from the first non-empty list.
 
         Args:
             timeout: Seconds to wait for a job.
@@ -79,7 +115,7 @@ class MaintenanceQueue:
         Returns:
             MaintenanceJob or None on timeout.
         """
-        result = self.redis.brpop(self.QUEUE_KEY, timeout=timeout)
+        result = self.redis.brpop(PRIORITY_ORDER, timeout=timeout)
         if result:
             data: dict = json.loads(result[1])
             return MaintenanceJob(**data)
@@ -89,7 +125,7 @@ class MaintenanceQueue:
         """Put a job back on the queue with incremented attempt count.
 
         If the job has reached MAX_RETRIES, it is moved to the failed queue
-        instead.
+        instead. The job is re-enqueued to its original priority key.
 
         Args:
             job: The job to requeue.
@@ -98,7 +134,8 @@ class MaintenanceQueue:
         if job.attempts >= self.MAX_RETRIES:
             self.move_to_failed(job)
             return
-        self.redis.lpush(self.QUEUE_KEY, json.dumps(asdict(job)))
+        key = self._key_for_priority(job.priority)
+        self.redis.lpush(key, json.dumps(asdict(job)))
         logger.info("Requeued job %s (attempt %d)", job.id, job.attempts)
 
     def move_to_failed(self, job: MaintenanceJob) -> None:
@@ -115,6 +152,8 @@ class MaintenanceQueue:
         )
 
     def pending_count(self) -> int:
-        """Get number of jobs waiting in the queue."""
-        count: int = self.redis.llen(self.QUEUE_KEY)
-        return count
+        """Get number of jobs waiting across all priority queues."""
+        total = 0
+        for key in PRIORITY_ORDER:
+            total += self.redis.llen(key)
+        return total
