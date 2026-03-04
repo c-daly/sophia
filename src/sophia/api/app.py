@@ -246,6 +246,8 @@ _proposal_worker: Optional[Any] = None
 _proposal_worker_task: Optional[Any] = None
 _maintenance_scheduler: Optional[MaintenanceScheduler] = None
 _maintenance_task: Optional[Any] = None
+_maint_redis: Optional[Any] = None
+_maint_event_bus: Optional[Any] = None
 
 
 @asynccontextmanager
@@ -255,7 +257,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
     global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
     global _proposal_processor, _proposal_worker, _proposal_worker_task
-    global _maintenance_scheduler, _maintenance_task
+    global _maintenance_scheduler, _maintenance_task, _maint_redis, _maint_event_bus
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -512,6 +514,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except asyncio.CancelledError:
             pass
         logger.info("Maintenance scheduler stopped")
+    if _maint_event_bus is not None:
+        _maint_event_bus.close()
+    if _maint_redis is not None:
+        _maint_redis.close()
 
     if _hcg_client:
         _hcg_client.close()

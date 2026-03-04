@@ -31,5 +31,5 @@ class MaintenanceConfig(BaseSettings):
         default=100, description="Member count to trigger ontology evolution"
     )
     max_concurrent_jobs: int = Field(
-        default=2, description="Max simultaneous maintenance jobs"
+        default=2, ge=1, description="Max simultaneous maintenance jobs"
     )

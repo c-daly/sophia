@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 from typing import Any, Callable
@@ -125,6 +126,8 @@ class MaintenanceScheduler:
                 priority="high",
                 params=params,
             )
+        else:
+            logger.warning("threshold_crossed: no handler for job_type %s", job_type)
 
     def _check_thresholds(self, type_names: list[str]) -> None:
         """Check if any types cross the member count threshold.
@@ -196,10 +199,14 @@ class MaintenanceScheduler:
     async def _periodic_loop(self) -> None:
         """Periodically enqueue full scan jobs."""
         interval = self._config.periodic_interval_seconds
+        first_run = True
         while self._running:
-            await asyncio.sleep(interval)
-            if not self._running:
-                break
+            if first_run:
+                first_run = False
+            else:
+                await asyncio.sleep(interval)
+                if not self._running:
+                    break
             logger.info("Periodic maintenance scan triggered")
             if "type_emergence" in self._handlers:
                 self._queue.enqueue(
@@ -225,7 +232,10 @@ class MaintenanceScheduler:
 
         logger.info("Dispatching maintenance job %s: %s", job.id, job.job_type)
         try:
-            await asyncio.to_thread(handler, **job.params)
+            if inspect.iscoroutinefunction(handler):
+                await handler(**job.params)
+            else:
+                await asyncio.to_thread(handler, **job.params)
             logger.info("Maintenance job %s completed", job.id)
         except Exception:
             logger.exception("Maintenance job %s failed", job.id)
