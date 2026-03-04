@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -210,27 +209,14 @@ class TestDispatch:
         self.mock_handler.assert_called_once_with(key="value")
 
     @pytest.mark.asyncio
-    async def test_dispatch_unknown_job_type_logs_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_dispatch_unknown_job_type_logs_warning(self) -> None:
         """_dispatch_job with unknown type should log a warning, not raise."""
         job = _make_job("unknown_type")
-        target_logger = logging.getLogger("sophia.maintenance.scheduler")
-        original_propagate = target_logger.propagate
-        target_logger.propagate = True
-        try:
-            with caplog.at_level(
-                logging.WARNING, logger="sophia.maintenance.scheduler"
-            ):
-                await self.scheduler._dispatch_job(job)
-            warning_messages = [
-                r.message for r in caplog.records if r.levelno >= logging.WARNING
-            ]
-            assert any(
-                "unknown_type" in m for m in warning_messages
-            ), f"Expected warning about unknown_type, got: {warning_messages}"
-        finally:
-            target_logger.propagate = original_propagate
+        with patch("sophia.maintenance.scheduler.logger") as mock_logger:
+            await self.scheduler._dispatch_job(job)
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args
+        assert "unknown_type" in str(call_args)
 
     @pytest.mark.asyncio
     async def test_dispatch_requeues_on_failure(self) -> None:
