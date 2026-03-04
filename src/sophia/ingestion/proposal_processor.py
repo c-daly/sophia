@@ -141,11 +141,7 @@ class ProposalProcessor:
             return
         try:
             # Query all type_definition nodes from the KG
-            records = self._hcg._execute_read(
-                "MATCH (n:Node {type: 'type_definition'}) "
-                "RETURN n.uuid AS uuid, n.name AS name, "
-                "n.properties AS properties"
-            )
+            records = self._hcg.get_all_type_definitions()
             snapshot: dict[str, dict[str, Any]] = {}
             for record in records:
                 name = record.get("name", "")
