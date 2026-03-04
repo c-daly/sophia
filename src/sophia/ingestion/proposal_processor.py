@@ -8,6 +8,7 @@ Sophia operates on embeddings, not text. Text properties exist on nodes
 for Hermes's benefit when context is returned.
 """
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal, Tuple
@@ -95,10 +96,68 @@ class ProposalProcessor:
         self,
         hcg_client: Any,
         milvus_sync: Any,
+        event_bus: Any | None = None,
+        redis_client: Any | None = None,
     ) -> None:
         self._hcg = hcg_client
         self._milvus = milvus_sync
         self._classifier = TypeClassifier(milvus=milvus_sync, hcg=hcg_client)
+        self._event_bus = event_bus
+        self._redis = redis_client
+        self._seen_type_uuids: set[str] = set()
+
+    def _publish_batch_event(
+        self,
+        stored_node_ids: list[str],
+        stored_edge_ids: list[str],
+        new_types: list[dict[str, str]],
+        updated_types: list[dict[str, str]],
+        affected_node_uuids: list[str],
+    ) -> None:
+        """Publish a batch event summarizing the proposal processing."""
+        if self._event_bus is None:
+            return
+        try:
+            self._event_bus.publish(
+                "logos:sophia:proposal_processed",
+                {
+                    "event_type": "proposal_processed",
+                    "source": "sophia",
+                    "payload": {
+                        "new_types": new_types,
+                        "updated_types": updated_types,
+                        "stored_node_ids": stored_node_ids,
+                        "stored_edge_ids": stored_edge_ids,
+                        "affected_node_uuids": affected_node_uuids,
+                    },
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish proposal_processed event")
+
+    def _write_type_snapshot(self) -> None:
+        """Write full type list to Redis for Hermes initial sync."""
+        if self._redis is None:
+            return
+        try:
+            records = self._hcg.get_all_type_definitions()
+            snapshot: dict[str, dict[str, Any]] = {}
+            for record in records:
+                name = record.get("name", "")
+                if not name:
+                    continue
+                props = record.get("properties")
+                if isinstance(props, dict):
+                    member_count = props.get("member_count", 0)
+                else:
+                    member_count = 0
+                snapshot[name] = {
+                    "uuid": record.get("uuid", ""),
+                    "member_count": member_count,
+                }
+            self._redis.set("logos:ontology:types", json.dumps(snapshot))
+        except Exception:
+            logger.exception("Failed to write type snapshot to Redis")
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
@@ -106,6 +165,10 @@ class ProposalProcessor:
         relevant_context: list[dict] = []
         # Track entity name -> node uuid for edge resolution.
         name_to_uuid: dict[str, str] = {}
+        # Track types and affected nodes for batch event.
+        new_types: list[dict[str, str]] = []
+        updated_types: list[dict[str, str]] = []
+        affected_node_uuids: list[str] = []
         pending_embeddings: dict[str, list[dict]] = {}
 
         with tracer.start_as_current_span(
@@ -260,6 +323,7 @@ class ProposalProcessor:
                         )
                         stored_ids.append(node_uuid)
                         name_to_uuid[name] = node_uuid
+                        affected_node_uuids.append(node_uuid)
                     except Exception as e:
                         logger.error(f"Failed to create node '{name}': {e}")
                         continue
@@ -267,6 +331,8 @@ class ProposalProcessor:
                     # 2c. Connect to type definition via IS_A edge.
                     # Ensure the type-definition node exists (MERGE is idempotent).
                     type_def_uuid = f"type_{node_type}"
+                    _is_new_type = type_def_uuid not in self._seen_type_uuids
+                    self._seen_type_uuids.add(type_def_uuid)
                     try:
                         self._hcg.add_node(
                             uuid=type_def_uuid,
@@ -286,6 +352,17 @@ class ProposalProcessor:
                             node_type,
                             e,
                         )
+
+                    # Track type as new or updated for the batch event.
+                    type_entry = {"uuid": type_def_uuid, "name": node_type}
+                    if _is_new_type and not any(
+                        t["uuid"] == type_def_uuid for t in new_types
+                    ):
+                        new_types.append(type_entry)
+                    elif not _is_new_type and not any(
+                        t["uuid"] == type_def_uuid for t in updated_types
+                    ):
+                        updated_types.append(type_entry)
 
                     # 2d. Collect embedding for batch upsert
                     if embedding:
@@ -444,6 +521,21 @@ class ProposalProcessor:
                             collection_type,
                             e,
                         )
+
+            # Write type snapshot BEFORE publishing event so subscribers
+            # see up-to-date data when they react to the event.
+            if new_types or updated_types:
+                self._write_type_snapshot()
+
+            # Publish batch event summarising what changed.
+            if stored_ids or stored_edge_ids or new_types or updated_types:
+                self._publish_batch_event(
+                    stored_node_ids=stored_ids,
+                    stored_edge_ids=stored_edge_ids,
+                    new_types=new_types,
+                    updated_types=updated_types,
+                    affected_node_uuids=affected_node_uuids,
+                )
 
             return {
                 "stored_node_ids": stored_ids,

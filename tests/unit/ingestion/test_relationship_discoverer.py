@@ -6,7 +6,6 @@ from sophia.ingestion.relationship_discoverer import RelationshipDiscoverer
 
 
 class TestRelationshipDiscoverer:
-
     def test_find_cross_cluster_candidates(self):
         """Nodes close to a node but in different type clusters are candidates."""
         mock_milvus = MagicMock()

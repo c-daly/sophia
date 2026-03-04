@@ -6,7 +6,6 @@ from sophia.ingestion.proposal_processor import ProposalProcessor
 
 
 class TestCentroidMemberCount:
-
     def _make_processor(self, mock_hcg, mock_milvus):
         """Build a ProposalProcessor with mocked dependencies."""
         with patch.object(ProposalProcessor, "__init__", lambda self: None):
