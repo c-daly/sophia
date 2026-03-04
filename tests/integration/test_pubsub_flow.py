@@ -16,12 +16,20 @@ from logos_config import RedisConfig
 from logos_events import EventBus
 
 REDIS_AVAILABLE = False
+_probe = None
 try:
-    r = redis.from_url("redis://localhost:6379/0")
-    r.ping()
+    _probe_config = RedisConfig()
+    _probe = redis.from_url(_probe_config.url)
+    _probe.ping()
     REDIS_AVAILABLE = True
 except Exception:
     pass
+finally:
+    if _probe is not None:
+        try:
+            _probe.close()
+        except Exception:
+            pass
 
 pytestmark = pytest.mark.skipif(not REDIS_AVAILABLE, reason="Redis not available")
 
@@ -33,15 +41,18 @@ class TestPubSubFlow:
         """Published proposal_processed event is received by subscriber."""
         config = RedisConfig()
         received: list[dict] = []
+        received_event = threading.Event()
+
+        def on_event(e: dict) -> None:
+            received.append(e)
+            received_event.set()
 
         # Subscriber
         sub_bus = EventBus(config)
-        sub_bus.subscribe(
-            "logos:sophia:proposal_processed", lambda e: received.append(e)
-        )
+        sub_bus.subscribe("logos:sophia:proposal_processed", on_event)
         listener = threading.Thread(target=sub_bus.listen, daemon=True)
         listener.start()
-        time.sleep(0.2)
+        time.sleep(0.2)  # allow subscription to register
 
         # Publisher
         pub_bus = EventBus(config)
@@ -61,8 +72,9 @@ class TestPubSubFlow:
         )
         pub_bus.close()
 
-        time.sleep(0.3)
+        assert received_event.wait(timeout=2.0), "Subscriber did not receive event"
         sub_bus.stop()
+        sub_bus.close()
 
         assert len(received) == 1
         assert received[0]["event_type"] == "proposal_processed"

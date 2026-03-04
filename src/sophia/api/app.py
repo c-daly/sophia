@@ -403,7 +403,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
                 _redis_config = RedisConfig()
                 _event_bus = EventBus(_redis_config)
-                _redis_direct = redis.from_url(_redis_config.url)
+                try:
+                    _redis_direct = redis.from_url(_redis_config.url)
+                except Exception:
+                    _event_bus.close()
+                    raise
                 logger.info("EventBus initialized for pub/sub")
             except Exception as e:
                 logger.warning(f"EventBus unavailable: {e}")

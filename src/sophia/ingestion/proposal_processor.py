@@ -532,7 +532,8 @@ class ProposalProcessor:
             )
 
             # Write full type snapshot to Redis for Hermes initial sync.
-            self._write_type_snapshot()
+            if new_types or updated_types:
+                self._write_type_snapshot()
 
             return {
                 "stored_node_ids": stored_ids,
