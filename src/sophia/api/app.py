@@ -461,9 +461,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         _maintenance_config = MaintenanceConfig()
         if _maintenance_config.enabled:
-            from logos_config import RedisConfig
-            from logos_events import EventBus
-
             import redis
 
             _maint_redis_config = RedisConfig()
