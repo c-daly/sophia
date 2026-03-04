@@ -52,6 +52,7 @@ class MaintenanceScheduler:
         self._running = False
         self._semaphore: asyncio.Semaphore | None = None
         self._listener_thread: threading.Thread | None = None
+        self._job_tasks: set[asyncio.Task] = set()
 
         if config.enabled:
             self._setup_subscriptions()
@@ -166,13 +167,19 @@ class MaintenanceScheduler:
         await asyncio.gather(*tasks)
 
     async def stop(self) -> None:
-        """Signal the scheduler to stop."""
+        """Signal the scheduler to stop and drain in-flight jobs."""
         self._running = False
         if self._event_bus is not None:
             self._event_bus.stop()
         if self._listener_thread is not None:
             await asyncio.to_thread(self._listener_thread.join, 5)
-        logger.info("Maintenance scheduler stopping")
+        # Drain in-flight job tasks before closing Redis
+        if self._job_tasks:
+            logger.info(
+                "Waiting for %d in-flight jobs to complete", len(self._job_tasks)
+            )
+            await asyncio.gather(*self._job_tasks, return_exceptions=True)
+        logger.info("Maintenance scheduler stopped")
 
     async def _dispatch_loop(self) -> None:
         """Continuously dequeue and dispatch jobs."""
@@ -182,7 +189,9 @@ class MaintenanceScheduler:
                 if job is None:
                     continue
                 assert self._semaphore is not None
-                asyncio.create_task(self._run_job_with_semaphore(job))
+                task = asyncio.create_task(self._run_job_with_semaphore(job))
+                self._job_tasks.add(task)
+                task.add_done_callback(self._job_tasks.discard)
             except Exception:
                 if self._running:
                     logger.exception("Error in dispatch loop")
@@ -205,13 +214,18 @@ class MaintenanceScheduler:
                 await asyncio.sleep(interval)
                 if not self._running:
                     break
-            logger.info("Periodic maintenance scan triggered")
-            if "type_emergence" in self._handlers:
-                self._queue.enqueue(
-                    job_type="type_emergence",
-                    priority="low",
-                    params={"scan": "full"},
-                )
+            try:
+                logger.info("Periodic maintenance scan triggered")
+                if "type_emergence" in self._handlers:
+                    self._queue.enqueue(
+                        job_type="type_emergence",
+                        priority="low",
+                        params={"scan": "full"},
+                    )
+            except Exception:
+                if self._running:
+                    logger.exception("Error in periodic loop")
+                    await asyncio.sleep(1)
 
     async def _dispatch_job(self, job: MaintenanceJob) -> None:
         """Dispatch a single job to the appropriate handler.
