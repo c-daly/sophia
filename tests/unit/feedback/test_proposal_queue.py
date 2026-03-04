@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from logos_config import RedisConfig
 from sophia.feedback.proposal_queue import ProposalQueue
 from sophia.feedback.proposal_worker import ProposalWorker
 
@@ -22,7 +23,7 @@ class TestProposalQueue:
         """Create a ProposalQueue with mocked Redis."""
         with patch("sophia.feedback.proposal_queue.redis") as mock_redis_mod:
             mock_redis_mod.from_url.return_value = mock_redis
-            q = ProposalQueue("redis://localhost:6379/0")
+            q = ProposalQueue(RedisConfig())
         return q
 
     def test_enqueue_dequeue(self, queue: ProposalQueue, mock_redis: MagicMock) -> None:

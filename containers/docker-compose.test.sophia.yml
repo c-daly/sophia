@@ -25,6 +25,8 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-logosdev}
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       # Sophia-specific config
       - SOPHIA_API_TOKEN=test-token-for-sophia
       - SEED_PICK_AND_PLACE_DATA=true
@@ -34,6 +36,8 @@ services:
       neo4j:
         condition: service_healthy
       milvus:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - sophia_test_media_storage:/app/media_storage
