@@ -140,7 +140,6 @@ class ProposalProcessor:
         if self._redis is None:
             return
         try:
-            # Query all type_definition nodes from the KG
             records = self._hcg.get_all_type_definitions()
             snapshot: dict[str, dict[str, Any]] = {}
             for record in records:
@@ -523,6 +522,11 @@ class ProposalProcessor:
                             e,
                         )
 
+            # Write type snapshot BEFORE publishing event so subscribers
+            # see up-to-date data when they react to the event.
+            if new_types or updated_types:
+                self._write_type_snapshot()
+
             # Publish batch event summarising what changed.
             if stored_ids or stored_edge_ids or new_types or updated_types:
                 self._publish_batch_event(
@@ -532,10 +536,6 @@ class ProposalProcessor:
                     updated_types=updated_types,
                     affected_node_uuids=affected_node_uuids,
                 )
-
-            # Write full type snapshot to Redis for Hermes initial sync.
-            if new_types or updated_types:
-                self._write_type_snapshot()
 
             return {
                 "stored_node_ids": stored_ids,

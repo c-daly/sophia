@@ -475,11 +475,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Feedback worker stopped")
 
     if _event_bus is not None:
-        _event_bus.close()
-        logger.info("EventBus closed")
+        try:
+            _event_bus.close()
+            logger.info("EventBus closed")
+        except Exception:
+            logger.exception("Error closing EventBus")
     if _redis_direct is not None:
-        _redis_direct.close()
-        logger.info("Redis direct connection closed")
+        try:
+            _redis_direct.close()
+            logger.info("Redis direct connection closed")
+        except Exception:
+            logger.exception("Error closing Redis direct connection")
 
     if _hcg_client:
         _hcg_client.close()

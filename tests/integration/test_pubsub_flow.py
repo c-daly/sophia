@@ -1,6 +1,6 @@
 """Integration test: sophia publishes events that hermes can subscribe to.
 
-Requires: Redis running on localhost:6379
+Requires: Redis (uses RedisConfig for connection details).
 """
 
 from __future__ import annotations
