@@ -92,8 +92,9 @@ class MaintenanceScheduler:
                 params={"node_uuids": affected_nodes},
             )
 
-        if updated_types and "type_emergence" in self._handlers:
-            for type_name in updated_types:
+        all_types = new_types + updated_types
+        if all_types and "type_emergence" in self._handlers:
+            for type_name in all_types:
                 self._queue.enqueue(
                     job_type="type_emergence",
                     priority="normal",
@@ -133,7 +134,7 @@ class MaintenanceScheduler:
         """
         if self._hcg is None:
             return
-        threshold = self._config.type_member_count_threshold
+        _threshold = self._config.type_member_count_threshold  # noqa: F841
         for type_name in type_names:
             try:
                 # Placeholder: look up type node to check member count
@@ -173,6 +174,8 @@ class MaintenanceScheduler:
         self._running = False
         if self._event_bus is not None:
             self._event_bus.stop()
+        if self._listener_thread is not None:
+            self._listener_thread.join(timeout=5)
         logger.info("Maintenance scheduler stopping")
 
     async def _dispatch_loop(self) -> None:
