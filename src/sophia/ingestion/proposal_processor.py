@@ -110,8 +110,8 @@ class ProposalProcessor:
         self,
         stored_node_ids: list[str],
         stored_edge_ids: list[str],
-        new_type_uuids: list[str],
-        updated_type_uuids: list[str],
+        new_types: list[dict[str, str]],
+        updated_types: list[dict[str, str]],
         affected_node_uuids: list[str],
     ) -> None:
         """Publish a batch event summarizing the proposal processing."""
@@ -124,8 +124,8 @@ class ProposalProcessor:
                     "event_type": "proposal_processed",
                     "source": "sophia",
                     "payload": {
-                        "new_type_uuids": new_type_uuids,
-                        "updated_type_uuids": updated_type_uuids,
+                        "new_types": new_types,
+                        "updated_types": updated_types,
                         "stored_node_ids": stored_node_ids,
                         "stored_edge_ids": stored_edge_ids,
                         "affected_node_uuids": affected_node_uuids,
@@ -167,8 +167,8 @@ class ProposalProcessor:
         # Track entity name -> node uuid for edge resolution.
         name_to_uuid: dict[str, str] = {}
         # Track types and affected nodes for batch event.
-        new_type_uuids: list[str] = []
-        updated_type_uuids: list[str] = []
+        new_types: list[dict[str, str]] = []
+        updated_types: list[dict[str, str]] = []
         affected_node_uuids: list[str] = []
         pending_embeddings: dict[str, list[dict]] = {}
 
@@ -355,10 +355,15 @@ class ProposalProcessor:
                         )
 
                     # Track type as new or updated for the batch event.
-                    if _is_new_type and type_def_uuid not in new_type_uuids:
-                        new_type_uuids.append(type_def_uuid)
-                    elif not _is_new_type and type_def_uuid not in updated_type_uuids:
-                        updated_type_uuids.append(type_def_uuid)
+                    type_entry = {"uuid": type_def_uuid, "name": node_type}
+                    if _is_new_type and not any(
+                        t["uuid"] == type_def_uuid for t in new_types
+                    ):
+                        new_types.append(type_entry)
+                    elif not _is_new_type and not any(
+                        t["uuid"] == type_def_uuid for t in updated_types
+                    ):
+                        updated_types.append(type_entry)
 
                     # 2d. Collect embedding for batch upsert
                     if embedding:
@@ -519,17 +524,17 @@ class ProposalProcessor:
                         )
 
             # Publish batch event summarising what changed.
-            if stored_ids or stored_edge_ids or new_type_uuids or updated_type_uuids:
+            if stored_ids or stored_edge_ids or new_types or updated_types:
                 self._publish_batch_event(
                     stored_node_ids=stored_ids,
                     stored_edge_ids=stored_edge_ids,
-                    new_type_uuids=new_type_uuids,
-                    updated_type_uuids=updated_type_uuids,
+                    new_types=new_types,
+                    updated_types=updated_types,
                     affected_node_uuids=affected_node_uuids,
                 )
 
             # Write full type snapshot to Redis for Hermes initial sync.
-            if new_type_uuids or updated_type_uuids:
+            if new_types or updated_types:
                 self._write_type_snapshot()
 
             return {
