@@ -1124,3 +1124,24 @@ class TestBatchEmbeddings:
         # No matches -> get_nodes_batch should not be called
         mock_hcg.get_nodes_batch.assert_not_called()
         assert result["relevant_context"] == []
+
+
+class TestProposalProcessorEventBus:
+    def test_proposal_processor_accepts_event_bus(self):
+        """ProposalProcessor accepts optional event_bus parameter."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_event_bus = MagicMock()
+        processor = ProposalProcessor(mock_hcg, mock_milvus, event_bus=mock_event_bus)
+        assert processor._event_bus is mock_event_bus
+
+    def test_proposal_processor_event_bus_defaults_to_none(self):
+        """ProposalProcessor works without event_bus."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        processor = ProposalProcessor(mock_hcg, mock_milvus)
+        assert processor._event_bus is None

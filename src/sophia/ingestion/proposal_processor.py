@@ -95,10 +95,14 @@ class ProposalProcessor:
         self,
         hcg_client: Any,
         milvus_sync: Any,
+        event_bus: Any | None = None,
+        redis_client: Any | None = None,
     ) -> None:
         self._hcg = hcg_client
         self._milvus = milvus_sync
         self._classifier = TypeClassifier(milvus=milvus_sync, hcg=hcg_client)
+        self._event_bus = event_bus
+        self._redis = redis_client
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
