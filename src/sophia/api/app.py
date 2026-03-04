@@ -36,6 +36,10 @@ from logos_test_utils import setup_logging
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from sophia.maintenance.config import MaintenanceConfig
+from sophia.maintenance.job_queue import MaintenanceQueue
+from sophia.maintenance.scheduler import MaintenanceScheduler
+
 from sophia.api.models import (
     PlanRequest,
     PlanResponse,
@@ -241,6 +245,10 @@ _feedback_worker_task: Optional[Any] = None
 _proposal_processor: Optional[ProposalProcessor] = None
 _proposal_worker: Optional[Any] = None
 _proposal_worker_task: Optional[Any] = None
+_maintenance_scheduler: Optional[MaintenanceScheduler] = None
+_maintenance_task: Optional[Any] = None
+_maint_redis: Optional[Any] = None
+_maint_event_bus: Optional[Any] = None
 _event_bus: Optional[Any] = None
 _redis_direct: Optional[Any] = None
 
@@ -252,6 +260,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
     global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
     global _proposal_processor, _proposal_worker, _proposal_worker_task
+    global _maintenance_scheduler, _maintenance_task, _maint_redis, _maint_event_bus
     global _event_bus, _redis_direct
 
     # Startup
@@ -385,6 +394,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     # Initialize ProposalProcessor (requires HCG client + Milvus)
+    _milvus_sync = None
     if _hcg_client:
         try:
             from logos_hcg.sync import HCGMilvusSync
@@ -445,6 +455,106 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             logger.warning(f"Proposal worker unavailable: {e}")
 
+    # Initialize Maintenance Scheduler
+    _maintenance_scheduler = None
+    _maintenance_task = None
+    try:
+        _maintenance_config = MaintenanceConfig()
+        if _maintenance_config.enabled:
+            import redis
+
+            _maint_redis_config = RedisConfig()
+            _maint_event_bus = EventBus(_maint_redis_config)
+            _maint_redis = redis.from_url(_maint_redis_config.url)
+            _maint_queue = MaintenanceQueue(_maint_redis)
+
+            # Register available handlers — adapters bridge scheduler params
+            # to the signatures expected by the underlying detectors.
+            from sophia.ingestion.type_emergence import TypeEmergenceDetector
+            from sophia.ingestion.relationship_discoverer import RelationshipDiscoverer
+
+            _handlers: dict = {}
+            if _milvus_sync and _hcg_client:
+                _type_emergence = TypeEmergenceDetector(
+                    milvus=_milvus_sync, hcg=_hcg_client
+                )
+                _relationship_discoverer = RelationshipDiscoverer(
+                    milvus=_milvus_sync, hcg=_hcg_client
+                )
+
+                def _handle_type_emergence(
+                    type_uuid: str = "", scan: str = "", **kwargs: object
+                ) -> None:
+                    """Adapter: scheduler params -> TypeEmergenceDetector.check_type.
+
+                    The scheduler enqueues jobs with ``type_uuid`` (from event
+                    payloads) or ``scan='full'`` (periodic). The underlying
+                    ``check_type`` accepts a type UUID directly.
+                    """
+                    assert _hcg_client is not None  # guarded by outer if
+                    if scan == "full":
+                        # Full scan: check all type definitions
+                        try:
+                            all_types = _hcg_client.get_all_type_definitions()
+                            for td in all_types:
+                                uuid = td.get("uuid", "")
+                                if uuid:
+                                    _type_emergence.check_type(uuid)
+                        except Exception:
+                            logger.exception("Full type emergence scan failed")
+                        return
+                    if not type_uuid:
+                        logger.warning("type_emergence job missing type_uuid param")
+                        return
+                    try:
+                        _type_emergence.check_type(type_uuid)
+                    except Exception:
+                        logger.exception("type_emergence failed for %r", type_uuid)
+
+                def _handle_relationship_discovery(
+                    node_uuids: list | None = None, **kwargs: object
+                ) -> None:
+                    """Adapter: scheduler params -> RelationshipDiscoverer.find_candidates.
+
+                    The underlying ``find_candidates`` requires per-node embedding
+                    and type info. Embedding lookup infrastructure (e.g.
+                    ``HCGMilvusSync.get_node_embedding``) does not exist yet, so
+                    this adapter logs and skips until that API is available.
+                    """
+                    if not node_uuids:
+                        logger.warning("relationship_discovery job missing node_uuids")
+                        return
+                    # TODO: Implement when HCGMilvusSync exposes a
+                    # get_node_embedding(uuid) -> {embedding, node_type} method.
+                    logger.info(
+                        "relationship_discovery: skipping %d node(s) — "
+                        "per-node embedding lookup not yet available",
+                        len(node_uuids),
+                    )
+
+                _handlers = {
+                    "type_emergence": _handle_type_emergence,
+                    "relationship_discovery": _handle_relationship_discovery,
+                }
+
+            if not _handlers:
+                logger.warning(
+                    "Maintenance scheduler started with no handlers "
+                    "(Milvus/HCG unavailable?); all jobs will be skipped"
+                )
+
+            _maintenance_scheduler = MaintenanceScheduler(
+                queue=_maint_queue,
+                event_bus=_maint_event_bus,
+                config=_maintenance_config,
+                handlers=_handlers,
+                hcg_client=_hcg_client,
+            )
+            _maintenance_task = asyncio.create_task(_maintenance_scheduler.start())
+            logger.info("Maintenance scheduler started")
+    except Exception:
+        logger.exception("Failed to start maintenance scheduler")
+
     logger.info("Sophia API service started successfully")
 
     yield
@@ -474,6 +584,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pass
         logger.info("Feedback worker stopped")
 
+    # Stop Maintenance Scheduler
+    if _maintenance_scheduler is not None:
+        await _maintenance_scheduler.stop()
+    if _maintenance_task is not None:
+        _maintenance_task.cancel()
+        try:
+            await _maintenance_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Maintenance scheduler stopped")
+    if _maint_event_bus is not None:
+        # safe after scheduler.stop() — stop() halts the listen loop,
+        # close() releases the underlying Redis connection.
+        _maint_event_bus.close()
+    if _maint_redis is not None:
+        _maint_redis.close()
     if _event_bus is not None:
         try:
             _event_bus.close()
