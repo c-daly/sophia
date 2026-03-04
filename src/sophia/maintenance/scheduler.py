@@ -80,60 +80,70 @@ class MaintenanceScheduler:
         type_emergence for updated types.
 
         Note: Called from the EventBus listener thread. Must remain synchronous.
+        Exceptions are caught to prevent killing the listener thread.
 
         Args:
             event: Event payload with affected_node_uuids and type UUIDs.
         """
-        payload = event.get("payload", {})
-        affected_nodes = payload.get("affected_node_uuids", [])
-        new_types = payload.get("new_types", [])
-        updated_types = payload.get("updated_types", [])
+        try:
+            payload = event.get("payload", {})
+            affected_nodes = payload.get("affected_node_uuids", [])
+            new_types = payload.get("new_types", [])
+            updated_types = payload.get("updated_types", [])
 
-        if affected_nodes and "relationship_discovery" in self._handlers:
-            self._queue.enqueue(
-                job_type="relationship_discovery",
-                priority="normal",
-                params={"node_uuids": affected_nodes},
-            )
-
-        all_types = new_types + updated_types
-        if all_types and "type_emergence" in self._handlers:
-            for type_entry in all_types:
+            if affected_nodes and "relationship_discovery" in self._handlers:
                 self._queue.enqueue(
-                    job_type="type_emergence",
+                    job_type="relationship_discovery",
                     priority="normal",
-                    params={"type_uuid": type_entry["uuid"]},
+                    params={"node_uuids": affected_nodes},
                 )
 
-        # Threshold check for new/updated types
-        all_type_uuids = [t["uuid"] for t in new_types + updated_types]
-        if self._config.threshold_enabled and all_type_uuids:
-            self._check_thresholds(all_type_uuids)
+            all_types = new_types + updated_types
+            if all_types and "type_emergence" in self._handlers:
+                for type_entry in all_types:
+                    self._queue.enqueue(
+                        job_type="type_emergence",
+                        priority="normal",
+                        params={"type_uuid": type_entry["uuid"]},
+                    )
+
+            # Threshold check for new/updated types
+            all_type_uuids = [t["uuid"] for t in new_types + updated_types]
+            if self._config.threshold_enabled and all_type_uuids:
+                self._check_thresholds(all_type_uuids)
+        except Exception:
+            logger.exception("Error handling proposal_processed event")
 
     def _on_threshold_crossed(self, event: dict) -> None:
         """Handle threshold_crossed events by enqueuing the specified job.
 
         Note: Called from the EventBus listener thread. Must remain synchronous.
+        Exceptions are caught to prevent killing the listener thread.
 
         Args:
             event: Event payload with job_type and optional params.
         """
-        payload = event.get("payload", {})
-        job_type = payload.get("job_type", "")
-        params = payload.get("params", {})
+        try:
+            payload = event.get("payload", {})
+            job_type = payload.get("job_type", "")
+            params = payload.get("params", {})
 
-        if not job_type:
-            logger.warning("threshold_crossed event missing job_type: %s", event)
-            return
+            if not job_type:
+                logger.warning("threshold_crossed event missing job_type: %s", event)
+                return
 
-        if job_type in self._handlers:
-            self._queue.enqueue(
-                job_type=job_type,
-                priority="high",
-                params=params,
-            )
-        else:
-            logger.warning("threshold_crossed: no handler for job_type %s", job_type)
+            if job_type in self._handlers:
+                self._queue.enqueue(
+                    job_type=job_type,
+                    priority="high",
+                    params=params,
+                )
+            else:
+                logger.warning(
+                    "threshold_crossed: no handler for job_type %s", job_type
+                )
+        except Exception:
+            logger.exception("Error handling threshold_crossed event")
 
     def _check_thresholds(self, type_uuids: list[str]) -> None:
         """Check if any types cross the member count threshold."""
@@ -201,6 +211,19 @@ class MaintenanceScheduler:
                 if self._running:
                     logger.exception("Error in dispatch loop")
                     await asyncio.sleep(1)
+        # Drain: process any remaining jobs after stop signal
+        while True:
+            try:
+                job = self._queue.dequeue(timeout=0)
+                if job is None:
+                    break
+                assert self._semaphore is not None
+                task = asyncio.create_task(self._run_job_with_semaphore(job))
+                self._job_tasks.add(task)
+                task.add_done_callback(self._job_tasks.discard)
+            except Exception:
+                logger.exception("Error draining dispatch queue")
+                break
 
     async def _run_job_with_semaphore(self, job: MaintenanceJob) -> None:
         """Run a job bounded by the concurrency semaphore."""
@@ -226,7 +249,9 @@ class MaintenanceScheduler:
                 # sweeps; it runs only via post-ingestion triggers on affected nodes.
                 if "type_emergence" in self._handlers and self._hcg is not None:
                     try:
-                        all_types = self._hcg.get_all_type_definitions()
+                        all_types = await asyncio.to_thread(
+                            self._hcg.get_all_type_definitions
+                        )
                     except Exception:
                         logger.exception("Failed to fetch types for periodic scan")
                         all_types = []
