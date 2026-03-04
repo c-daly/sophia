@@ -6,6 +6,8 @@ from datetime import datetime
 
 import redis
 
+from logos_config import RedisConfig
+
 from sophia.feedback.models import FeedbackPayload
 
 logger = logging.getLogger(__name__)
@@ -18,13 +20,13 @@ class FeedbackQueue:
     FAILED_KEY = "sophia:feedback:failed"
     MAX_RETRIES = 5
 
-    def __init__(self, redis_url: str):
+    def __init__(self, redis_config: RedisConfig):
         """Initialize queue with Redis connection.
 
         Args:
-            redis_url: Redis connection URL (e.g., redis://localhost:6379/0)
+            redis_config: Redis connection configuration
         """
-        self.redis = redis.from_url(redis_url)
+        self.redis = redis.from_url(redis_config.url)
 
     def enqueue(self, payload: FeedbackPayload) -> str:
         """Add feedback to queue.

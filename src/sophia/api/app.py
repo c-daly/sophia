@@ -274,7 +274,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             from redis.exceptions import ConnectionError as RedisConnectionError
 
-            feedback_queue = FeedbackQueue(feedback_config.redis_url)
+            feedback_queue = FeedbackQueue(feedback_config.redis)
             # Test connection
             feedback_queue.pending_count()
             _feedback_dispatcher = FeedbackDispatcher(feedback_queue, enabled=True)
@@ -411,7 +411,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from sophia.feedback.proposal_queue import ProposalQueue
             from sophia.feedback.proposal_worker import ProposalWorker
 
-            proposal_queue = ProposalQueue(feedback_config.redis_url)
+            proposal_queue = ProposalQueue(feedback_config.redis)
             proposal_queue.pending_count()  # Test connection
             _proposal_worker = ProposalWorker(
                 queue=proposal_queue,
@@ -668,12 +668,16 @@ def create_app() -> FastAPI:
                                 before=(
                                     before_val
                                     if isinstance(before_val, dict)
-                                    else {"value": before_val} if before_val else None
+                                    else {"value": before_val}
+                                    if before_val
+                                    else None
                                 ),
                                 after=(
                                     after_val
                                     if isinstance(after_val, dict)
-                                    else {"value": after_val} if after_val else None
+                                    else {"value": after_val}
+                                    if after_val
+                                    else None
                                 ),
                                 changed_properties=(
                                     changed_props if changed_props else None
