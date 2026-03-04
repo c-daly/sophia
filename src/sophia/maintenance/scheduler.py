@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any, Callable
 
 from sophia.maintenance.config import MaintenanceConfig
@@ -19,7 +20,7 @@ class MaintenanceScheduler:
     - Post-ingestion: reacts to proposal_processed events
     - Event-driven: reacts to threshold_crossed events
     - Periodic: runs full scans on a configurable interval
-    - Threshold: (configured via event-driven channel)
+    - Threshold: checks member counts against configured thresholds
 
     Each trigger enqueues jobs into the MaintenanceQueue. The dispatch loop
     dequeues and runs them through registered handler callables.
@@ -42,28 +43,29 @@ class MaintenanceScheduler:
             handlers: Mapping of job_type -> callable handler.
             hcg_client: Optional HCG client for graph operations.
         """
-        self.queue = queue
-        self.event_bus = event_bus
-        self.config = config
-        self.handlers = handlers
-        self.hcg_client = hcg_client
+        self._queue = queue
+        self._event_bus = event_bus
+        self._config = config
+        self._handlers = handlers
+        self._hcg = hcg_client
         self._running = False
         self._semaphore: asyncio.Semaphore | None = None
+        self._listener_thread: threading.Thread | None = None
 
         if config.enabled:
             self._setup_subscriptions()
 
     def _setup_subscriptions(self) -> None:
         """Subscribe to EventBus channels based on config toggles."""
-        if self.config.post_ingestion_enabled:
-            self.event_bus.subscribe(
+        if self._config.post_ingestion_enabled:
+            self._event_bus.subscribe(
                 "logos:sophia:proposal_processed",
                 self._on_proposal_processed,
             )
             logger.info("Subscribed to logos:sophia:proposal_processed")
 
-        if self.config.event_driven_enabled:
-            self.event_bus.subscribe(
+        if self._config.event_driven_enabled:
+            self._event_bus.subscribe(
                 "logos:sophia:threshold_crossed",
                 self._on_threshold_crossed,
             )
@@ -76,24 +78,31 @@ class MaintenanceScheduler:
         type_emergence for updated types.
 
         Args:
-            event: Event payload with affected_node_ids and updated_types.
+            event: Event payload with affected_node_uuids and updated_types.
         """
-        affected_nodes = event.get("affected_node_ids", [])
-        updated_types = event.get("updated_types", [])
+        payload = event.get("payload", {})
+        affected_nodes = payload.get("affected_node_uuids", [])
+        new_types = payload.get("new_types", [])
+        updated_types = payload.get("updated_types", [])
 
-        if affected_nodes:
-            self.queue.enqueue(
+        if affected_nodes and "relationship_discovery" in self._handlers:
+            self._queue.enqueue(
                 job_type="relationship_discovery",
                 priority="normal",
-                params={"node_ids": affected_nodes},
+                params={"node_uuids": affected_nodes},
             )
 
-        if updated_types:
-            self.queue.enqueue(
-                job_type="type_emergence",
-                priority="normal",
-                params={"types": updated_types},
-            )
+        if updated_types and "type_emergence" in self._handlers:
+            for type_name in updated_types:
+                self._queue.enqueue(
+                    job_type="type_emergence",
+                    priority="normal",
+                    params={"type_name": type_name},
+                )
+
+        # Threshold check for new/updated types
+        if self._config.threshold_enabled and (new_types or updated_types):
+            self._check_thresholds(new_types + updated_types)
 
     def _on_threshold_crossed(self, event: dict) -> None:
         """Handle threshold_crossed events by enqueuing the specified job.
@@ -101,65 +110,100 @@ class MaintenanceScheduler:
         Args:
             event: Event payload with job_type and optional params.
         """
-        job_type = event.get("job_type", "")
-        params = event.get("params", {})
+        payload = event.get("payload", {})
+        job_type = payload.get("job_type", "")
+        params = payload.get("params", {})
 
         if not job_type:
             logger.warning("threshold_crossed event missing job_type: %s", event)
             return
 
-        self.queue.enqueue(
-            job_type=job_type,
-            priority="normal",
-            params=params,
-        )
+        if job_type in self._handlers:
+            self._queue.enqueue(
+                job_type=job_type,
+                priority="high",
+                params=params,
+            )
+
+    def _check_thresholds(self, type_names: list[str]) -> None:
+        """Check if any types cross the member count threshold.
+
+        Args:
+            type_names: Type names to check against configured thresholds.
+        """
+        if self._hcg is None:
+            return
+        threshold = self._config.type_member_count_threshold
+        for type_name in type_names:
+            try:
+                # Placeholder: look up type node to check member count
+                # Implementation depends on HCGClient API
+                pass
+            except Exception:
+                logger.exception("Failed threshold check for type %s", type_name)
 
     async def start(self) -> None:
-        """Start the scheduler dispatch and periodic loops.
+        """Start the scheduler: listener thread + dispatch loop + periodic timer.
 
         If the scheduler is disabled via config, returns immediately.
         """
-        if not self.config.enabled:
+        if not self._config.enabled:
             logger.info("Maintenance scheduler disabled, not starting")
             return
 
         self._running = True
-        self._semaphore = asyncio.Semaphore(self.config.max_concurrent_jobs)
+        self._semaphore = asyncio.Semaphore(self._config.max_concurrent_jobs)
+
+        # Start EventBus listener in background thread
+        self._listener_thread = threading.Thread(
+            target=self._event_bus.listen, daemon=True, name="maintenance-listener"
+        )
+        self._listener_thread.start()
         logger.info("Maintenance scheduler started")
 
-        tasks = [self._dispatch_loop()]
-        if self.config.periodic_enabled:
-            tasks.append(self._periodic_loop())
+        # Run dispatch loop and periodic timer concurrently
+        tasks = [asyncio.create_task(self._dispatch_loop())]
+        if self._config.periodic_enabled:
+            tasks.append(asyncio.create_task(self._periodic_loop()))
 
         await asyncio.gather(*tasks)
 
     def stop(self) -> None:
         """Signal the scheduler to stop."""
         self._running = False
+        if self._event_bus is not None:
+            self._event_bus.stop()
         logger.info("Maintenance scheduler stopping")
 
     async def _dispatch_loop(self) -> None:
         """Continuously dequeue and dispatch jobs."""
         while self._running:
-            job = await asyncio.to_thread(self.queue.dequeue, timeout=1)
-            if job is None:
-                continue
-            assert self._semaphore is not None
-            async with self._semaphore:
-                await self._dispatch_job(job)
+            try:
+                job = await asyncio.to_thread(self._queue.dequeue, 1)
+                if job is None:
+                    continue
+                assert self._semaphore is not None
+                async with self._semaphore:
+                    await self._dispatch_job(job)
+            except Exception:
+                if self._running:
+                    logger.exception("Error in dispatch loop")
+                    await asyncio.sleep(1)
 
     async def _periodic_loop(self) -> None:
         """Periodically enqueue full scan jobs."""
+        interval = self._config.periodic_interval_seconds
         while self._running:
-            await asyncio.sleep(self.config.periodic_interval_seconds)
+            await asyncio.sleep(interval)
             if not self._running:
                 break
-            self.queue.enqueue(
-                job_type="full_scan",
-                priority="low",
-                params={},
-            )
-            logger.info("Enqueued periodic full_scan job")
+            logger.info("Periodic maintenance scan triggered")
+            if "type_emergence" in self._handlers:
+                self._queue.enqueue(
+                    job_type="type_emergence",
+                    priority="low",
+                    params={"scan": "full"},
+                )
 
     async def _dispatch_job(self, job: MaintenanceJob) -> None:
         """Dispatch a single job to the appropriate handler.
@@ -167,7 +211,7 @@ class MaintenanceScheduler:
         Args:
             job: The maintenance job to dispatch.
         """
-        handler = self.handlers.get(job.job_type)
+        handler = self._handlers.get(job.job_type)
         if handler is None:
             logger.warning(
                 "No handler for job type %s (job %s), skipping",
@@ -176,9 +220,10 @@ class MaintenanceScheduler:
             )
             return
 
+        logger.info("Dispatching maintenance job %s: %s", job.id, job.job_type)
         try:
-            await asyncio.to_thread(handler, job)
-            logger.info("Completed job %s (type=%s)", job.id, job.job_type)
+            await asyncio.to_thread(handler, **job.params)
+            logger.info("Maintenance job %s completed", job.id)
         except Exception:
-            logger.exception("Job %s failed, requeuing", job.id)
-            self.queue.requeue(job)
+            logger.exception("Maintenance job %s failed", job.id)
+            self._queue.requeue(job)

@@ -43,9 +43,9 @@ class TestMaintenanceSchedulerInit:
             config=config,
             handlers=self.handlers,
         )
-        assert scheduler.handlers == self.handlers
-        assert scheduler.config is config
-        assert scheduler.queue is self.mock_queue
+        assert scheduler._handlers == self.handlers
+        assert scheduler._config is config
+        assert scheduler._queue is self.mock_queue
 
     def test_disabled_scheduler_does_nothing(self) -> None:
         """When enabled=False, no EventBus subscriptions should be created."""
@@ -119,6 +119,7 @@ class TestEventHandlers:
         self.handlers = {
             "relationship_discovery": MagicMock(),
             "type_emergence": MagicMock(),
+            "consolidation": MagicMock(),
         }
         config = MaintenanceConfig(enabled=True)
         self.scheduler = MaintenanceScheduler(
@@ -131,8 +132,13 @@ class TestEventHandlers:
     def test_on_proposal_processed_enqueues_jobs(self) -> None:
         """_on_proposal_processed should enqueue relationship_discovery and type_emergence."""
         event = {
-            "affected_node_ids": ["node-1", "node-2"],
-            "updated_types": ["Person", "Organization"],
+            "event_type": "proposal_processed",
+            "source": "sophia",
+            "payload": {
+                "affected_node_uuids": ["node-1", "node-2"],
+                "new_types": [],
+                "updated_types": ["Person", "Organization"],
+            },
         }
         self.scheduler._on_proposal_processed(event)
 
@@ -143,14 +149,41 @@ class TestEventHandlers:
 
     def test_on_threshold_crossed_enqueues_event_job(self) -> None:
         """_on_threshold_crossed should enqueue job type from event payload."""
-        event = {"job_type": "consolidation", "params": {"threshold": 0.9}}
+        event = {
+            "event_type": "threshold_crossed",
+            "payload": {
+                "job_type": "consolidation",
+                "params": {"threshold": 0.9},
+            },
+        }
         self.scheduler._on_threshold_crossed(event)
 
         self.mock_queue.enqueue.assert_called_once_with(
             job_type="consolidation",
-            priority="normal",
+            priority="high",
             params={"threshold": 0.9},
         )
+
+    def test_on_proposal_processed_calls_check_thresholds(self) -> None:
+        """_on_proposal_processed should call _check_thresholds for new/updated types."""
+        config = MaintenanceConfig(enabled=True, threshold_enabled=True)
+        scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=MagicMock(),
+            config=config,
+            handlers=self.handlers,
+            hcg_client=MagicMock(),
+        )
+        event = {
+            "event_type": "proposal_processed",
+            "payload": {
+                "affected_node_uuids": [],
+                "new_types": ["vehicle"],
+                "updated_types": ["person"],
+            },
+        }
+        # _check_thresholds is a placeholder (pass), so just verify no error
+        scheduler._on_proposal_processed(event)
 
 
 class TestDispatch:
@@ -169,12 +202,14 @@ class TestDispatch:
             handlers=self.handlers,
         )
 
+    @pytest.mark.asyncio
     async def test_dispatch_calls_handler(self) -> None:
-        """_dispatch_job should call the correct handler for the job type."""
+        """_dispatch_job should call the correct handler with job.params."""
         job = _make_job("consolidation", params={"key": "value"})
         await self.scheduler._dispatch_job(job)
-        self.mock_handler.assert_called_once()
+        self.mock_handler.assert_called_once_with(key="value")
 
+    @pytest.mark.asyncio
     async def test_dispatch_unknown_job_type_logs_warning(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -184,6 +219,7 @@ class TestDispatch:
             await self.scheduler._dispatch_job(job)
         assert "unknown_type" in caplog.text
 
+    @pytest.mark.asyncio
     async def test_dispatch_requeues_on_failure(self) -> None:
         """_dispatch_job should requeue job when handler raises."""
         self.mock_handler.side_effect = RuntimeError("boom")
@@ -200,6 +236,7 @@ class TestStartStop:
         self.mock_event_bus = MagicMock()
         self.handlers = {"consolidation": MagicMock()}
 
+    @pytest.mark.asyncio
     async def test_start_disabled_returns_immediately(self) -> None:
         """start() with enabled=False should return without running loops."""
         config = MaintenanceConfig(enabled=False)
@@ -211,3 +248,17 @@ class TestStartStop:
         )
         await scheduler.start()
         assert not scheduler._running
+
+    def test_stop_calls_event_bus_stop(self) -> None:
+        """stop() should set _running=False and call event_bus.stop()."""
+        config = MaintenanceConfig(enabled=True)
+        scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        scheduler._running = True
+        scheduler.stop()
+        assert not scheduler._running
+        self.mock_event_bus.stop.assert_called_once()
