@@ -135,8 +135,11 @@ class TestEventHandlers:
             "source": "sophia",
             "payload": {
                 "affected_node_uuids": ["node-1", "node-2"],
-                "new_type_uuids": [],
-                "updated_type_uuids": ["type_Person", "type_Organization"],
+                "new_types": [],
+                "updated_types": [
+                    {"uuid": "type_Person", "name": "Person"},
+                    {"uuid": "type_Organization", "name": "Organization"},
+                ],
             },
         }
         self.scheduler._on_proposal_processed(event)
@@ -177,8 +180,8 @@ class TestEventHandlers:
             "event_type": "proposal_processed",
             "payload": {
                 "affected_node_uuids": [],
-                "new_type_uuids": ["type_vehicle"],
-                "updated_type_uuids": ["type_person"],
+                "new_types": [{"uuid": "type_vehicle", "name": "vehicle"}],
+                "updated_types": [{"uuid": "type_person", "name": "person"}],
             },
         }
         # _check_thresholds logs and returns, so just verify no error

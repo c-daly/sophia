@@ -86,8 +86,8 @@ class MaintenanceScheduler:
         """
         payload = event.get("payload", {})
         affected_nodes = payload.get("affected_node_uuids", [])
-        new_type_uuids = payload.get("new_type_uuids", [])
-        updated_type_uuids = payload.get("updated_type_uuids", [])
+        new_types = payload.get("new_types", [])
+        updated_types = payload.get("updated_types", [])
 
         if affected_nodes and "relationship_discovery" in self._handlers:
             self._queue.enqueue(
@@ -96,18 +96,19 @@ class MaintenanceScheduler:
                 params={"node_uuids": affected_nodes},
             )
 
-        all_type_uuids = new_type_uuids + updated_type_uuids
-        if all_type_uuids and "type_emergence" in self._handlers:
-            for type_uuid in all_type_uuids:
+        all_types = new_types + updated_types
+        if all_types and "type_emergence" in self._handlers:
+            for type_entry in all_types:
                 self._queue.enqueue(
                     job_type="type_emergence",
                     priority="normal",
-                    params={"type_uuid": type_uuid},
+                    params={"type_uuid": type_entry["uuid"]},
                 )
 
         # Threshold check for new/updated types
-        if self._config.threshold_enabled and (new_type_uuids or updated_type_uuids):
-            self._check_thresholds(new_type_uuids + updated_type_uuids)
+        all_type_uuids = [t["uuid"] for t in new_types + updated_types]
+        if self._config.threshold_enabled and all_type_uuids:
+            self._check_thresholds(all_type_uuids)
 
     def _on_threshold_crossed(self, event: dict) -> None:
         """Handle threshold_crossed events by enqueuing the specified job.

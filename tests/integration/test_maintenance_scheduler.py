@@ -81,8 +81,8 @@ class TestMaintenanceSchedulerIntegration:
                 "source": "sophia",
                 "payload": {
                     "affected_node_uuids": ["n1", "n2"],
-                    "new_type_uuids": [],
-                    "updated_type_uuids": [],
+                    "new_types": [],
+                    "updated_types": [],
                 },
             }
         )
@@ -123,8 +123,11 @@ class TestMaintenanceSchedulerIntegration:
                 "source": "sophia",
                 "payload": {
                     "affected_node_uuids": ["n1"],
-                    "new_type_uuids": [],
-                    "updated_type_uuids": ["type_Vehicle", "type_Tool"],
+                    "new_types": [],
+                    "updated_types": [
+                        {"uuid": "type_Vehicle", "name": "Vehicle"},
+                        {"uuid": "type_Tool", "name": "Tool"},
+                    ],
                 },
             }
         )
