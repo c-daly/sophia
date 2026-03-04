@@ -1,0 +1,213 @@
+"""Tests for MaintenanceScheduler core."""
+
+from __future__ import annotations
+
+import logging
+from unittest.mock import MagicMock
+
+import pytest
+
+from sophia.maintenance.config import MaintenanceConfig
+from sophia.maintenance.job_queue import MaintenanceJob, MaintenanceQueue
+from sophia.maintenance.scheduler import MaintenanceScheduler
+
+
+def _make_job(job_type: str = "consolidation", **kwargs) -> MaintenanceJob:
+    """Create a MaintenanceJob for testing."""
+    defaults = {
+        "id": "maint-test123",
+        "job_type": job_type,
+        "priority": "normal",
+        "params": {},
+        "created_at": "2026-03-04T00:00:00+00:00",
+        "attempts": 0,
+    }
+    defaults.update(kwargs)
+    return MaintenanceJob(**defaults)
+
+
+class TestMaintenanceSchedulerInit:
+    """Tests for scheduler initialization and subscription setup."""
+
+    def setup_method(self) -> None:
+        self.mock_queue = MagicMock(spec=MaintenanceQueue)
+        self.mock_event_bus = MagicMock()
+        self.handlers = {"consolidation": MagicMock(), "pruning": MagicMock()}
+
+    def test_init_registers_handlers(self) -> None:
+        """Scheduler should store handlers dict and wire up config."""
+        config = MaintenanceConfig(enabled=True)
+        scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        assert scheduler.handlers == self.handlers
+        assert scheduler.config is config
+        assert scheduler.queue is self.mock_queue
+
+    def test_disabled_scheduler_does_nothing(self) -> None:
+        """When enabled=False, no EventBus subscriptions should be created."""
+        config = MaintenanceConfig(enabled=False)
+        MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        self.mock_event_bus.subscribe.assert_not_called()
+
+    def test_enabled_scheduler_subscribes_to_proposal_processed(self) -> None:
+        """When post_ingestion_enabled, should subscribe to proposal_processed."""
+        config = MaintenanceConfig(
+            enabled=True,
+            post_ingestion_enabled=True,
+            event_driven_enabled=False,
+        )
+        MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        subscribe_calls = self.mock_event_bus.subscribe.call_args_list
+        channels = [c[0][0] for c in subscribe_calls]
+        assert "logos:sophia:proposal_processed" in channels
+
+    def test_disabled_post_ingestion_skips_subscription(self) -> None:
+        """When post_ingestion_enabled=False, should not subscribe to proposal_processed."""
+        config = MaintenanceConfig(
+            enabled=True,
+            post_ingestion_enabled=False,
+            event_driven_enabled=False,
+        )
+        MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        subscribe_calls = self.mock_event_bus.subscribe.call_args_list
+        channels = [c[0][0] for c in subscribe_calls]
+        assert "logos:sophia:proposal_processed" not in channels
+
+    def test_event_driven_enabled_subscribes_threshold(self) -> None:
+        """When event_driven_enabled, should subscribe to threshold_crossed."""
+        config = MaintenanceConfig(
+            enabled=True,
+            post_ingestion_enabled=False,
+            event_driven_enabled=True,
+        )
+        MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        subscribe_calls = self.mock_event_bus.subscribe.call_args_list
+        channels = [c[0][0] for c in subscribe_calls]
+        assert "logos:sophia:threshold_crossed" in channels
+
+
+class TestEventHandlers:
+    """Tests for event handler methods that enqueue jobs."""
+
+    def setup_method(self) -> None:
+        self.mock_queue = MagicMock(spec=MaintenanceQueue)
+        self.mock_event_bus = MagicMock()
+        self.handlers = {
+            "relationship_discovery": MagicMock(),
+            "type_emergence": MagicMock(),
+        }
+        config = MaintenanceConfig(enabled=True)
+        self.scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+
+    def test_on_proposal_processed_enqueues_jobs(self) -> None:
+        """_on_proposal_processed should enqueue relationship_discovery and type_emergence."""
+        event = {
+            "affected_node_ids": ["node-1", "node-2"],
+            "updated_types": ["Person", "Organization"],
+        }
+        self.scheduler._on_proposal_processed(event)
+
+        enqueue_calls = self.mock_queue.enqueue.call_args_list
+        job_types = [c[1]["job_type"] for c in enqueue_calls]
+        assert "relationship_discovery" in job_types
+        assert "type_emergence" in job_types
+
+    def test_on_threshold_crossed_enqueues_event_job(self) -> None:
+        """_on_threshold_crossed should enqueue job type from event payload."""
+        event = {"job_type": "consolidation", "params": {"threshold": 0.9}}
+        self.scheduler._on_threshold_crossed(event)
+
+        self.mock_queue.enqueue.assert_called_once_with(
+            job_type="consolidation",
+            priority="normal",
+            params={"threshold": 0.9},
+        )
+
+
+class TestDispatch:
+    """Tests for async job dispatch."""
+
+    def setup_method(self) -> None:
+        self.mock_queue = MagicMock(spec=MaintenanceQueue)
+        self.mock_event_bus = MagicMock()
+        self.mock_handler = MagicMock(return_value={"status": "ok"})
+        self.handlers = {"consolidation": self.mock_handler}
+        config = MaintenanceConfig(enabled=True)
+        self.scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+
+    async def test_dispatch_calls_handler(self) -> None:
+        """_dispatch_job should call the correct handler for the job type."""
+        job = _make_job("consolidation", params={"key": "value"})
+        await self.scheduler._dispatch_job(job)
+        self.mock_handler.assert_called_once()
+
+    async def test_dispatch_unknown_job_type_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """_dispatch_job with unknown type should log a warning, not raise."""
+        job = _make_job("unknown_type")
+        with caplog.at_level(logging.WARNING):
+            await self.scheduler._dispatch_job(job)
+        assert "unknown_type" in caplog.text
+
+    async def test_dispatch_requeues_on_failure(self) -> None:
+        """_dispatch_job should requeue job when handler raises."""
+        self.mock_handler.side_effect = RuntimeError("boom")
+        job = _make_job("consolidation")
+        await self.scheduler._dispatch_job(job)
+        self.mock_queue.requeue.assert_called_once_with(job)
+
+
+class TestStartStop:
+    """Tests for start/stop lifecycle."""
+
+    def setup_method(self) -> None:
+        self.mock_queue = MagicMock(spec=MaintenanceQueue)
+        self.mock_event_bus = MagicMock()
+        self.handlers = {"consolidation": MagicMock()}
+
+    async def test_start_disabled_returns_immediately(self) -> None:
+        """start() with enabled=False should return without running loops."""
+        config = MaintenanceConfig(enabled=False)
+        scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        await scheduler.start()
+        assert not scheduler._running
