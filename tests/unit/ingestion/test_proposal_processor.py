@@ -1355,8 +1355,8 @@ class TestProposalProcessorRedisSnapshot:
 
         processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
 
-        # Set up the _execute_read return for type_definition query
-        mock_hcg._execute_read.return_value = [
+        # Set up the get_all_type_definitions return for type snapshot
+        mock_hcg.get_all_type_definitions.return_value = [
             {
                 "uuid": "type_entity",
                 "name": "entity",
@@ -1402,14 +1402,14 @@ class TestProposalProcessorRedisSnapshot:
         # Should not raise even without redis_client
         result = processor.process(self._make_proposal())
         assert "stored_node_ids" in result
-        # _execute_read should NOT be called for type snapshot when no redis
-        mock_hcg._execute_read.assert_not_called()
+        # get_all_type_definitions should NOT be called for type snapshot when no redis
+        mock_hcg.get_all_type_definitions.assert_not_called()
 
     def test_process_redis_write_failure_does_not_break_processing(self):
         """If Redis write fails, process() still returns results."""
         processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
 
-        mock_hcg._execute_read.return_value = [
+        mock_hcg.get_all_type_definitions.return_value = [
             {
                 "uuid": "type_entity",
                 "name": "entity",
@@ -1426,7 +1426,7 @@ class TestProposalProcessorRedisSnapshot:
         """If HCG type query fails, process() still returns results."""
         processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
 
-        mock_hcg._execute_read.side_effect = RuntimeError("Neo4j down")
+        mock_hcg.get_all_type_definitions.side_effect = RuntimeError("Neo4j down")
 
         result = processor.process(self._make_proposal())
         assert "stored_node_ids" in result
@@ -1440,7 +1440,7 @@ class TestProposalProcessorRedisSnapshot:
 
         processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
 
-        mock_hcg._execute_read.return_value = [
+        mock_hcg.get_all_type_definitions.return_value = [
             {
                 "uuid": "type_entity",
                 "name": "entity",

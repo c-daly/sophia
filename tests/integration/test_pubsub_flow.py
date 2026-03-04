@@ -98,7 +98,7 @@ class TestPubSubFlow:
 
         try:
             mock_hcg = MagicMock()
-            mock_hcg._execute_read.return_value = [
+            mock_hcg.get_all_type_definitions.return_value = [
                 {
                     "name": "person",
                     "uuid": "type_person",
