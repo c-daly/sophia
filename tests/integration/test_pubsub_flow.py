@@ -57,21 +57,23 @@ class TestPubSubFlow:
         try:
             # Publisher
             pub_bus = EventBus(config)
-            pub_bus.publish(
-                "logos:sophia:proposal_processed",
-                {
-                    "event_type": "proposal_processed",
-                    "source": "sophia",
-                    "payload": {
-                        "new_types": ["vehicle"],
-                        "updated_types": ["person"],
-                        "stored_node_ids": ["n1"],
-                        "stored_edge_ids": ["e1"],
-                        "affected_node_uuids": ["n1"],
+            try:
+                pub_bus.publish(
+                    "logos:sophia:proposal_processed",
+                    {
+                        "event_type": "proposal_processed",
+                        "source": "sophia",
+                        "payload": {
+                            "new_types": ["vehicle"],
+                            "updated_types": ["person"],
+                            "stored_node_ids": ["n1"],
+                            "stored_edge_ids": ["e1"],
+                            "affected_node_uuids": ["n1"],
+                        },
                     },
-                },
-            )
-            pub_bus.close()
+                )
+            finally:
+                pub_bus.close()
 
             assert received_event.wait(timeout=2.0), "Subscriber did not receive event"
 
