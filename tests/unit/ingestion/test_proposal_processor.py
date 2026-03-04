@@ -1208,8 +1208,8 @@ class TestProposalProcessorEventBus:
         assert "affected_node_uuids" in payload
         assert "stored_node_ids" in payload
         assert "stored_edge_ids" in payload
-        assert "new_types" in payload
-        assert "updated_types" in payload
+        assert "new_type_uuids" in payload
+        assert "updated_type_uuids" in payload
         assert "node-uuid-1" in payload["stored_node_ids"]
 
     def test_process_no_event_bus_no_publish(self):

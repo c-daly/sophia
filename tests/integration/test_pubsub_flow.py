@@ -64,8 +64,8 @@ class TestPubSubFlow:
                         "event_type": "proposal_processed",
                         "source": "sophia",
                         "payload": {
-                            "new_types": ["vehicle"],
-                            "updated_types": ["person"],
+                            "new_type_uuids": ["type_vehicle"],
+                            "updated_type_uuids": ["type_person"],
                             "stored_node_ids": ["n1"],
                             "stored_edge_ids": ["e1"],
                             "affected_node_uuids": ["n1"],
@@ -79,7 +79,7 @@ class TestPubSubFlow:
 
             assert len(received) == 1
             assert received[0]["event_type"] == "proposal_processed"
-            assert received[0]["payload"]["new_types"] == ["vehicle"]
+            assert received[0]["payload"]["new_type_uuids"] == ["type_vehicle"]
         finally:
             sub_bus.stop()
             sub_bus.close()
