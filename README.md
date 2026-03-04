@@ -26,11 +26,7 @@ poetry install
 
 Interactive docs at `http://localhost:47000/docs` when running.
 
-Key endpoints:
-- `POST /plan` - Generate plan from goal
-- `POST /execute` - Execute a plan
-- `GET /cwm` - Query cognitive world model
-- `GET /health` - Health check
+See interactive docs for the full endpoint list.
 
 ## Architecture
 
@@ -44,14 +40,15 @@ Sophia is non-linguistic. For any text I/O, she relies on Hermes.
 
 ## Configuration
 
-Uses `logos_config` for ports/settings. Sophia port range: 47xxx.
+Uses `logos_config` for ports/settings. Sophia API runs on port 47000; infrastructure services are shared across all LOGOS repos.
 
 | Service | Port |
 |---------|------|
 | API | 47000 |
-| Neo4j HTTP | 47474 |
-| Neo4j Bolt | 47687 |
-| Milvus | 47530 |
+| Neo4j HTTP | 7474 |
+| Neo4j Bolt | 7687 |
+| Milvus | 19530 |
+| Redis | 6379 |
 
 ## Development
 
