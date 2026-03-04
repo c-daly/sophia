@@ -52,33 +52,35 @@ class TestPubSubFlow:
         sub_bus.subscribe("logos:sophia:proposal_processed", on_event)
         listener = threading.Thread(target=sub_bus.listen, daemon=True)
         listener.start()
-        time.sleep(0.2)  # allow subscription to register
+        time.sleep(0.5)  # allow subscription to register
 
-        # Publisher
-        pub_bus = EventBus(config)
-        pub_bus.publish(
-            "logos:sophia:proposal_processed",
-            {
-                "event_type": "proposal_processed",
-                "source": "sophia",
-                "payload": {
-                    "new_types": ["vehicle"],
-                    "updated_types": ["person"],
-                    "stored_node_ids": ["n1"],
-                    "stored_edge_ids": ["e1"],
-                    "affected_node_uuids": ["n1"],
+        try:
+            # Publisher
+            pub_bus = EventBus(config)
+            pub_bus.publish(
+                "logos:sophia:proposal_processed",
+                {
+                    "event_type": "proposal_processed",
+                    "source": "sophia",
+                    "payload": {
+                        "new_types": ["vehicle"],
+                        "updated_types": ["person"],
+                        "stored_node_ids": ["n1"],
+                        "stored_edge_ids": ["e1"],
+                        "affected_node_uuids": ["n1"],
+                    },
                 },
-            },
-        )
-        pub_bus.close()
+            )
+            pub_bus.close()
 
-        assert received_event.wait(timeout=2.0), "Subscriber did not receive event"
-        sub_bus.stop()
-        sub_bus.close()
+            assert received_event.wait(timeout=2.0), "Subscriber did not receive event"
 
-        assert len(received) == 1
-        assert received[0]["event_type"] == "proposal_processed"
-        assert received[0]["payload"]["new_types"] == ["vehicle"]
+            assert len(received) == 1
+            assert received[0]["event_type"] == "proposal_processed"
+            assert received[0]["payload"]["new_types"] == ["vehicle"]
+        finally:
+            sub_bus.stop()
+            sub_bus.close()
 
     def test_write_type_snapshot_writes_correct_format(self):
         """_write_type_snapshot writes correct JSON to Redis key."""
@@ -92,36 +94,36 @@ class TestPubSubFlow:
         # Clean up before test
         r.delete("logos:ontology:types")
 
-        mock_hcg = MagicMock()
-        mock_hcg._execute_read.return_value = [
-            {
-                "name": "person",
-                "uuid": "type_person",
-                "properties": {"member_count": 10},
-            },
-            {
-                "name": "location",
-                "uuid": "type_location",
-                "properties": {"member_count": 5},
-            },
-        ]
+        try:
+            mock_hcg = MagicMock()
+            mock_hcg._execute_read.return_value = [
+                {
+                    "name": "person",
+                    "uuid": "type_person",
+                    "properties": {"member_count": 10},
+                },
+                {
+                    "name": "location",
+                    "uuid": "type_location",
+                    "properties": {"member_count": 5},
+                },
+            ]
 
-        processor = ProposalProcessor(
-            hcg_client=mock_hcg,
-            milvus_sync=MagicMock(),
-            event_bus=None,
-            redis_client=r,
-        )
-        processor._write_type_snapshot()
+            processor = ProposalProcessor(
+                hcg_client=mock_hcg,
+                milvus_sync=MagicMock(),
+                event_bus=None,
+                redis_client=r,
+            )
+            processor._write_type_snapshot()
 
-        raw = r.get("logos:ontology:types")
-        assert raw is not None
-        snapshot = json.loads(raw)
-        assert "person" in snapshot
-        assert snapshot["person"]["uuid"] == "type_person"
-        assert snapshot["person"]["member_count"] == 10
-        assert "location" in snapshot
-
-        # Cleanup
-        r.delete("logos:ontology:types")
-        r.close()
+            raw = r.get("logos:ontology:types")
+            assert raw is not None
+            snapshot = json.loads(raw)
+            assert "person" in snapshot
+            assert snapshot["person"]["uuid"] == "type_person"
+            assert snapshot["person"]["member_count"] == 10
+            assert "location" in snapshot
+        finally:
+            r.delete("logos:ontology:types")
+            r.close()

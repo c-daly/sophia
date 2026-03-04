@@ -104,6 +104,7 @@ class ProposalProcessor:
         self._classifier = TypeClassifier(milvus=milvus_sync, hcg=hcg_client)
         self._event_bus = event_bus
         self._redis = redis_client
+        self._seen_type_uuids: set[str] = set()
 
     def _publish_batch_event(
         self,
@@ -172,7 +173,6 @@ class ProposalProcessor:
         # Track types and affected nodes for batch event.
         new_types: list[str] = []
         updated_types: list[str] = []
-        seen_type_uuids: set[str] = set()
         affected_node_uuids: list[str] = []
         pending_embeddings: dict[str, list[dict]] = {}
 
@@ -336,8 +336,8 @@ class ProposalProcessor:
                     # 2c. Connect to type definition via IS_A edge.
                     # Ensure the type-definition node exists (MERGE is idempotent).
                     type_def_uuid = f"type_{node_type}"
-                    _is_new_type = type_def_uuid not in seen_type_uuids
-                    seen_type_uuids.add(type_def_uuid)
+                    _is_new_type = type_def_uuid not in self._seen_type_uuids
+                    self._seen_type_uuids.add(type_def_uuid)
                     try:
                         self._hcg.add_node(
                             uuid=type_def_uuid,
@@ -523,13 +523,14 @@ class ProposalProcessor:
                         )
 
             # Publish batch event summarising what changed.
-            self._publish_batch_event(
-                stored_node_ids=stored_ids,
-                stored_edge_ids=stored_edge_ids,
-                new_types=new_types,
-                updated_types=updated_types,
-                affected_node_uuids=affected_node_uuids,
-            )
+            if stored_ids or stored_edge_ids or new_types or updated_types:
+                self._publish_batch_event(
+                    stored_node_ids=stored_ids,
+                    stored_edge_ids=stored_edge_ids,
+                    new_types=new_types,
+                    updated_types=updated_types,
+                    affected_node_uuids=affected_node_uuids,
+                )
 
             # Write full type snapshot to Redis for Hermes initial sync.
             if new_types or updated_types:
