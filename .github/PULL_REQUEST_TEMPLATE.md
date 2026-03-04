@@ -30,7 +30,7 @@ poetry run pytest tests/ -m "not requires_torch"
 ## Checklist (required)
 - [ ] Linked the related issue (`Closes #<n>` or `See #<n>`)
 - [ ] Tests added or updated
-- [ ] Linting/formatting run (`ruff check --fix .` + `ruff format .`)
+- [ ] Linting/formatting run (`ruff check --fix .` + `black .`)
 - [ ] Type checks (`poetry run mypy src/`) as applicable
 - [ ] Documentation updated (README, `docs/`, or OpenAPI spec)
 - [ ] CI is passing
