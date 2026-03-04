@@ -35,6 +35,10 @@ from logos_test_utils import setup_logging
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from sophia.maintenance.config import MaintenanceConfig
+from sophia.maintenance.job_queue import MaintenanceQueue
+from sophia.maintenance.scheduler import MaintenanceScheduler
+
 from sophia.api.models import (
     PlanRequest,
     PlanResponse,
@@ -240,6 +244,8 @@ _feedback_worker_task: Optional[Any] = None
 _proposal_processor: Optional[ProposalProcessor] = None
 _proposal_worker: Optional[Any] = None
 _proposal_worker_task: Optional[Any] = None
+_maintenance_scheduler: Optional[MaintenanceScheduler] = None
+_maintenance_task: Optional[Any] = None
 
 
 @asynccontextmanager
@@ -249,6 +255,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
     global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
     global _proposal_processor, _proposal_worker, _proposal_worker_task
+    global _maintenance_scheduler, _maintenance_task
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -381,6 +388,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     # Initialize ProposalProcessor (requires HCG client + Milvus)
+    _milvus_sync = None
     if _hcg_client:
         try:
             from logos_hcg.sync import HCGMilvusSync
@@ -422,6 +430,49 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:
             logger.warning(f"Proposal worker unavailable: {e}")
 
+    # Initialize Maintenance Scheduler
+    _maintenance_scheduler = None
+    _maintenance_task = None
+    try:
+        _maintenance_config = MaintenanceConfig()
+        if _maintenance_config.enabled:
+            from logos_config import RedisConfig
+            from logos_events import EventBus
+
+            import redis
+
+            _maint_redis_config = RedisConfig()
+            _maint_event_bus = EventBus(_maint_redis_config)
+            _maint_redis = redis.from_url(_maint_redis_config.url)
+            _maint_queue = MaintenanceQueue(_maint_redis)
+
+            # Register available handlers
+            from sophia.ingestion.type_emergence import TypeEmergenceDetector
+            from sophia.ingestion.relationship_discoverer import RelationshipDiscoverer
+
+            _handlers: dict = {}
+            if _milvus_sync and _hcg_client:
+                _type_emergence = TypeEmergenceDetector(
+                    milvus=_milvus_sync, hcg=_hcg_client
+                )
+                _relationship_discoverer = RelationshipDiscoverer(milvus=_milvus_sync)
+                _handlers = {
+                    "type_emergence": _type_emergence.check_type,
+                    "relationship_discovery": _relationship_discoverer.find_candidates,
+                }
+
+            _maintenance_scheduler = MaintenanceScheduler(
+                queue=_maint_queue,
+                event_bus=_maint_event_bus,
+                config=_maintenance_config,
+                handlers=_handlers,
+                hcg_client=_hcg_client,
+            )
+            _maintenance_task = asyncio.create_task(_maintenance_scheduler.start())
+            logger.info("Maintenance scheduler started")
+    except Exception:
+        logger.exception("Failed to start maintenance scheduler")
+
     logger.info("Sophia API service started successfully")
 
     yield
@@ -450,6 +501,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except asyncio.CancelledError:
             pass
         logger.info("Feedback worker stopped")
+
+    # Stop Maintenance Scheduler
+    if _maintenance_scheduler is not None:
+        _maintenance_scheduler.stop()
+    if _maintenance_task is not None:
+        _maintenance_task.cancel()
+        try:
+            await _maintenance_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Maintenance scheduler stopped")
 
     if _hcg_client:
         _hcg_client.close()
