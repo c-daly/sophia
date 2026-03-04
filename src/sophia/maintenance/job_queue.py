@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass
+from typing import Any
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class MaintenanceQueue:
     FAILED_KEY = "sophia:maintenance:failed"
     MAX_RETRIES = 3
 
-    def __init__(self, redis_client: object) -> None:
+    def __init__(self, redis_client: Any) -> None:
         """Initialize queue with a Redis client.
 
         Args:
