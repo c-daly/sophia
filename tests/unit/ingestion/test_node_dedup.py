@@ -6,7 +6,6 @@ from sophia.hcg_client.client import HCGClient
 
 
 class TestNodeDedup:
-
     def _make_client(self):
         """Build an HCGClient with mocked Neo4j driver."""
         with patch.object(HCGClient, "__init__", lambda self: None):

@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 import redis
 
+from logos_config import RedisConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,8 +18,8 @@ class ProposalQueue:
     QUEUE_KEY = "sophia:proposals:pending"
     CONTEXT_PREFIX = "sophia:context:"
 
-    def __init__(self, redis_url: str):
-        self.redis = redis.from_url(redis_url)
+    def __init__(self, redis_config: RedisConfig):
+        self.redis = redis.from_url(redis_config.url)
 
     def enqueue(self, proposal: dict, conversation_id: str | None = None) -> str:
         message_id = f"pq-{uuid.uuid4()}"

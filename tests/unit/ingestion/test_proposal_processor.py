@@ -1124,3 +1124,334 @@ class TestBatchEmbeddings:
         # No matches -> get_nodes_batch should not be called
         mock_hcg.get_nodes_batch.assert_not_called()
         assert result["relevant_context"] == []
+
+
+class TestProposalProcessorEventBus:
+    def test_proposal_processor_accepts_event_bus(self):
+        """ProposalProcessor accepts optional event_bus parameter."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_event_bus = MagicMock()
+        processor = ProposalProcessor(mock_hcg, mock_milvus, event_bus=mock_event_bus)
+        assert processor._event_bus is mock_event_bus
+
+    def test_proposal_processor_event_bus_defaults_to_none(self):
+        """ProposalProcessor works without event_bus."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        processor = ProposalProcessor(mock_hcg, mock_milvus)
+        assert processor._event_bus is None
+
+    def test_process_publishes_batch_event(self):
+        """process() publishes a proposal_processed event via EventBus."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_event_bus = MagicMock()
+
+        # Configure mocks to let process() run through node creation path
+        mock_hcg.add_node.return_value = "node-uuid-1"
+        mock_hcg.add_edge.return_value = "edge-uuid-1"
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "properties": {"member_count": 1, "centroid": [0.1] * 384},
+        }
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_hcg.find_nodes_by_names.return_value = {}
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+        mock_milvus.batch_upsert_embeddings.return_value = None
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus, event_bus=mock_event_bus)
+
+        proposal = {
+            "proposal_id": "p-event-test",
+            "proposed_nodes": [
+                {
+                    "name": "Alice",
+                    "type": "entity",
+                    "embedding": [0.1] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {
+                "embedding": [0.5] * 384,
+                "embedding_id": "doc-1",
+                "dimension": 384,
+                "model": "all-MiniLM-L6-v2",
+            },
+            "raw_text": "test event publishing",
+            "source_service": "hermes",
+            "confidence": 0.7,
+            "metadata": {},
+        }
+
+        processor.process(proposal)
+
+        mock_event_bus.publish.assert_called_once()
+        channel, event = mock_event_bus.publish.call_args[0]
+        assert channel == "logos:sophia:proposal_processed"
+        assert event["event_type"] == "proposal_processed"
+        assert event["source"] == "sophia"
+        assert "payload" in event
+        payload = event["payload"]
+        assert "affected_node_uuids" in payload
+        assert "stored_node_ids" in payload
+        assert "stored_edge_ids" in payload
+        assert "new_types" in payload
+        assert "updated_types" in payload
+        assert "node-uuid-1" in payload["stored_node_ids"]
+
+    def test_process_no_event_bus_no_publish(self):
+        """process() works without event_bus -- no publish call."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+
+        mock_hcg.add_node.return_value = "node-uuid-1"
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus)
+
+        proposal = {
+            "proposal_id": "p-no-bus",
+            "proposed_nodes": [
+                {
+                    "name": "Bob",
+                    "type": "entity",
+                    "embedding": [0.2] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {},
+            "raw_text": "test no event bus",
+            "source_service": "hermes",
+            "confidence": 0.7,
+        }
+
+        # Should not raise even without event_bus
+        result = processor.process(proposal)
+        assert "stored_node_ids" in result
+
+    def test_process_publish_failure_does_not_break_processing(self):
+        """If EventBus.publish() raises, process() still returns normally."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_event_bus = MagicMock()
+        mock_event_bus.publish.side_effect = RuntimeError("Redis down")
+
+        mock_hcg.add_node.return_value = "node-uuid-1"
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus, event_bus=mock_event_bus)
+
+        proposal = {
+            "proposal_id": "p-fail-bus",
+            "proposed_nodes": [
+                {
+                    "name": "Charlie",
+                    "type": "entity",
+                    "embedding": [0.3] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {},
+            "raw_text": "test publish failure",
+            "source_service": "hermes",
+            "confidence": 0.7,
+        }
+
+        result = processor.process(proposal)
+        assert "stored_node_ids" in result
+        assert "node-uuid-1" in result["stored_node_ids"]
+        mock_event_bus.publish.assert_called_once()
+
+
+class TestProposalProcessorRedisSnapshot:
+    def _make_processor_with_redis(
+        self, mock_hcg=None, mock_milvus=None, mock_event_bus=None, mock_redis=None
+    ):
+        """Helper to create a processor with Redis and sensible mock defaults."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        if mock_hcg is None:
+            mock_hcg = MagicMock()
+        if mock_milvus is None:
+            mock_milvus = MagicMock()
+        if mock_event_bus is None:
+            mock_event_bus = MagicMock()
+        if mock_redis is None:
+            mock_redis = MagicMock()
+
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "properties": {"member_count": 1, "centroid": [0.1] * 384},
+        }
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_hcg.find_nodes_by_names.return_value = {}
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+        mock_milvus.batch_upsert_embeddings.return_value = None
+
+        processor = ProposalProcessor(
+            mock_hcg, mock_milvus, event_bus=mock_event_bus, redis_client=mock_redis
+        )
+        return processor, mock_hcg, mock_milvus, mock_event_bus, mock_redis
+
+    def _make_proposal(self, nodes=None, edges=None):
+        """Helper to create a minimal proposal."""
+        return {
+            "proposal_id": "p-redis-test",
+            "proposed_nodes": nodes
+            or [
+                {
+                    "name": "TestNode",
+                    "type": "entity",
+                    "embedding": [0.1] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": edges or [],
+            "document_embedding": {},
+            "raw_text": "redis test",
+            "source_service": "hermes",
+            "confidence": 0.7,
+        }
+
+    def test_process_writes_type_snapshot_to_redis(self):
+        """process() writes full type list to Redis key logos:ontology:types."""
+        import json
+
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+
+        # Set up the get_all_type_definitions return for type snapshot
+        mock_hcg.get_all_type_definitions.return_value = [
+            {
+                "uuid": "type_entity",
+                "name": "entity",
+                "properties": {"member_count": 5},
+            },
+            {
+                "uuid": "type_concept",
+                "name": "concept",
+                "properties": {"member_count": 3},
+            },
+        ]
+
+        processor.process(self._make_proposal())
+
+        # Verify Redis write
+        mock_redis.set.assert_called_once()
+        key = mock_redis.set.call_args[0][0]
+        assert key == "logos:ontology:types"
+        value = json.loads(mock_redis.set.call_args[0][1])
+        assert isinstance(value, dict)
+        assert "entity" in value
+        assert value["entity"]["uuid"] == "type_entity"
+        assert value["entity"]["member_count"] == 5
+        assert "concept" in value
+        assert value["concept"]["uuid"] == "type_concept"
+        assert value["concept"]["member_count"] == 3
+
+    def test_process_no_redis_client_skips_snapshot(self):
+        """process() skips type snapshot when redis_client is None."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus)
+
+        # Should not raise even without redis_client
+        result = processor.process(self._make_proposal())
+        assert "stored_node_ids" in result
+        # get_all_type_definitions should NOT be called for type snapshot when no redis
+        mock_hcg.get_all_type_definitions.assert_not_called()
+
+    def test_process_redis_write_failure_does_not_break_processing(self):
+        """If Redis write fails, process() still returns results."""
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+
+        mock_hcg.get_all_type_definitions.return_value = [
+            {
+                "uuid": "type_entity",
+                "name": "entity",
+                "properties": {"member_count": 1},
+            },
+        ]
+        mock_redis.set.side_effect = RuntimeError("Redis connection lost")
+
+        result = processor.process(self._make_proposal())
+        assert "stored_node_ids" in result
+        assert "new-uuid" in result["stored_node_ids"]
+
+    def test_process_hcg_query_failure_does_not_break_processing(self):
+        """If HCG type query fails, process() still returns results."""
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+
+        mock_hcg.get_all_type_definitions.side_effect = RuntimeError("Neo4j down")
+
+        result = processor.process(self._make_proposal())
+        assert "stored_node_ids" in result
+        assert "new-uuid" in result["stored_node_ids"]
+        # Redis should not have been written to
+        mock_redis.set.assert_not_called()
+
+    def test_type_snapshot_skips_nameless_records(self):
+        """Type records with empty names are excluded from the snapshot."""
+        import json
+
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+
+        mock_hcg.get_all_type_definitions.return_value = [
+            {
+                "uuid": "type_entity",
+                "name": "entity",
+                "properties": {"member_count": 2},
+            },
+            {"uuid": "type_empty", "name": "", "properties": {"member_count": 0}},
+        ]
+
+        processor.process(self._make_proposal())
+
+        value = json.loads(mock_redis.set.call_args[0][1])
+        assert "entity" in value
+        assert "" not in value
+        assert len(value) == 1

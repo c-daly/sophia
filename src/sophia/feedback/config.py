@@ -3,6 +3,8 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from logos_config import RedisConfig
+
 
 class FeedbackConfig(BaseSettings):
     """Configuration for feedback emission."""
@@ -11,9 +13,9 @@ class FeedbackConfig(BaseSettings):
         default=True,
         description="Enable/disable feedback emission",
     )
-    redis_url: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL",
+    redis: RedisConfig = Field(
+        default_factory=RedisConfig,
+        description="Redis configuration",
     )
     hermes_url: str = Field(
         default="http://localhost:18000",

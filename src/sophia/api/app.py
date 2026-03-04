@@ -29,7 +29,8 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from logos_config import Neo4jConfig, MilvusConfig, get_env_value
+from logos_config import Neo4jConfig, MilvusConfig, RedisConfig, get_env_value
+from logos_events import EventBus
 from logos_config.health import HealthResponse as LogosHealthResponse, DependencyStatus
 from logos_test_utils import setup_logging
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -248,6 +249,8 @@ _maintenance_scheduler: Optional[MaintenanceScheduler] = None
 _maintenance_task: Optional[Any] = None
 _maint_redis: Optional[Any] = None
 _maint_event_bus: Optional[Any] = None
+_event_bus: Optional[Any] = None
+_redis_direct: Optional[Any] = None
 
 
 @asynccontextmanager
@@ -258,6 +261,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
     global _proposal_processor, _proposal_worker, _proposal_worker_task
     global _maintenance_scheduler, _maintenance_task, _maint_redis, _maint_event_bus
+    global _event_bus, _redis_direct
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -283,7 +287,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             from redis.exceptions import ConnectionError as RedisConnectionError
 
-            feedback_queue = FeedbackQueue(feedback_config.redis_url)
+            feedback_queue = FeedbackQueue(feedback_config.redis)
             # Test connection
             feedback_queue.pending_count()
             _feedback_dispatcher = FeedbackDispatcher(feedback_queue, enabled=True)
@@ -403,9 +407,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # Ensure HCG collections exist for proposal processing
             for _nt in ALL_MILVUS_COLLECTIONS:
                 _milvus_sync.ensure_collection(_nt)  # type: ignore[attr-defined]
+            # Initialize EventBus for pub/sub
+            try:
+                import redis
+
+                _redis_config = RedisConfig()
+                _event_bus = EventBus(_redis_config)
+                try:
+                    _redis_direct = redis.from_url(_redis_config.url)
+                except Exception:
+                    _event_bus.close()
+                    raise
+                logger.info("EventBus initialized for pub/sub")
+            except Exception as e:
+                logger.warning(f"EventBus unavailable: {e}")
+                _event_bus = None
+                _redis_direct = None
+
             _proposal_processor = ProposalProcessor(
                 hcg_client=_hcg_client,
                 milvus_sync=_milvus_sync,
+                event_bus=_event_bus,
+                redis_client=_redis_direct,
             )
             logger.info("ProposalProcessor initialized")
         except Exception as e:
@@ -421,7 +444,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from sophia.feedback.proposal_queue import ProposalQueue
             from sophia.feedback.proposal_worker import ProposalWorker
 
-            proposal_queue = ProposalQueue(feedback_config.redis_url)
+            proposal_queue = ProposalQueue(feedback_config.redis)
             proposal_queue.pending_count()  # Test connection
             _proposal_worker = ProposalWorker(
                 queue=proposal_queue,
@@ -613,6 +636,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _maint_event_bus.close()
     if _maint_redis is not None:
         _maint_redis.close()
+    if _event_bus is not None:
+        try:
+            _event_bus.close()
+            logger.info("EventBus closed")
+        except Exception:
+            logger.exception("Error closing EventBus")
+    if _redis_direct is not None:
+        try:
+            _redis_direct.close()
+            logger.info("Redis direct connection closed")
+        except Exception:
+            logger.exception("Error closing Redis direct connection")
 
     if _hcg_client:
         _hcg_client.close()
