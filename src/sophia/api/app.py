@@ -29,7 +29,8 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from logos_config import Neo4jConfig, MilvusConfig, get_env_value
+from logos_config import Neo4jConfig, MilvusConfig, RedisConfig, get_env_value
+from logos_events import EventBus
 from logos_config.health import HealthResponse as LogosHealthResponse, DependencyStatus
 from logos_test_utils import setup_logging
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -240,6 +241,7 @@ _feedback_worker_task: Optional[Any] = None
 _proposal_processor: Optional[ProposalProcessor] = None
 _proposal_worker: Optional[Any] = None
 _proposal_worker_task: Optional[Any] = None
+_event_bus: Optional[Any] = None
 
 
 @asynccontextmanager
@@ -249,6 +251,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _jepa_runner, _media_storage, _media_ingestion, _cwm_persistence
     global _feedback_dispatcher, _feedback_worker, _feedback_worker_task
     global _proposal_processor, _proposal_worker, _proposal_worker_task
+    global _event_bus
 
     # Startup
     logger.info("Starting Sophia API service...")
@@ -393,9 +396,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # Ensure HCG collections exist for proposal processing
             for _nt in ALL_MILVUS_COLLECTIONS:
                 _milvus_sync.ensure_collection(_nt)  # type: ignore[attr-defined]
+            # Initialize EventBus for pub/sub
+            try:
+                import redis
+
+                _redis_config = RedisConfig()
+                _event_bus = EventBus(_redis_config)
+                _redis_direct = redis.from_url(_redis_config.url)
+                logger.info("EventBus initialized for pub/sub")
+            except Exception as e:
+                logger.warning(f"EventBus unavailable: {e}")
+                _event_bus = None
+                _redis_direct = None
+
             _proposal_processor = ProposalProcessor(
                 hcg_client=_hcg_client,
                 milvus_sync=_milvus_sync,
+                event_bus=_event_bus,
+                redis_client=_redis_direct,
             )
             logger.info("ProposalProcessor initialized")
         except Exception as e:
@@ -450,6 +468,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except asyncio.CancelledError:
             pass
         logger.info("Feedback worker stopped")
+
+    if _event_bus is not None:
+        _event_bus.close()
+        logger.info("EventBus closed")
 
     if _hcg_client:
         _hcg_client.close()
