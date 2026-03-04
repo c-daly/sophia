@@ -104,12 +104,45 @@ class ProposalProcessor:
         self._event_bus = event_bus
         self._redis = redis_client
 
+    def _publish_batch_event(
+        self,
+        stored_node_ids: list[str],
+        stored_edge_ids: list[str],
+        new_types: list[str],
+        updated_types: list[str],
+        affected_node_uuids: list[str],
+    ) -> None:
+        """Publish a batch event summarizing the proposal processing."""
+        if self._event_bus is None:
+            return
+        try:
+            self._event_bus.publish(
+                "logos:sophia:proposal_processed",
+                {
+                    "event_type": "proposal_processed",
+                    "source": "sophia",
+                    "payload": {
+                        "new_types": new_types,
+                        "updated_types": updated_types,
+                        "stored_node_ids": stored_node_ids,
+                        "stored_edge_ids": stored_edge_ids,
+                        "affected_node_uuids": affected_node_uuids,
+                    },
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish proposal_processed event")
+
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
         stored_ids: list[str] = []
         relevant_context: list[dict] = []
         # Track entity name -> node uuid for edge resolution.
         name_to_uuid: dict[str, str] = {}
+        # Track types and affected nodes for batch event.
+        new_types: list[str] = []
+        updated_types: list[str] = []
+        affected_node_uuids: list[str] = []
         pending_embeddings: dict[str, list[dict]] = {}
 
         with tracer.start_as_current_span(
@@ -264,6 +297,7 @@ class ProposalProcessor:
                         )
                         stored_ids.append(node_uuid)
                         name_to_uuid[name] = node_uuid
+                        affected_node_uuids.append(node_uuid)
                     except Exception as e:
                         logger.error(f"Failed to create node '{name}': {e}")
                         continue
@@ -271,6 +305,7 @@ class ProposalProcessor:
                     # 2c. Connect to type definition via IS_A edge.
                     # Ensure the type-definition node exists (MERGE is idempotent).
                     type_def_uuid = f"type_{node_type}"
+                    _is_new_type = type_def_uuid not in name_to_uuid
                     try:
                         self._hcg.add_node(
                             uuid=type_def_uuid,
@@ -290,6 +325,12 @@ class ProposalProcessor:
                             node_type,
                             e,
                         )
+
+                    # Track type as new or updated for the batch event.
+                    if _is_new_type and node_type not in new_types:
+                        new_types.append(node_type)
+                    elif not _is_new_type and node_type not in updated_types:
+                        updated_types.append(node_type)
 
                     # 2d. Collect embedding for batch upsert
                     if embedding:
@@ -448,6 +489,15 @@ class ProposalProcessor:
                             collection_type,
                             e,
                         )
+
+            # Publish batch event summarising what changed.
+            self._publish_batch_event(
+                stored_node_ids=stored_ids,
+                stored_edge_ids=stored_edge_ids,
+                new_types=new_types,
+                updated_types=updated_types,
+                affected_node_uuids=affected_node_uuids,
+            )
 
             return {
                 "stored_node_ids": stored_ids,

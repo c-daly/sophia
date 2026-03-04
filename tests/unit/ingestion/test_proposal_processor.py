@@ -1145,3 +1145,148 @@ class TestProposalProcessorEventBus:
         mock_milvus = MagicMock()
         processor = ProposalProcessor(mock_hcg, mock_milvus)
         assert processor._event_bus is None
+
+    def test_process_publishes_batch_event(self):
+        """process() publishes a proposal_processed event via EventBus."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_event_bus = MagicMock()
+
+        # Configure mocks to let process() run through node creation path
+        mock_hcg.add_node.return_value = "node-uuid-1"
+        mock_hcg.add_edge.return_value = "edge-uuid-1"
+        mock_hcg.get_node.return_value = {
+            "uuid": "type_entity",
+            "name": "entity",
+            "properties": {"member_count": 1, "centroid": [0.1] * 384},
+        }
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_hcg.find_nodes_by_names.return_value = {}
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+        mock_milvus.batch_upsert_embeddings.return_value = None
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus, event_bus=mock_event_bus)
+
+        proposal = {
+            "proposal_id": "p-event-test",
+            "proposed_nodes": [
+                {
+                    "name": "Alice",
+                    "type": "entity",
+                    "embedding": [0.1] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {
+                "embedding": [0.5] * 384,
+                "embedding_id": "doc-1",
+                "dimension": 384,
+                "model": "all-MiniLM-L6-v2",
+            },
+            "raw_text": "test event publishing",
+            "source_service": "hermes",
+            "confidence": 0.7,
+            "metadata": {},
+        }
+
+        processor.process(proposal)
+
+        mock_event_bus.publish.assert_called_once()
+        channel, event = mock_event_bus.publish.call_args[0]
+        assert channel == "logos:sophia:proposal_processed"
+        assert event["event_type"] == "proposal_processed"
+        assert event["source"] == "sophia"
+        assert "payload" in event
+        payload = event["payload"]
+        assert "affected_node_uuids" in payload
+        assert "stored_node_ids" in payload
+        assert "stored_edge_ids" in payload
+        assert "new_types" in payload
+        assert "updated_types" in payload
+        assert "node-uuid-1" in payload["stored_node_ids"]
+
+    def test_process_no_event_bus_no_publish(self):
+        """process() works without event_bus -- no publish call."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+
+        mock_hcg.add_node.return_value = "node-uuid-1"
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus)
+
+        proposal = {
+            "proposal_id": "p-no-bus",
+            "proposed_nodes": [
+                {
+                    "name": "Bob",
+                    "type": "entity",
+                    "embedding": [0.2] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {},
+            "raw_text": "test no event bus",
+            "source_service": "hermes",
+            "confidence": 0.7,
+        }
+
+        # Should not raise even without event_bus
+        result = processor.process(proposal)
+        assert "stored_node_ids" in result
+
+    def test_process_publish_failure_does_not_break_processing(self):
+        """If EventBus.publish() raises, process() still returns normally."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_milvus = MagicMock()
+        mock_event_bus = MagicMock()
+        mock_event_bus.publish.side_effect = RuntimeError("Redis down")
+
+        mock_hcg.add_node.return_value = "node-uuid-1"
+        mock_hcg.get_nodes_batch.return_value = []
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(mock_hcg, mock_milvus, event_bus=mock_event_bus)
+
+        proposal = {
+            "proposal_id": "p-fail-bus",
+            "proposed_nodes": [
+                {
+                    "name": "Charlie",
+                    "type": "entity",
+                    "embedding": [0.3] * 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [],
+            "document_embedding": {},
+            "raw_text": "test publish failure",
+            "source_service": "hermes",
+            "confidence": 0.7,
+        }
+
+        result = processor.process(proposal)
+        assert "stored_node_ids" in result
+        assert "node-uuid-1" in result["stored_node_ids"]
+        mock_event_bus.publish.assert_called_once()
