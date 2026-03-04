@@ -19,7 +19,7 @@ class MaintenanceConfig(BaseSettings):
     )
     periodic_enabled: bool = Field(default=True, description="Run periodic graph scans")
     periodic_interval_seconds: int = Field(
-        default=3600, description="Interval between periodic scans"
+        default=3600, ge=1, description="Interval between periodic scans"
     )
     event_driven_enabled: bool = Field(
         default=True, description="React to specific EventBus channels"

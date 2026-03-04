@@ -81,8 +81,8 @@ class TestMaintenanceSchedulerIntegration:
                 "source": "sophia",
                 "payload": {
                     "affected_node_uuids": ["n1", "n2"],
-                    "new_types": [],
-                    "updated_types": [],
+                    "new_type_uuids": [],
+                    "updated_type_uuids": [],
                 },
             }
         )
@@ -97,7 +97,7 @@ class TestMaintenanceSchedulerIntegration:
         assert job.params == {"node_uuids": ["n1", "n2"]}
 
     def test_proposal_processed_enqueues_type_emergence(self) -> None:
-        """_on_proposal_processed enqueues type_emergence for updated_types."""
+        """_on_proposal_processed enqueues type_emergence for updated type UUIDs."""
         queue = MaintenanceQueue(self.redis)
         event_bus = self._make_mock_event_bus()
 
@@ -123,8 +123,8 @@ class TestMaintenanceSchedulerIntegration:
                 "source": "sophia",
                 "payload": {
                     "affected_node_uuids": ["n1"],
-                    "new_types": [],
-                    "updated_types": ["Vehicle", "Tool"],
+                    "new_type_uuids": [],
+                    "updated_type_uuids": ["type_Vehicle", "type_Tool"],
                 },
             }
         )
@@ -155,7 +155,7 @@ class TestMaintenanceSchedulerIntegration:
                 "event_type": "threshold_crossed",
                 "payload": {
                     "job_type": "consolidation",
-                    "params": {"type_name": "Animal"},
+                    "params": {"type_uuid": "type_Animal"},
                 },
             }
         )
@@ -164,7 +164,7 @@ class TestMaintenanceSchedulerIntegration:
         job = queue.dequeue(timeout=1)
         assert job is not None
         assert job.priority == "high"
-        assert job.params == {"type_name": "Animal"}
+        assert job.params == {"type_uuid": "type_Animal"}
 
     @pytest.mark.asyncio
     async def test_dispatch_loop_processes_jobs(self) -> None:

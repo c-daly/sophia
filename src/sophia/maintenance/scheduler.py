@@ -79,13 +79,15 @@ class MaintenanceScheduler:
         Enqueues relationship_discovery for affected nodes and
         type_emergence for updated types.
 
+        Note: Called from the EventBus listener thread. Must remain synchronous.
+
         Args:
-            event: Event payload with affected_node_uuids and updated_types.
+            event: Event payload with affected_node_uuids and type UUIDs.
         """
         payload = event.get("payload", {})
         affected_nodes = payload.get("affected_node_uuids", [])
-        new_types = payload.get("new_types", [])
-        updated_types = payload.get("updated_types", [])
+        new_type_uuids = payload.get("new_type_uuids", [])
+        updated_type_uuids = payload.get("updated_type_uuids", [])
 
         if affected_nodes and "relationship_discovery" in self._handlers:
             self._queue.enqueue(
@@ -94,21 +96,23 @@ class MaintenanceScheduler:
                 params={"node_uuids": affected_nodes},
             )
 
-        all_types = new_types + updated_types
-        if all_types and "type_emergence" in self._handlers:
-            for type_name in all_types:
+        all_type_uuids = new_type_uuids + updated_type_uuids
+        if all_type_uuids and "type_emergence" in self._handlers:
+            for type_uuid in all_type_uuids:
                 self._queue.enqueue(
                     job_type="type_emergence",
                     priority="normal",
-                    params={"type_name": type_name},
+                    params={"type_uuid": type_uuid},
                 )
 
         # Threshold check for new/updated types
-        if self._config.threshold_enabled and (new_types or updated_types):
-            self._check_thresholds(new_types + updated_types)
+        if self._config.threshold_enabled and (new_type_uuids or updated_type_uuids):
+            self._check_thresholds(new_type_uuids + updated_type_uuids)
 
     def _on_threshold_crossed(self, event: dict) -> None:
         """Handle threshold_crossed events by enqueuing the specified job.
+
+        Note: Called from the EventBus listener thread. Must remain synchronous.
 
         Args:
             event: Event payload with job_type and optional params.
@@ -130,14 +134,14 @@ class MaintenanceScheduler:
         else:
             logger.warning("threshold_crossed: no handler for job_type %s", job_type)
 
-    def _check_thresholds(self, type_names: list[str]) -> None:
+    def _check_thresholds(self, type_uuids: list[str]) -> None:
         """Check if any types cross the member count threshold."""
         if self._hcg is None:
             return
         # TODO: Implement when HCGClient exposes member count queries
         logger.debug(
             "Threshold checking not yet implemented, skipping %d types",
-            len(type_names),
+            len(type_uuids),
         )
 
     async def start(self) -> None:
@@ -216,12 +220,23 @@ class MaintenanceScheduler:
                     break
             try:
                 logger.info("Periodic maintenance scan triggered")
-                if "type_emergence" in self._handlers:
-                    self._queue.enqueue(
-                        job_type="type_emergence",
-                        priority="low",
-                        params={"scan": "full"},
-                    )
+                # Periodic scans only trigger type_emergence. Relationship discovery
+                # requires per-node embeddings and is too expensive for full-graph
+                # sweeps; it runs only via post-ingestion triggers on affected nodes.
+                if "type_emergence" in self._handlers and self._hcg is not None:
+                    try:
+                        all_types = self._hcg.get_all_type_definitions()
+                    except Exception:
+                        logger.exception("Failed to fetch types for periodic scan")
+                        all_types = []
+                    for td in all_types:
+                        type_uuid = td.get("uuid", "")
+                        if type_uuid:
+                            self._queue.enqueue(
+                                job_type="type_emergence",
+                                priority="low",
+                                params={"type_uuid": type_uuid},
+                            )
             except Exception:
                 if self._running:
                     logger.exception("Error in periodic loop")

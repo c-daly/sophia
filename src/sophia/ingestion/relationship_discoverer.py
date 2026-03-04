@@ -16,8 +16,9 @@ _SEARCHABLE_TYPES = ("Entity", "Concept", "State", "Process")
 class RelationshipDiscoverer:
     """Discovers relationship candidates across type clusters."""
 
-    def __init__(self, milvus: Any) -> None:
+    def __init__(self, milvus: Any, hcg: Any | None = None) -> None:
         self._milvus = milvus
+        self._hcg = hcg
 
     def find_candidates(
         self,

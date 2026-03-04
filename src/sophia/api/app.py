@@ -448,7 +448,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _maint_redis = redis.from_url(_maint_redis_config.url)
             _maint_queue = MaintenanceQueue(_maint_redis)
 
-            # Register available handlers
+            # Register available handlers — adapters bridge scheduler params
+            # to the signatures expected by the underlying detectors.
             from sophia.ingestion.type_emergence import TypeEmergenceDetector
             from sophia.ingestion.relationship_discoverer import RelationshipDiscoverer
 
@@ -457,11 +458,103 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 _type_emergence = TypeEmergenceDetector(
                     milvus=_milvus_sync, hcg=_hcg_client
                 )
-                _relationship_discoverer = RelationshipDiscoverer(milvus=_milvus_sync)
+                _relationship_discoverer = RelationshipDiscoverer(
+                    milvus=_milvus_sync, hcg=_hcg_client
+                )
+
+                def _handle_type_emergence(
+                    type_name: str = "", scan: str = "", **kwargs: object
+                ) -> None:
+                    """Adapter: scheduler params -> TypeEmergenceDetector.check_type.
+
+                    The scheduler enqueues jobs with ``type_name`` (from event
+                    payloads) or ``scan='full'`` (periodic). The underlying
+                    ``check_type`` expects a type UUID, so we resolve the name
+                    via the HCG graph.
+                    """
+                    assert _hcg_client is not None  # guarded by outer if
+                    if scan == "full":
+                        # Full scan: check all type definitions
+                        try:
+                            # get_all_type_definitions requires foundry >= v0.7.0;
+                            # fall back gracefully if unavailable.
+                            if not hasattr(_hcg_client, "get_all_type_definitions"):
+                                logger.debug(
+                                    "Full type emergence scan skipped — "
+                                    "HCGClient.get_all_type_definitions not available "
+                                    "(requires foundry >= v0.7.0)"
+                                )
+                                return
+                            all_types = _hcg_client.get_all_type_definitions()
+                            for td in all_types:
+                                type_uuid = td.get("uuid", "")
+                                if type_uuid:
+                                    _type_emergence.check_type(type_uuid)
+                        except Exception:
+                            logger.exception("Full type emergence scan failed")
+                        return
+                    if not type_name:
+                        logger.warning("type_emergence job missing type_name param")
+                        return
+                    # Look up UUID from type name via HCG
+                    try:
+                        if not hasattr(_hcg_client, "get_all_type_definitions"):
+                            logger.debug(
+                                "type_emergence skipped for %r — "
+                                "get_all_type_definitions not available",
+                                type_name,
+                            )
+                            return
+                        all_types = _hcg_client.get_all_type_definitions()
+                        for td in all_types:
+                            if td.get("name") == type_name:
+                                _type_emergence.check_type(td["uuid"])
+                                return
+                        logger.warning(
+                            "type_emergence: type %r not found in graph", type_name
+                        )
+                    except Exception:
+                        logger.exception(
+                            "type_emergence lookup failed for %r", type_name
+                        )
+
+                def _handle_relationship_discovery(
+                    node_uuids: list | None = None, **kwargs: object
+                ) -> None:
+                    """Adapter: scheduler params -> RelationshipDiscoverer.find_candidates.
+
+                    The underlying ``find_candidates`` requires per-node embedding
+                    and type info. Embedding lookup infrastructure (e.g.
+                    ``HCGMilvusSync.get_node_embedding``) does not exist yet, so
+                    this adapter logs and skips until that API is available.
+                    """
+                    if not node_uuids:
+                        logger.warning("relationship_discovery job missing node_uuids")
+                        return
+                    # TODO: Implement when HCGMilvusSync exposes a
+                    # get_node_embedding(uuid) -> {embedding, node_type} method.
+                    logger.info(
+                        "relationship_discovery: skipping %d node(s) — "
+                        "per-node embedding lookup not yet available",
+                        len(node_uuids),
+                    )
+
                 _handlers = {
-                    "type_emergence": _type_emergence.check_type,
-                    "relationship_discovery": _relationship_discoverer.find_candidates,
+                    "type_emergence": _handle_type_emergence,
+                    "relationship_discovery": _handle_relationship_discovery,
                 }
+
+            if not _handlers:
+                logger.warning(
+                    "Maintenance scheduler started with no handlers "
+                    "(Milvus/HCG unavailable?); all jobs will be skipped"
+                )
+
+            if not _handlers:
+                logger.warning(
+                    "Maintenance scheduler starting with no handlers "
+                    "(Milvus/HCG unavailable?); all jobs will be skipped"
+                )
 
             _maintenance_scheduler = MaintenanceScheduler(
                 queue=_maint_queue,
@@ -515,6 +608,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pass
         logger.info("Maintenance scheduler stopped")
     if _maint_event_bus is not None:
+        # safe after scheduler.stop() — stop() halts the listen loop,
+        # close() releases the underlying Redis connection.
         _maint_event_bus.close()
     if _maint_redis is not None:
         _maint_redis.close()
