@@ -483,60 +483,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
 
                 def _handle_type_emergence(
-                    type_name: str = "", scan: str = "", **kwargs: object
+                    type_uuid: str = "", scan: str = "", **kwargs: object
                 ) -> None:
                     """Adapter: scheduler params -> TypeEmergenceDetector.check_type.
 
-                    The scheduler enqueues jobs with ``type_name`` (from event
+                    The scheduler enqueues jobs with ``type_uuid`` (from event
                     payloads) or ``scan='full'`` (periodic). The underlying
-                    ``check_type`` expects a type UUID, so we resolve the name
-                    via the HCG graph.
+                    ``check_type`` accepts a type UUID directly.
                     """
                     assert _hcg_client is not None  # guarded by outer if
                     if scan == "full":
                         # Full scan: check all type definitions
                         try:
-                            # get_all_type_definitions requires foundry >= v0.7.0;
-                            # fall back gracefully if unavailable.
-                            if not hasattr(_hcg_client, "get_all_type_definitions"):
-                                logger.debug(
-                                    "Full type emergence scan skipped — "
-                                    "HCGClient.get_all_type_definitions not available "
-                                    "(requires foundry >= v0.7.0)"
-                                )
-                                return
                             all_types = _hcg_client.get_all_type_definitions()
                             for td in all_types:
-                                type_uuid = td.get("uuid", "")
-                                if type_uuid:
-                                    _type_emergence.check_type(type_uuid)
+                                uuid = td.get("uuid", "")
+                                if uuid:
+                                    _type_emergence.check_type(uuid)
                         except Exception:
                             logger.exception("Full type emergence scan failed")
                         return
-                    if not type_name:
-                        logger.warning("type_emergence job missing type_name param")
+                    if not type_uuid:
+                        logger.warning("type_emergence job missing type_uuid param")
                         return
-                    # Look up UUID from type name via HCG
                     try:
-                        if not hasattr(_hcg_client, "get_all_type_definitions"):
-                            logger.debug(
-                                "type_emergence skipped for %r — "
-                                "get_all_type_definitions not available",
-                                type_name,
-                            )
-                            return
-                        all_types = _hcg_client.get_all_type_definitions()
-                        for td in all_types:
-                            if td.get("name") == type_name:
-                                _type_emergence.check_type(td["uuid"])
-                                return
-                        logger.warning(
-                            "type_emergence: type %r not found in graph", type_name
-                        )
+                        _type_emergence.check_type(type_uuid)
                     except Exception:
-                        logger.exception(
-                            "type_emergence lookup failed for %r", type_name
-                        )
+                        logger.exception("type_emergence failed for %r", type_uuid)
 
                 def _handle_relationship_discovery(
                     node_uuids: list | None = None, **kwargs: object
@@ -567,12 +540,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if not _handlers:
                 logger.warning(
                     "Maintenance scheduler started with no handlers "
-                    "(Milvus/HCG unavailable?); all jobs will be skipped"
-                )
-
-            if not _handlers:
-                logger.warning(
-                    "Maintenance scheduler starting with no handlers "
                     "(Milvus/HCG unavailable?); all jobs will be skipped"
                 )
 
