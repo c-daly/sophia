@@ -8,6 +8,7 @@ Sophia operates on embeddings, not text. Text properties exist on nodes
 for Hermes's benefit when context is returned.
 """
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal, Tuple
@@ -132,6 +133,35 @@ class ProposalProcessor:
             )
         except Exception:
             logger.exception("Failed to publish proposal_processed event")
+
+    def _write_type_snapshot(self) -> None:
+        """Write full type list to Redis for Hermes initial sync."""
+        if self._redis is None:
+            return
+        try:
+            # Query all type_definition nodes from the KG
+            records = self._hcg._execute_read(
+                "MATCH (n:Node {type: 'type_definition'}) "
+                "RETURN n.uuid AS uuid, n.name AS name, "
+                "n.properties AS properties"
+            )
+            snapshot: dict[str, dict[str, Any]] = {}
+            for record in records:
+                name = record.get("name", "")
+                if not name:
+                    continue
+                props = record.get("properties")
+                if isinstance(props, dict):
+                    member_count = props.get("member_count", 0)
+                else:
+                    member_count = 0
+                snapshot[name] = {
+                    "uuid": record.get("uuid", ""),
+                    "member_count": member_count,
+                }
+            self._redis.set("logos:ontology:types", json.dumps(snapshot))
+        except Exception:
+            logger.exception("Failed to write type snapshot to Redis")
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
@@ -498,6 +528,9 @@ class ProposalProcessor:
                 updated_types=updated_types,
                 affected_node_uuids=affected_node_uuids,
             )
+
+            # Write full type snapshot to Redis for Hermes initial sync.
+            self._write_type_snapshot()
 
             return {
                 "stored_node_ids": stored_ids,
