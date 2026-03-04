@@ -80,20 +80,47 @@ class TestPubSubFlow:
         assert received[0]["event_type"] == "proposal_processed"
         assert received[0]["payload"]["new_types"] == ["vehicle"]
 
-    def test_type_snapshot_written_and_readable(self):
-        """Type snapshot written to Redis is readable."""
+    def test_write_type_snapshot_writes_correct_format(self):
+        """_write_type_snapshot writes correct JSON to Redis key."""
+        from unittest.mock import MagicMock
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
         config = RedisConfig()
         r = redis.from_url(config.url)
 
-        snapshot = {
-            "person": {"uuid": "t1", "member_count": 10},
-            "location": {"uuid": "t2", "member_count": 5},
-        }
-        r.set("logos:ontology:types", json.dumps(snapshot))
+        # Clean up before test
+        r.delete("logos:ontology:types")
+
+        mock_hcg = MagicMock()
+        mock_hcg._execute_read.return_value = [
+            {
+                "name": "person",
+                "uuid": "type_person",
+                "properties": {"member_count": 10},
+            },
+            {
+                "name": "location",
+                "uuid": "type_location",
+                "properties": {"member_count": 5},
+            },
+        ]
+
+        processor = ProposalProcessor(
+            hcg_client=mock_hcg,
+            milvus_sync=MagicMock(),
+            event_bus=None,
+            redis_client=r,
+        )
+        processor._write_type_snapshot()
 
         raw = r.get("logos:ontology:types")
-        loaded = json.loads(raw)
-        assert loaded == snapshot
+        assert raw is not None
+        snapshot = json.loads(raw)
+        assert "person" in snapshot
+        assert snapshot["person"]["uuid"] == "type_person"
+        assert snapshot["person"]["member_count"] == 10
+        assert "location" in snapshot
 
         # Cleanup
         r.delete("logos:ontology:types")
