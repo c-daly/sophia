@@ -21,6 +21,8 @@ wheels/
 *.egg
 MANIFEST
 
+.serena/ 
+
 # Virtual environments
 venv/
 env/
