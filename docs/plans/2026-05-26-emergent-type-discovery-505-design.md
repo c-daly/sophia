@@ -36,7 +36,7 @@ Relationship to siblings: **#504 (Type Correction)** is downstream — it correc
 
 1. Hermes extracts; unknowns fall to `entity` (the junk drawer).
 2. Sophia ingests → `entity` grows and its variance climbs.
-3. Sophia detects the high-variance type and pulls its outliers.
+3. Sophia clusters the type's **full membership** to find latent sub-structure.
 4. Sophia clusters outliers by **embedding ∩ structure**; only groups coherent in both proceed.
 5. Sophia sends each candidate cluster's **full membership** to Hermes `name_cluster`; Hermes returns the binding label (existing or new, broad if necessary).
 6. Sophia mints the type, retypes members (`type` + `IS_A` + incremental centroid update), records lineage.
@@ -48,14 +48,16 @@ Relationship to siblings: **#504 (Type Correction)** is downstream — it correc
 ### 0. Enabling change — record Hermes' initial type recommendation (ingestion)
 Hermes' proposal already carries a per-node `type` (its NER pick from the 14-vocab), but `ProposalProcessor` overwrites it with the centroid-derived type and discards the hint. Persist it instead as `hermes_type_hint` on the node (a one-property addition in `ProposalProcessor`), alongside the authoritative centroid `type`. This costs nothing at ingestion and gives emergence (and #504) a recorded prior — e.g. a cluster whose members were mostly hinted `concept` reinforces naming it `concept` — plus a debugging breadcrumb for *what Hermes originally thought*.
 
-### 1. Trigger — junk-drawer detection
-A maintenance handler registered on `MaintenanceScheduler` (job_type → handler). For each candidate type it computes cohesion = variance of member embeddings around the type centroid (reuse `type_emergence._variance`). A type is a junk-drawer candidate when `variance > variance_threshold` AND `member_count ≥ min_cluster_size`. `entity` is the first target. Runs on the periodic maintenance sweep and on the scheduler's existing threshold events.
+### 1. Trigger — accumulation (not anomaly)
+The scheduler already enqueues `type_emergence` jobs (`params={"type_uuid": ...}`) on two triggers: the **periodic scan** and **member-count growth** after proposal processing. Emergence runs on *accumulation* — a type worth examining is one that has grown, not one with outliers. `variance` (reuse `type_emergence._variance`) is only a cheap **pre-filter**: skip types already tight enough that re-clustering can't improve them (`variance ≤ variance_threshold`). The real go/no-go is whether full-membership clustering reveals cohesion-improving sub-clusters (§2). `entity` is the first target.
 
-### 2. Dual-signal, outlier-first clustering (scale-aware)
-- **Outlier pull:** select members whose distance from the type centroid is anomalous; cluster only those, not the whole type.
-- **Embedding signal:** cluster the outlier embeddings (extend the existing `type_emergence` k-means; choose k via cohesion gain / recursive k=2 until sub-clusters are cohesive).
-- **Structural signal (net-new):** compute a per-node *neighbor-relation signature* from Neo4j — the multiset of `(relation_type, neighbor_type)` pairs incident to the node (e.g. `{MOVED_TO→location, LOCATED_ON→object}` vs `{DEFINED_AS→concept, MEASURES→concept}`). Group nodes by signature similarity.
-- **Intersection:** a candidate cluster is a group of nodes that co-occur in both an embedding cluster and a structural cluster. Only the intersection proceeds to naming. This is the precision bar that prevents spurious types.
+### 2. Dual-signal full-membership clustering
+Emergence clusters the **entire membership** of the type — never outliers. Two reasons outliers are the wrong frame: (a) the cold-start `entity` blob has no coherent core to be an outlier *from* — its centroid is a meaningless average between the real groups; (b) a type can be perfectly outlier-free yet secretly **multi-modal** — several tight sub-clusters a single broad type is papering over. Finding that latent structure is the whole point, and latent structure isn't an anomaly.
+- **Embedding signal:** recursively binary-split the members with the existing `type_emergence._kmeans_2` — keep splitting a group while the split *improves cohesion* by ≥ `min_cohesion_improvement` and both halves are ≥ `min_cluster_size`; stop when a piece is already cohesive. Finds *however many* tight clusters exist, not just two.
+- **Structural signal (net-new):** per-node *neighbor-relation signature* from Neo4j — the multiset of `(relation_type, neighbor_type)` pairs incident to the node (e.g. `{MOVED_TO→location, LOCATED_ON→object}` vs `{DEFINED_AS→concept, MEASURES→concept}`). A cluster must be structurally coherent (members mutually similar on signature).
+- **Agreement:** a cluster is minted only if coherent in **both** signals. The split decision is cohesion *gain*, never anomaly.
+
+> Outliers are still interesting — but for **#504 (correction)**, not emergence: a node far from its assigned type's centroid (and near another's) is a re-typing or alias/merge candidate. That lane belongs to #504; #505 never pulls outliers.
 
 ### 3. `name_cluster` — Hermes contract (net-new endpoint)
 Sophia knows *that* the nodes belong together; Hermes says *what* they are.

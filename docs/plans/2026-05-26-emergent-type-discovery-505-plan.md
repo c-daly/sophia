@@ -402,7 +402,7 @@ git commit -m "feat(505): structural neighbor-relation signature + similarity"
 
 ---
 
-## Task 5: Dual-signal outlier clustering
+## Task 5: Dual-signal full-membership clustering (recursive)
 
 **Files:**
 - Create: `sophia/src/sophia/maintenance/emergence_clustering.py`
@@ -452,6 +452,25 @@ def test_no_split_when_signals_disagree():
 
 def test_below_min_size_not_returned():
     members = [_m(f"p{i}", [0.0, 0.0], ("MOVED_TO", "location")) for i in range(2)]
+    clusters = find_emergent_clusters(members, min_cluster_size=3,
+                                      min_cohesion_improvement=0.15)
+    assert clusters == []
+
+
+def test_three_groups_recurse_to_three():
+    """Full-membership recursive split finds >2 tight groups, no outliers needed."""
+    members = []
+    for (bx, by), sig in [((0.0, 0.0), ("A", "t")), ((9.0, 9.0), ("B", "t")),
+                          ((0.0, 18.0), ("C", "t"))]:
+        members += [_m(f"{sig[0]}{i}", [bx + i * 0.01, by], sig) for i in range(3)]
+    clusters = find_emergent_clusters(members, min_cluster_size=3,
+                                      min_cohesion_improvement=0.1)
+    assert len(clusters) == 3
+
+
+def test_single_cohesive_group_returns_empty():
+    """A type that is already one tight group yields no sub-types."""
+    members = [_m(f"a{i}", [0.0 + i * 0.01, 0.0], ("A", "t")) for i in range(6)]
     clusters = find_emergent_clusters(members, min_cluster_size=3,
                                       min_cohesion_improvement=0.15)
     assert clusters == []
@@ -523,25 +542,49 @@ def _cohesion_improvement(parent: list[Member], group: list[Member]) -> float:
     return (pv - gv) / pv
 
 
+def _recursive_clusters(
+    members: list[Member], *, min_cluster_size: int, min_cohesion_improvement: float
+) -> list[list[Member]]:
+    """Recursively binary-split the FULL set while each split improves cohesion."""
+    if len(members) < 2 * min_cluster_size:
+        return [members]
+    groups = _embedding_groups(members)
+    if len(groups) < 2 or any(len(g) < min_cluster_size for g in groups):
+        return [members]
+    if min(_cohesion_improvement(members, g) for g in groups) < min_cohesion_improvement:
+        return [members]  # split doesn't help -> this set is a cohesive leaf
+    leaves: list[list[Member]] = []
+    for g in groups:
+        leaves.extend(_recursive_clusters(
+            g, min_cluster_size=min_cluster_size,
+            min_cohesion_improvement=min_cohesion_improvement))
+    return leaves
+
+
 def find_emergent_clusters(
     members: list[Member],
     *,
     min_cluster_size: int,
     min_cohesion_improvement: float,
 ) -> list[EmergentCluster]:
-    """Return clusters that agree on embedding AND structure and are cohesive."""
-    if len(members) < min_cluster_size:
+    """Cluster the FULL membership; return cohesive, structurally-coherent groups.
+
+    No outlier step: a type is split when recursive clustering reveals tighter
+    sub-groups (cohesion gain), which also catches outlier-free but multi-modal
+    types. Returns [] when the membership is already one cohesive group.
+    """
+    if len(members) < 2 * min_cluster_size:
         return []
-    clusters: list[EmergentCluster] = []
-    for group in _embedding_groups(members):
-        if len(group) < min_cluster_size:
-            continue
-        if not _structurally_coherent(group):
-            continue
-        if _cohesion_improvement(members, group) < min_cohesion_improvement:
-            continue
-        clusters.append(EmergentCluster(members=group))
-    return clusters
+    leaves = _recursive_clusters(
+        members, min_cluster_size=min_cluster_size,
+        min_cohesion_improvement=min_cohesion_improvement)
+    if len(leaves) < 2:
+        return []  # nothing split out -> no new sub-types
+    return [
+        EmergentCluster(members=leaf)
+        for leaf in leaves
+        if len(leaf) >= min_cluster_size and _structurally_coherent(leaf)
+    ]
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
