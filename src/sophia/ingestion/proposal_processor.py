@@ -313,6 +313,11 @@ class ProposalProcessor:
                                 classification.needs_reclassification
                             )
 
+                        # Preserve Hermes' initial NER type pick as provenance / a
+                        # weak prior for emergence (#505); the authoritative `type`
+                        # is the centroid-classified one above.
+                        node_props["hermes_type_hint"] = proposed.get("type")
+
                         node_uuid = self._hcg.add_node(
                             name=name,
                             node_type=node_type,
