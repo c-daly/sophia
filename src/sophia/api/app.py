@@ -470,13 +470,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
             # Register available handlers — adapters bridge scheduler params
             # to the signatures expected by the underlying detectors.
-            from sophia.ingestion.type_emergence import TypeEmergenceDetector
+            from sophia.maintenance.emergence_handler import build_emergence_handler
             from sophia.ingestion.relationship_discoverer import RelationshipDiscoverer
 
             _handlers: dict = {}
             if _milvus_sync and _hcg_client:
-                _type_emergence = TypeEmergenceDetector(
-                    milvus=_milvus_sync, hcg=_hcg_client
+                _emergence_run = build_emergence_handler(
+                    config=_maintenance_config,
+                    hcg=_hcg_client,
+                    milvus=_milvus_sync,
+                    event_bus=_event_bus,
+                    hermes_url=feedback_config.hermes_url,
+                    token=get_env_value("SOPHIA_API_TOKEN") or "",
                 )
                 _relationship_discoverer = RelationshipDiscoverer(
                     milvus=_milvus_sync, hcg=_hcg_client
@@ -499,7 +504,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                             for td in all_types:
                                 uuid = td.get("uuid", "")
                                 if uuid:
-                                    _type_emergence.check_type(uuid)
+                                    _emergence_run(uuid)
                         except Exception:
                             logger.exception("Full type emergence scan failed")
                         return
@@ -507,7 +512,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                         logger.warning("type_emergence job missing type_uuid param")
                         return
                     try:
-                        _type_emergence.check_type(type_uuid)
+                        _emergence_run(type_uuid)
                     except Exception:
                         logger.exception("type_emergence failed for %r", type_uuid)
 

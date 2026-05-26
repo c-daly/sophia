@@ -144,3 +144,29 @@ class EmergenceHandler:
             logger.info(
                 "emergence: minted %s from %d members", name.label, cluster.size
             )
+
+
+def build_emergence_handler(*, config, hcg, milvus, event_bus, hermes_url, token):
+    """Return the callable registered as handlers['type_emergence']."""
+    from sophia.maintenance.hermes_naming import name_cluster
+    from sophia.maintenance.type_minting import mint_type
+
+    handler = EmergenceHandler(
+        config=config,
+        hcg=hcg,
+        milvus=milvus,
+        event_bus=event_bus,
+        hermes_url=hermes_url,
+        token=token,
+        load_members=lambda u: load_type_members(hcg, milvus, u),
+        name_fn=lambda c, cand, url, tok: name_cluster(
+            c, candidates=cand, hermes_url=url, token=tok
+        ),
+        mint_fn=mint_type,
+        candidates_fn=lambda: current_categories(hcg),
+    )
+
+    def _run(type_uuid: str) -> None:
+        handler.run(type_uuid=type_uuid)
+
+    return _run
