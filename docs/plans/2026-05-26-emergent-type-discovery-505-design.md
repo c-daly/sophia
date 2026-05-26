@@ -21,7 +21,7 @@ Relationship to siblings: **#504 (Type Correction)** is downstream — it correc
 
 **Goals**
 - Detect when a type has become a junk drawer (high internal variance).
-- Cluster its outlier members using **two agreeing signals** (embedding proximity ∩ structural relationship-pattern similarity).
+- Cluster the type's full membership using **two agreeing signals** (embedding proximity ∩ structural relationship-pattern similarity).
 - Ask Hermes to name the unifying category of each cluster (the bind), reusing an existing category label when one fits, otherwise coining a new (possibly broad) one.
 - Mint the type (under `root`, peer of object/location), retype members with `IS_A` rewiring, seed its centroid, and keep a name/lineage history.
 - Propagate the new type to Hermes via pub/sub so subsequent ingestions use it.
@@ -37,8 +37,8 @@ Relationship to siblings: **#504 (Type Correction)** is downstream — it correc
 1. Hermes extracts; unknowns fall to `entity` (the junk drawer).
 2. Sophia ingests → `entity` grows and its variance climbs.
 3. Sophia clusters the type's **full membership** to find latent sub-structure.
-4. Sophia clusters outliers by **embedding ∩ structure**; only groups coherent in both proceed.
-5. Sophia sends each candidate cluster's **full membership** to Hermes `name_cluster`; Hermes returns the binding label (existing or new, broad if necessary).
+4. Only sub-groups coherent in **both** signals (embedding ∩ structure) proceed.
+5. Sophia sends each candidate cluster's **full membership** to Hermes `name_cluster`; Hermes returns the binding label (reusing an existing label where one fits, broad if necessary).
 6. Sophia mints the type, retypes members (`type` + `IS_A` + incremental centroid update), records lineage.
 7. Sophia publishes the ontology change; Hermes updates its type list.
 8. Next similar ingestion classifies into the new type. The loop repeats, refining coarse types into finer ones over time (monotonic refinement — see Guards).

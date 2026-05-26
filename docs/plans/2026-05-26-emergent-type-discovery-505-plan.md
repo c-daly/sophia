@@ -4,7 +4,7 @@
 
 **Goal:** Make Sophia turn the junk-drawer `entity` type into real, named types by clustering its members on two agreeing signals (embedding ∩ structure), asking Hermes to name each cluster, and minting the types — so the ontology grows from data and future ingestions classify correctly.
 
-**Architecture:** A `type_emergence` maintenance handler (the scheduler already dispatches this `job_type` with `params={"type_uuid": ...}`) orchestrates: detect high variance → pull outliers → dual-signal cluster → Hermes `name_cluster` → mint type (node + Milvus centroid + `IS_A` rewire + `name_history`) → publish ontology change via `EventBus`. Pure logic (signatures, clustering, minting decisions) is split into small, unit-testable modules; the handler wires them to Neo4j/Milvus/Hermes.
+**Architecture:** A `type_emergence` maintenance handler (the scheduler already dispatches this `job_type` with `params={"type_uuid": ...}`) orchestrates: on accumulation (periodic scan / member-count growth) → cluster the type's full membership (dual-signal: embedding ∩ structure) → Hermes `name_cluster` → mint type (node + Milvus centroid + `IS_A` rewire + `name_history`) → publish ontology change via `EventBus`. Pure logic (signatures, clustering, minting decisions) is split into small, unit-testable modules; the handler wires them to Neo4j/Milvus/Hermes.
 
 **Tech Stack:** Python 3.12, Poetry, pytest (mock-based unit tests), Pydantic v2 (`BaseSettings`), Neo4j (`HCGClient`), Milvus (type-centroid store), Redis `EventBus` (`logos_events`), FastAPI (Hermes endpoint), `httpx` (Sophia→Hermes call).
 
@@ -19,7 +19,7 @@
 **Sophia (new):**
 - `src/sophia/maintenance/emergence_types.py` — shared dataclasses (`Member`, `EmergentCluster`, `NameResult`).
 - `src/sophia/maintenance/structural_signature.py` — neighbor-relation signature + similarity (pure).
-- `src/sophia/maintenance/emergence_clustering.py` — outlier pull + dual-signal clustering (pure).
+- `src/sophia/maintenance/emergence_clustering.py` — full-membership dual-signal clustering (pure).
 - `src/sophia/maintenance/type_minting.py` — mint type node + seed centroid + retype member + `name_history` (HCG/Milvus side effects, dependency-injected).
 - `src/sophia/maintenance/hermes_naming.py` — Sophia→Hermes `name_cluster` client (httpx).
 - `src/sophia/maintenance/emergence_handler.py` — the `type_emergence` orchestration handler.
@@ -595,7 +595,7 @@ Expected: PASS. If `_kmeans_2`'s return shape differs from `(list_a, list_b)`, f
 
 ```bash
 git add src/sophia/maintenance/emergence_clustering.py tests/maintenance/test_emergence_clustering.py
-git commit -m "feat(505): dual-signal outlier clustering"
+git commit -m "feat(505): dual-signal full-membership clustering"
 ```
 
 ---
@@ -1339,8 +1339,8 @@ Re-send a domain sentence through Hermes `/llm` (as in the creation-loop demo) a
 ## Self-Review
 
 **Spec coverage** (design doc → task):
-- Junk-drawer/variance trigger → Task 9 (handler uses `find_emergent_clusters`; scheduler already dispatches `type_emergence`). Variance threshold config → Task 1.
-- Dual-signal (embedding ∩ structural), outlier-first → Tasks 4, 5.
+- Accumulation trigger (periodic scan + member-count growth, already dispatched by the scheduler); variance as cheap pre-filter → Task 9 / Task 1.
+- Dual-signal (embedding ∩ structural), full-membership recursive → Tasks 4, 5.
 - `name_cluster` (all members, name-the-bind, candidates as hints, `hermes_type_hint` prior) → Tasks 6, 7.
 - Type creation under `root` + retype + `IS_A` + centroid seed + `name_history` lineage → Task 8.
 - Pub/sub propagation → Task 9 (`EventBus.publish` on mint).
