@@ -13,10 +13,71 @@ import uuid as uuid_lib
 
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_clusters
+from sophia.maintenance.emergence_types import Member
+from sophia.maintenance.structural_signature import build_signature
 
 logger = logging.getLogger(__name__)
 
 ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
+
+
+def _type_name(type_uuid: str) -> str:
+    """Convention: type-definition uuids are 'type_<name>'."""
+    return type_uuid[len("type_"):] if type_uuid.startswith("type_") else type_uuid
+
+
+def current_categories(hcg) -> list[str]:
+    """Existing type-definition labels, excluding `entity` and reserved_* types."""
+    out: list[str] = []
+    for node in hcg.list_all_nodes(node_type="type_definition"):
+        name = node.get("name")
+        if not name or name == "entity" or name.startswith("reserved_"):
+            continue
+        out.append(name)
+    return out
+
+
+def load_type_members(hcg, milvus, type_uuid: str) -> list[Member]:
+    """Load all members of a type as Member objects (embedding + structural signature).
+
+    Embeddings come from Milvus; the structural signature is built from the node's
+    outgoing reified edges (relation + resolved neighbor type). Nodes without an
+    embedding are skipped (they can't be clustered).
+    """
+    type_name = _type_name(type_uuid)
+    members: list[Member] = []
+    for row in hcg.list_all_nodes(node_type=type_name):
+        uuid = row["uuid"]
+        emb = milvus.get_embedding(node_type=type_name, uuid=uuid)
+        if not emb or not emb.get("embedding"):
+            continue
+        edges = hcg.query_edges_from(uuid)
+        target_uuids = [e["target"] for e in edges if e.get("target")]
+        target_nodes = {
+            n["uuid"]: n for n in (hcg.get_nodes_batch(target_uuids) if target_uuids else [])
+        }
+        neighbors = [
+            {
+                "relation": e.get("relation"),
+                "neighbor_name": target_nodes.get(e.get("target"), {}).get("name"),
+                "neighbor_type": target_nodes.get(e.get("target"), {}).get("type"),
+            }
+            for e in edges
+        ]
+        props = row.get("properties", {}) or {}
+        members.append(
+            Member(
+                uuid=uuid,
+                name=row.get("name", uuid),
+                embedding=emb["embedding"],
+                signature=build_signature(neighbors),
+                current_type=row.get("type", type_name),
+                hermes_type_hint=props.get("hermes_type_hint"),
+                neighbors=neighbors,
+                model=emb.get("model"),
+            )
+        )
+    return members
 
 
 class EmergenceHandler:
