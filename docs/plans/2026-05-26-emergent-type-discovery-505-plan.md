@@ -224,8 +224,8 @@ def test_member_and_cluster_construct():
 
 
 def test_name_result():
-    r = NameResult(label="concept", description="abstract idea", is_new=True, confidence=0.8)
-    assert r.is_new and r.confidence == 0.8
+    r = NameResult(label="concept", description="abstract idea", confidence=0.8)
+    assert r.label == "concept" and r.confidence == 0.8
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -276,11 +276,10 @@ class EmergentCluster:
 
 @dataclass
 class NameResult:
-    """Hermes' answer to 'what binds these together?'."""
+    """Hermes' answer to 'what binds these together?' — just a label."""
 
     label: str
     description: str
-    is_new: bool
     confidence: float
 ```
 
@@ -623,8 +622,7 @@ def test_name_cluster_returns_label(monkeypatch):
     # Stub the LLM provider call used inside the handler to a deterministic answer.
     import hermes.main as m
     async def fake_name(members, candidates):
-        return {"label": "concept", "description": "abstract ideas",
-                "is_new": False, "confidence": 0.82}
+        return {"label": "concept", "description": "abstract ideas", "confidence": 0.82}
     monkeypatch.setattr(m, "_name_cluster_via_llm", fake_name, raising=False)
 
     client = TestClient(app)
@@ -670,7 +668,6 @@ class NameClusterRequest(BaseModel):
 class NameClusterResponse(BaseModel):
     label: str
     description: str
-    is_new: bool
     confidence: float
 
 
@@ -695,15 +692,13 @@ async def _name_cluster_via_llm(
         "genuinely fits; otherwise propose a new lowercase noun.\n\n"
         f"Existing categories: {', '.join(candidates) or '(none)'}\n\n"
         f"Members:\n{member_lines}\n\n"
-        'Respond as JSON: {"label": "...", "description": "...", '
-        '"is_new": true|false, "confidence": 0.0-1.0}'
+        'Respond as JSON: {"label": "...", "description": "...", "confidence": 0.0-1.0}'
     )
     # Reuse the same provider/JSON-parse path as /name-type. Pseudocode:
     raw = await _call_llm_json(prompt)  # the helper /name-type already uses
     return {
         "label": str(raw["label"]).strip().lower(),
         "description": str(raw.get("description", "")),
-        "is_new": bool(raw.get("is_new", str(raw["label"]).lower() not in candidates)),
         "confidence": float(raw.get("confidence", 0.5)),
     }
 
@@ -764,7 +759,7 @@ def _cluster():
 def test_name_cluster_posts_and_parses():
     route = respx.post("http://hermes:17000/name-cluster").mock(
         return_value=httpx.Response(200, json={
-            "label": "concept", "description": "ideas", "is_new": False, "confidence": 0.8
+            "label": "concept", "description": "ideas", "confidence": 0.8
         })
     )
     result = name_cluster(_cluster(), candidates=["object", "concept"],
@@ -831,7 +826,6 @@ def name_cluster(
         return NameResult(
             label=data["label"],
             description=data.get("description", ""),
-            is_new=bool(data.get("is_new", True)),
             confidence=float(data.get("confidence", 0.0)),
         )
     except (httpx.HTTPError, KeyError, ValueError) as e:
@@ -911,7 +905,7 @@ def _cluster():
 
 def test_mint_creates_type_node_with_centroid_and_lineage():
     hcg, milvus = FakeHCG(), FakeMilvus()
-    name = NameResult(label="concept", description="ideas", is_new=True, confidence=0.8)
+    name = NameResult(label="concept", description="ideas", confidence=0.8)
     type_uuid = mint_type(_cluster(), name, hcg=hcg, milvus=milvus,
                           source_cluster_id="cl1")
     # type-definition node created
@@ -1047,7 +1041,7 @@ def test_handler_mints_named_clusters_and_publishes():
 
     def fake_name(cluster, candidates, hermes_url, token):
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
-        return NameResult(label=label, description="", is_new=True, confidence=0.9)
+        return NameResult(label=label, description="", confidence=0.9)
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id):
         minted.append(name.label)
@@ -1067,7 +1061,7 @@ def test_handler_mints_named_clusters_and_publishes():
 
 def test_handler_skips_low_confidence(monkeypatch):
     def fake_name(cluster, candidates, hermes_url, token):
-        return NameResult(label="x", description="", is_new=True, confidence=0.1)
+        return NameResult(label="x", description="", confidence=0.1)
     minted = []
     handler = EmergenceHandler(
         config=MaintenanceConfig(), hcg=object(), milvus=object(),

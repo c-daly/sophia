@@ -64,15 +64,18 @@ Sophia knows *that* the nodes belong together; Hermes says *what* they are.
 
 - **Request:** all member nodes of the candidate cluster — `[{name, type (current), hermes_type_hint, neighbors: [{relation, neighbor_name, neighbor_type}]}]` — plus the current category list as optional hints. Each member's recorded `hermes_type_hint` travels as a weak prior. (If membership exceeds `max_cluster_size`, send a representative sample; default is all.)
 - **Task:** name the single category that binds them, *even if broad*; prefer an existing category label when one genuinely fits; never refuse.
-- **Response:** `{label, description, is_new: bool, confidence}`.
+- **Response:** `{label, description, confidence}`. Hermes just names the bind; the label is a human-readable tag for the new type. Sophia is **non-linguistic** — she doesn't string-match labels to make decisions. (She *might* later compare label *embeddings*, or use a technique she discovers, as a check — that stays in vector space and is out of scope here.)
 
 Adapt the existing `POST /name-type` into `POST /name-cluster` (or extend it). Because the cluster is a proper subset of the parent type, the returned label is necessarily more specific than the parent (`entity`) — so naming cannot regenerate junk-drawer breadth.
 
 ### 4. Type creation, retype, and lineage
+- **Emergence always mints a new type** for each qualifying cluster — no new-vs-existing decision at emergence time. The residue it works on is unmatched *by construction* (nodes that fit no existing centroid at ingestion), so its clusters are genuinely new. The Hermes `label` is just the new type's tag. Reconciling a borderline node into an existing type is **#504**'s job, done in embedding space (centroid proximity), not by label.
 - Create a type-definition node: `:Node {uuid, name, is_type_definition: true, ancestors: [root, …]}` directly under `root` (the level at which `object`/`location` sit; at cold-start these are the first real type nodes created). No `reserved_` prefix.
 - Seed its Milvus centroid = mean of the cluster members' embeddings.
 - Retype each member: set `type`, rewire the `IS_A` edge (`member → new_type`), and incrementally update both centroids (remove from parent, add to new) via the existing `TypeClassifier.update_centroid_for_assignment`.
 - **Lineage / name history:** store on the type node `name_history: [{name, named_at, reason, source_cluster_id, hermes_confidence}]` (typed records). When a type splits out of another, add a `DERIVED_FROM` provenance edge between the type nodes so the ontology's evolution is navigable in-graph.
+
+> Existing types grow via **ingestion + #504**, not emergence: once `tool` is a type with a centroid, new tool-like entities classify into `tool` at ingestion and never reach the residue emergence works on. So emergence never re-encounters an existing type's members — it only ever mints new ones.
 
 ### 5. Propagation
 Publish an ontology-changed event via the #501 ontology pub/sub with the new type (uuid, name, ancestors). Hermes consumes it and updates its type list, closing the loop.
