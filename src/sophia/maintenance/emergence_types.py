@@ -18,6 +18,7 @@ class Member:
     current_type: str
     hermes_type_hint: str | None
     neighbors: list[dict[str, Any]] = field(default_factory=list)
+    model: str | None = None  # embedding model (for centroid upsert)
 
 
 @dataclass
