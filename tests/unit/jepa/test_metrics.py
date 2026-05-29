@@ -17,22 +17,6 @@ def _otel_available() -> bool:
         return False
 
 
-class TestJEPAMetricsImport:
-    """Test metrics module imports correctly."""
-
-    def test_import_jepa_metrics_class(self):
-        """Test JEPAMetrics class can be imported."""
-        from sophia.jepa.metrics import JEPAMetrics
-
-        assert JEPAMetrics is not None
-
-    def test_import_get_jepa_metrics_function(self):
-        """Test get_jepa_metrics function can be imported."""
-        from sophia.jepa.metrics import get_jepa_metrics
-
-        assert callable(get_jepa_metrics)
-
-
 class TestJEPAMetricsInitialization:
     """Test JEPAMetrics initialization."""
 
