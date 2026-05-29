@@ -24,39 +24,6 @@ def mock_hcg_client():
     return client
 
 
-class TestNeo4jUnavailable:
-    """Tests for Neo4j unavailability scenarios."""
-
-    @pytest.mark.asyncio
-    async def test_query_fails_gracefully_when_neo4j_down(self, mock_hcg_client):
-        """Test that Neo4j connection failures are handled gracefully."""
-        mock_hcg_client.add_node.side_effect = Exception("Neo4j connection failed")
-
-        with pytest.raises(Exception, match="Neo4j connection failed"):
-            mock_hcg_client.add_node(
-                node_id="test_node", node_type="test", properties={}
-            )
-
-
-class TestMilvusUnavailable:
-    """Tests for Milvus unavailability scenarios."""
-
-    def test_embedding_storage_error_handling(self, mock_hcg_client):
-        """Test that embedding storage handles Milvus failures."""
-        mock_hcg_client._milvus.insert_embedding.side_effect = Exception(
-            "Milvus connection failed"
-        )
-
-        embeddings = {
-            "visual": [0.1] * 768,
-            "physics": [0.2] * 768,
-        }
-
-        # Verify exception is raised
-        with pytest.raises(Exception, match="Milvus connection failed"):
-            mock_hcg_client._milvus.insert_embedding("sample_123", embeddings)
-
-
 class TestSimulationErrors:
     """Tests for simulation error cases."""
 
