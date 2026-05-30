@@ -865,8 +865,16 @@ class TestBatchEmbeddings:
         assert edge_batch[0]["uuid"] == "edge-uuid-1"
         assert edge_batch[0]["model"] == "all-MiniLM-L6-v2"
 
-    def test_batch_upsert_failure_still_returns_results(self):
-        """If batch_upsert_embeddings raises, process() should still return stored IDs."""
+    def test_batch_upsert_failure_propagates(self):
+        """A failed Milvus embedding write must NOT be silently swallowed.
+
+        Regression for #146: previously the flush wrapped batch_upsert in a
+        warn-only except, so a failed write was swallowed and ingestion
+        reported success while hcg_*_embeddings stayed empty. The failure must
+        now propagate as EmbeddingPersistenceError so the caller sees it.
+        """
+        import pytest
+
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "uuid-1"
         mock_milvus = MagicMock()
@@ -878,15 +886,23 @@ class TestBatchEmbeddings:
             "Milvus connection lost"
         )
 
-        from sophia.ingestion.proposal_processor import ProposalProcessor
+        from sophia.ingestion.proposal_processor import (
+            EmbeddingPersistenceError,
+            ProposalProcessor,
+        )
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
 
         proposal = self._make_proposal(nodes=[self._make_node("Gamma")])
-        result = processor.process(proposal)
 
-        assert "uuid-1" in result["stored_node_ids"]
-        assert "stored_edge_ids" in result
+        with pytest.raises(EmbeddingPersistenceError) as exc_info:
+            processor.process(proposal)
+
+        # The failing collection and its underlying error are surfaced.
+        assert "Entity" in exc_info.value.failures
+        assert "Milvus connection lost" in exc_info.value.failures["Entity"]
+        # The write was actually attempted, not skipped.
+        mock_milvus.batch_upsert_embeddings.assert_called()
 
     def test_no_embeddings_skips_batch_call(self):
         """If no nodes have embeddings, batch_upsert_embeddings should not be called."""
