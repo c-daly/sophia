@@ -54,6 +54,13 @@ def _member_rows(hcg: Any, type_uuid: str, type_name: str) -> list[dict[str, Any
     type is resolved by the nodes that have an ``IS_A`` edge into *this specific*
     type-definition uuid -- so two minted types that share a label do not bleed
     members into one another.
+
+    IS_A edges are additive (mint_type cannot delete the old edge), so a member
+    that was split out of this type into a *child* type still carries its stale
+    IS_A edge here. We therefore also require the node's authoritative
+    ``type_uuid`` pointer (overwritten on each retype) to still equal this type --
+    otherwise a re-emergence run would re-include and re-mint already-retyped
+    members (#149 review).
     """
     if type_name == _BASE_TYPE:
         return list(hcg.list_all_nodes(node_type=type_name))
@@ -62,7 +69,11 @@ def _member_rows(hcg: Any, type_uuid: str, type_name: str) -> list[dict[str, Any
     member_uuids = [e["source"] for e in (edges or []) if e and e.get("source")]
     if not member_uuids:
         return []
-    return [n for n in (hcg.get_nodes_batch(member_uuids) or []) if n and "uuid" in n]
+    return [
+        n
+        for n in (hcg.get_nodes_batch(member_uuids) or [])
+        if n and "uuid" in n and n.get("type_uuid") == type_uuid
+    ]
 
 
 def _build_member(

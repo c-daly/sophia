@@ -96,8 +96,18 @@ def test_load_type_members_minted_type_uses_is_a_edges():
         nodes_by_type={},
         edges={},
         batch={
-            "u1": {"uuid": "u1", "name": "deriv", "type": "concept"},
-            "u2": {"uuid": "u2", "name": "integ", "type": "concept"},
+            "u1": {
+                "uuid": "u1",
+                "name": "deriv",
+                "type": "concept",
+                "type_uuid": type_uuid,
+            },
+            "u2": {
+                "uuid": "u2",
+                "name": "integ",
+                "type": "concept",
+                "type_uuid": type_uuid,
+            },
         },
         is_a_edges={
             ("IS_A", type_uuid): [
@@ -122,7 +132,9 @@ def test_load_type_members_tolerates_dangling_is_a_edges():
     hcg = _FakeHCG(
         nodes_by_type={},
         edges={},
-        batch={"u1": {"uuid": "u1", "name": "x", "type": "concept"}},
+        batch={
+            "u1": {"uuid": "u1", "name": "x", "type": "concept", "type_uuid": type_uuid}
+        },
         is_a_edges={
             ("IS_A", type_uuid): [
                 {"source": "u1", "target": type_uuid},
@@ -144,7 +156,14 @@ def test_minted_member_embeddings_read_from_base_collection():
     hcg = _FakeHCG(
         nodes_by_type={},
         edges={},
-        batch={"u1": {"uuid": "u1", "name": "deriv", "type": "concept"}},
+        batch={
+            "u1": {
+                "uuid": "u1",
+                "name": "deriv",
+                "type": "concept",
+                "type_uuid": type_uuid,
+            }
+        },
         is_a_edges={("IS_A", type_uuid): [{"source": "u1", "target": type_uuid}]},
     )
 
@@ -159,4 +178,43 @@ def test_minted_member_embeddings_read_from_base_collection():
 
     members = load_type_members(hcg, _CollectionAwareMilvus(), type_uuid)
     # Read from Entity (base), not Concept (the slug's mapping) -> member kept.
+    assert {m.uuid for m in members} == {"u1"}
+
+
+def test_retyped_member_with_stale_is_a_edge_excluded_from_parent():
+    """A member split out of a parent type into a child keeps a stale IS_A edge
+    to the parent (the client can't delete edges), but its authoritative
+    type_uuid now points at the child. Re-emergence on the parent must NOT
+    re-include and re-mint it (#149 review)."""
+    parent_uuid = "type_tool_parent01"
+    child_uuid = "type_hammer_child02"
+    hcg = _FakeHCG(
+        nodes_by_type={},
+        edges={},
+        batch={
+            # u1 still belongs to the parent.
+            "u1": {"uuid": "u1", "name": "w", "type": "tool", "type_uuid": parent_uuid},
+            # u2 was retyped into the child but kept its stale IS_A -> parent.
+            "u2": {
+                "uuid": "u2",
+                "name": "h",
+                "type": "hammer",
+                "type_uuid": child_uuid,
+            },
+        },
+        is_a_edges={
+            ("IS_A", parent_uuid): [
+                {"source": "u1", "target": parent_uuid},
+                {"source": "u2", "target": parent_uuid},  # stale
+            ]
+        },
+    )
+    milvus = _FakeMilvus(
+        {
+            "u1": {"embedding": [0.1], "model": "m"},
+            "u2": {"embedding": [0.2], "model": "m"},
+        }
+    )
+    members = load_type_members(hcg, milvus, parent_uuid)
+    # u2 retyped away -> excluded despite the stale IS_A edge.
     assert {m.uuid for m in members} == {"u1"}

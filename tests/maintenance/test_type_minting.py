@@ -95,8 +95,8 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert model == "all-MiniLM-L6-v2"
 
     # members retyped + IS_A edges to the new (unique) type uuid
-    assert ("u1", {"type": "concept"}) in hcg.updated
-    assert ("u2", {"type": "concept"}) in hcg.updated
+    assert ("u1", {"type": "concept", "type_uuid": type_uuid}) in hcg.updated
+    assert ("u2", {"type": "concept", "type_uuid": type_uuid}) in hcg.updated
     assert ("u1", type_uuid, "IS_A") in hcg.edges
     assert ("u2", type_uuid, "IS_A") in hcg.edges
 
@@ -131,8 +131,8 @@ def test_messy_label_is_slugified_into_identifiers():
     assert type_uuid.startswith("type_living_thing_")
     assert " " not in type_uuid and "!" not in type_uuid
     # Members retyped with the slug, never the raw label.
-    assert ("u1", {"type": "living_thing"}) in hcg.updated
-    assert ("u2", {"type": "living_thing"}) in hcg.updated
+    assert ("u1", {"type": "living_thing", "type_uuid": type_uuid}) in hcg.updated
+    assert ("u2", {"type": "living_thing", "type_uuid": type_uuid}) in hcg.updated
     # Human-readable label preserved for display/lineage.
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
     assert tdef[0]["properties"]["name_history"][0]["name"] == "Living Thing!"
