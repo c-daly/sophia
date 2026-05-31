@@ -828,6 +828,16 @@ class HCGClient(LogosHCGClient):
         deleted = records[0]["deleted"] if records else 0
         return bool(deleted)
 
+    def delete_edge(self, edge_uuid: str) -> bool:
+        """Delete a reified edge by its uuid.
+
+        Edges are stored as ``:Node`` records (see :meth:`add_edge`), so
+        removing an edge is just :meth:`delete_node` on the edge's uuid. This
+        wrapper names the intent at the call site -- e.g. dropping a stale
+        ``IS_A`` edge when a member is retyped (#149 review).
+        """
+        return self.delete_node(edge_uuid)
+
     def clear_all(self) -> None:
         """Remove all nodes/edges from the graph."""
         self._execute_query("MATCH (n) DETACH DELETE n")

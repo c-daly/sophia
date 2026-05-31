@@ -5,7 +5,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from typing import Any, AsyncIterator, Callable, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
 
@@ -110,6 +110,31 @@ from sophia.feedback import (
 
 # Configure structured logging for sophia
 logger = setup_logging("sophia")
+
+
+def _run_full_type_emergence_scan(
+    hcg_client: Any, run_one: Callable[[str], None]
+) -> None:
+    """Run emergence over every type definition, isolating per-type failures.
+
+    A transient HCG/Milvus error on one type must not abort the rest of the
+    periodic full scan, and individual failures must be surfaced rather than
+    silently dropped (greptile #149). A failure listing the type definitions
+    aborts the scan (there is nothing to iterate).
+    """
+    try:
+        all_types = hcg_client.get_all_type_definitions()
+    except Exception:
+        logger.exception("Full type emergence scan: listing type definitions failed")
+        return
+    for td in all_types:
+        type_uuid = td.get("uuid", "")
+        if not type_uuid:
+            continue
+        try:
+            run_one(type_uuid)
+        except Exception:
+            logger.exception("type_emergence failed during full scan for %r", type_uuid)
 
 
 def sanitize_neo4j_properties(props: Dict[str, Any]) -> Dict[str, Any]:
@@ -404,9 +429,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 milvus_port=str(milvus_config.port),
             )
             _milvus_sync.connect()
-            # Ensure HCG collections exist for proposal processing
-            for _nt in ALL_MILVUS_COLLECTIONS:
-                _milvus_sync.ensure_collection(_nt)  # type: ignore[attr-defined]
+            # Ensure HCG collections exist for proposal processing. Post-logos#542
+            # ensure_collection() requires the embedding dim: pre-create at an
+            # explicit LOGOS_EMBEDDING_DIM when set, otherwise defer to lazy
+            # creation at the *measured* dim on first write (HCGMilvusSync
+            # self-corrects), mirroring infra/init_milvus_collections.py.
+            from logos_config import get_embedding_dim_override
+
+            _dim_override = get_embedding_dim_override()
+            if _dim_override is not None:
+                for _nt in ALL_MILVUS_COLLECTIONS:
+                    _milvus_sync.ensure_collection(_nt, _dim_override)
+            else:
+                logger.info(
+                    "LOGOS_EMBEDDING_DIM unset — HCG embedding collections will be "
+                    "created lazily at the measured dimension on first write "
+                    "(logos#542)."
+                )
             # Initialize EventBus for pub/sub
             try:
                 import redis
@@ -470,13 +509,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
             # Register available handlers — adapters bridge scheduler params
             # to the signatures expected by the underlying detectors.
-            from sophia.ingestion.type_emergence import TypeEmergenceDetector
+            from sophia.maintenance.emergence_handler import build_emergence_handler
             from sophia.ingestion.relationship_discoverer import RelationshipDiscoverer
 
             _handlers: dict = {}
             if _milvus_sync and _hcg_client:
-                _type_emergence = TypeEmergenceDetector(
-                    milvus=_milvus_sync, hcg=_hcg_client
+                _emergence_run = build_emergence_handler(
+                    config=_maintenance_config,
+                    hcg=_hcg_client,
+                    milvus=_milvus_sync,
+                    event_bus=_event_bus,
+                    hermes_url=feedback_config.hermes_url,
+                    token=get_env_value("SOPHIA_API_TOKEN") or "",
                 )
                 _relationship_discoverer = RelationshipDiscoverer(
                     milvus=_milvus_sync, hcg=_hcg_client
@@ -493,21 +537,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     """
                     assert _hcg_client is not None  # guarded by outer if
                     if scan == "full":
-                        # Full scan: check all type definitions
-                        try:
-                            all_types = _hcg_client.get_all_type_definitions()
-                            for td in all_types:
-                                uuid = td.get("uuid", "")
-                                if uuid:
-                                    _type_emergence.check_type(uuid)
-                        except Exception:
-                            logger.exception("Full type emergence scan failed")
+                        # Full scan: check every type definition, isolating
+                        # per-type failures so one bad type can't abort the
+                        # rest of the scan (greptile #149).
+                        _run_full_type_emergence_scan(_hcg_client, _emergence_run)
                         return
                     if not type_uuid:
                         logger.warning("type_emergence job missing type_uuid param")
                         return
                     try:
-                        _type_emergence.check_type(type_uuid)
+                        _emergence_run(type_uuid)
                     except Exception:
                         logger.exception("type_emergence failed for %r", type_uuid)
 
