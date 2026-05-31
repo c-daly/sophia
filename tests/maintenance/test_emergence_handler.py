@@ -70,6 +70,40 @@ def test_handler_mints_named_clusters_and_publishes():
     assert len(published) == 2  # one ontology-change event per minted type
 
 
+def test_handler_isolates_failing_cluster():
+    """A mint failure on one cluster must not abort the rest of the run."""
+    minted = []
+
+    def fake_name(cluster, candidates, hermes_url, token):
+        label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
+        return NameResult(label=label, description="", confidence=0.9)
+
+    def flaky_mint(cluster, name, hcg, milvus, source_cluster_id):
+        if name.label == "object":
+            raise RuntimeError("transient HCG write error")
+        minted.append(name.label)
+        return f"type_{name.label}"
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=object(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=flaky_mint,
+        candidates_fn=lambda: ["object", "location", "concept"],
+    )
+
+    # Must not raise even though the "object" cluster's mint blows up.
+    handler.run(type_uuid="type_entity")
+
+    # The failing cluster is skipped; the other cluster still mints.
+    assert minted == ["concept"]
+
+
 def test_handler_skips_low_confidence():
     minted = []
 

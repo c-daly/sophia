@@ -5,7 +5,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from typing import Any, AsyncIterator, Callable, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
 
@@ -110,6 +110,31 @@ from sophia.feedback import (
 
 # Configure structured logging for sophia
 logger = setup_logging("sophia")
+
+
+def _run_full_type_emergence_scan(
+    hcg_client: Any, run_one: Callable[[str], None]
+) -> None:
+    """Run emergence over every type definition, isolating per-type failures.
+
+    A transient HCG/Milvus error on one type must not abort the rest of the
+    periodic full scan, and individual failures must be surfaced rather than
+    silently dropped (greptile #149). A failure listing the type definitions
+    aborts the scan (there is nothing to iterate).
+    """
+    try:
+        all_types = hcg_client.get_all_type_definitions()
+    except Exception:
+        logger.exception("Full type emergence scan: listing type definitions failed")
+        return
+    for td in all_types:
+        type_uuid = td.get("uuid", "")
+        if not type_uuid:
+            continue
+        try:
+            run_one(type_uuid)
+        except Exception:
+            logger.exception("type_emergence failed during full scan for %r", type_uuid)
 
 
 def sanitize_neo4j_properties(props: Dict[str, Any]) -> Dict[str, Any]:
@@ -512,15 +537,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     """
                     assert _hcg_client is not None  # guarded by outer if
                     if scan == "full":
-                        # Full scan: check all type definitions
-                        try:
-                            all_types = _hcg_client.get_all_type_definitions()
-                            for td in all_types:
-                                uuid = td.get("uuid", "")
-                                if uuid:
-                                    _emergence_run(uuid)
-                        except Exception:
-                            logger.exception("Full type emergence scan failed")
+                        # Full scan: check every type definition, isolating
+                        # per-type failures so one bad type can't abort the
+                        # rest of the scan (greptile #149).
+                        _run_full_type_emergence_scan(_hcg_client, _emergence_run)
                         return
                     if not type_uuid:
                         logger.warning("type_emergence job missing type_uuid param")

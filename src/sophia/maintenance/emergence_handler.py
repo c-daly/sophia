@@ -183,32 +183,41 @@ class EmergenceHandler:
         # same-label sibling.
         candidates = list(self._candidates_fn())
         for cluster in clusters:
-            name = self._name_fn(cluster, candidates, self._hermes_url, self._token)
-            if name is None or name.confidence < self._config.hermes_confidence_floor:
-                logger.info("emergence: skip cluster (no/low-confidence name)")
-                continue
-            cluster_id = uuid_lib.uuid4().hex[:8]
-            new_type_uuid = self._mint_fn(
-                cluster,
-                name,
-                hcg=self._hcg,
-                milvus=self._milvus,
-                source_cluster_id=cluster_id,
-            )
-            if name.label not in candidates:
-                candidates.append(name.label)
-            if self._event_bus is not None:
-                self._event_bus.publish(
-                    ONTOLOGY_CHANGED_CHANNEL,
-                    {
-                        "type_uuid": new_type_uuid,
-                        "name": name.label,
-                        "ancestors": ["root"],
-                    },
+            # Per-cluster isolation: a transient HCG/Milvus/Redis error while
+            # minting one cluster must not abort the whole run -- log it and move
+            # on so the remaining clusters still get minted (greptile #149).
+            try:
+                name = self._name_fn(cluster, candidates, self._hermes_url, self._token)
+                if (
+                    name is None
+                    or name.confidence < self._config.hermes_confidence_floor
+                ):
+                    logger.info("emergence: skip cluster (no/low-confidence name)")
+                    continue
+                cluster_id = uuid_lib.uuid4().hex[:8]
+                new_type_uuid = self._mint_fn(
+                    cluster,
+                    name,
+                    hcg=self._hcg,
+                    milvus=self._milvus,
+                    source_cluster_id=cluster_id,
                 )
-            logger.info(
-                "emergence: minted %s from %d members", name.label, cluster.size
-            )
+                if name.label not in candidates:
+                    candidates.append(name.label)
+                if self._event_bus is not None:
+                    self._event_bus.publish(
+                        ONTOLOGY_CHANGED_CHANNEL,
+                        {
+                            "type_uuid": new_type_uuid,
+                            "name": name.label,
+                            "ancestors": ["root"],
+                        },
+                    )
+                logger.info(
+                    "emergence: minted %s from %d members", name.label, cluster.size
+                )
+            except Exception:
+                logger.exception("emergence: cluster failed, skipping")
 
 
 def build_emergence_handler(
