@@ -17,6 +17,27 @@ from sophia.ingestion.type_classifier import TypeClassifier
 
 logger = logging.getLogger(__name__)
 
+
+class EmbeddingPersistenceError(RuntimeError):
+    """Raised when flushing pending embeddings to Milvus fails.
+
+    Ingestion must not silently swallow a failed embedding write: an empty
+    ``hcg_*_embeddings`` collection starves the type classifier and emergent
+    type discovery. This error surfaces the failure to the caller so a
+    partially-ingested batch is reported instead of being reported as success.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failures: "dict[str, str] | None" = None,
+    ) -> None:
+        super().__init__(message)
+        # Map of collection_type -> stringified underlying error.
+        self.failures: dict[str, str] = failures or {}
+
+
 try:
     from logos_observability import get_tracer
 
@@ -508,7 +529,15 @@ class ProposalProcessor:
                             }
                         )
 
-            # Flush all pending embeddings in batch
+            # Flush all pending embeddings in batch.
+            #
+            # A failed Milvus write must NOT be silently swallowed: when it is,
+            # ingestion reports success while the hcg_*_embeddings collections
+            # stay empty, starving the type classifier and emergent type
+            # discovery. We attempt every collection (so one bad collection
+            # does not mask the others), collect any failures, and raise so the
+            # caller sees the error instead of a false success.
+            embedding_failures: dict[str, str] = {}
             for collection_type, batch in pending_embeddings.items():
                 if batch:
                     try:
@@ -516,11 +545,60 @@ class ProposalProcessor:
                             node_type=collection_type, embeddings=batch
                         )
                     except Exception as e:
-                        logger.warning(
+                        logger.error(
                             "Batch embedding upsert failed for %s: %s",
                             collection_type,
                             e,
                         )
+                        embedding_failures[collection_type] = str(e)
+
+            if embedding_failures:
+                # The Neo4j nodes/edges (steps 2-3) already committed, but their
+                # embeddings did not land in Milvus. Orphaned nodes are invisible
+                # to the dedup search (search_similar), so a retry would re-create
+                # duplicates -- and no batch event is emitted for writes that
+                # half-landed. Data is wipeable down to the type baseline, so
+                # best-effort roll the partial graph writes back; a retry then
+                # re-creates cleanly. (Centroid drift is left as-is: regenerable.)
+                rolled_back = 0
+                for uuid in stored_ids:
+                    try:
+                        # delete_node also removes edge-nodes touching this node.
+                        self._hcg.delete_node(uuid)
+                        rolled_back += 1
+                    except Exception:
+                        logger.exception(
+                            "Rollback: failed to delete node %s after "
+                            "embedding-persistence failure",
+                            uuid,
+                        )
+                # Edges are reified as Node entities. Deleting stored_ids drops the
+                # edges touching them, but an edge added this batch between two
+                # PRE-EXISTING nodes must be deleted by its own uuid too, or it
+                # survives the rollback (gemini asked to roll back stored_edge_ids).
+                for edge_uuid in stored_edge_ids:
+                    try:
+                        self._hcg.delete_node(edge_uuid)
+                        rolled_back += 1
+                    except Exception:
+                        logger.exception(
+                            "Rollback: failed to delete edge %s after "
+                            "embedding-persistence failure",
+                            edge_uuid,
+                        )
+                logger.critical(
+                    "Embedding persistence failed for %s; rolled back %d/%d graph "
+                    "node(s)+edge(s) so the batch is cleanly retryable.",
+                    sorted(embedding_failures),
+                    rolled_back,
+                    len(stored_ids) + len(stored_edge_ids),
+                )
+                raise EmbeddingPersistenceError(
+                    "Failed to persist embeddings to Milvus for "
+                    f"{sorted(embedding_failures)}; ingestion did not complete and "
+                    "the partially-written graph nodes were rolled back.",
+                    failures=embedding_failures,
+                )
 
             # Write type snapshot BEFORE publishing event so subscribers
             # see up-to-date data when they react to the event.
