@@ -9,10 +9,22 @@ from sophia.maintenance.type_minting import mint_type
 
 
 class FakeHCG:
-    def __init__(self):
+    def __init__(self, existing_edges=None):
         self.added_nodes = []
         self.updated = []
         self.edges = []
+        self.deleted = []
+        self._existing_edges = existing_edges or {}
+
+    def query_edges_from(self, uuid):
+        return self._existing_edges.get(uuid, [])
+
+    def delete_node(self, uuid):
+        self.deleted.append(uuid)
+        return True
+
+    def delete_edge(self, edge_uuid):
+        return self.delete_node(edge_uuid)
 
     def add_node(self, name, node_type, uuid=None, properties=None, **kw):
         self.added_nodes.append(
@@ -133,6 +145,32 @@ def test_messy_label_is_slugified_into_identifiers():
     # Members retyped with the slug, never the raw label.
     assert ("u1", {"type": "living_thing", "type_uuid": type_uuid}) in hcg.updated
     assert ("u2", {"type": "living_thing", "type_uuid": type_uuid}) in hcg.updated
+
+
+def test_mint_removes_stale_is_a_edge_before_adding_new():
+    """Retyping a member deletes its prior IS_A edge (a reified edge node) so
+    re-emergence on the old parent no longer re-includes it (#149 review)."""
+    parent = "type_tool_parent01"
+    hcg = FakeHCG(
+        existing_edges={
+            "u1": [
+                {"id": "e_old1", "relation": "IS_A", "source": "u1", "target": parent}
+            ],
+            "u2": [
+                {"id": "e_old2", "relation": "IS_A", "source": "u2", "target": parent}
+            ],
+        }
+    )
+    name = NameResult(label="hammer", description="", confidence=0.8)
+
+    new_uuid = mint_type(
+        _cluster(), name, hcg=hcg, milvus=FakeMilvus(), source_cluster_id="cl"
+    )
+
+    # Stale IS_A edge nodes deleted; fresh IS_A edge points at the new type.
+    assert "e_old1" in hcg.deleted and "e_old2" in hcg.deleted
+    assert ("u1", new_uuid, "IS_A") in hcg.edges
+    assert ("u2", new_uuid, "IS_A") in hcg.edges
     # Human-readable label preserved for display/lineage.
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
-    assert tdef[0]["properties"]["name_history"][0]["name"] == "Living Thing!"
+    assert tdef[0]["properties"]["name_history"][0]["name"] == "hammer"

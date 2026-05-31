@@ -93,11 +93,19 @@ def mint_type(
     )
 
     for member in cluster.members:
-        # Stamp the authoritative current-membership pointer (`type_uuid`). It is
-        # OVERWRITTEN on each retype, so a member split out of a parent type into
-        # a child type points only at the child. The IS_A edge is additive (the
-        # client has no edge-delete), so re-emergence on the parent must filter by
-        # this pointer, not the stale IS_A edge alone (#149 review).
+        # Remove the member's prior type-membership IS_A edge(s) before adding the
+        # new one. Edges are reified :Node records, so delete_edge(edge_uuid)
+        # removes the edge -- without this, a member split out of a parent type
+        # keeps a stale IS_A->parent edge and re-emergence on the parent would
+        # re-include and re-mint it (#149 review).
+        for e in hcg.query_edges_from(member.uuid):
+            if e.get("relation") == "IS_A":
+                edge_uuid = e.get("id") or e.get("uuid")
+                if edge_uuid:
+                    hcg.delete_edge(edge_uuid)
+        # Also stamp the authoritative current-membership pointer (type_uuid,
+        # overwritten on each retype); _member_rows filters by it as
+        # defense-in-depth should an edge delete above ever be missed.
         hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
         hcg.add_edge(member.uuid, type_uuid, "IS_A")
 

@@ -219,6 +219,22 @@ def test_delete_node_reports_deleted(
     assert "edge.source = $uuid OR edge.target = $uuid" in calls[0]
 
 
+def test_delete_edge_delegates_to_delete_node(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """delete_edge is a thin wrapper that delete_node's the reified edge node."""
+    seen = []
+
+    def mock_delete_node(uuid: str) -> bool:
+        seen.append(uuid)
+        return True
+
+    monkeypatch.setattr(client, "delete_node", mock_delete_node)
+
+    assert client.delete_edge("edge-1") is True
+    assert seen == ["edge-1"]
+
+
 def test_health_check_uses_session(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:
