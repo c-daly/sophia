@@ -865,8 +865,16 @@ class TestBatchEmbeddings:
         assert edge_batch[0]["uuid"] == "edge-uuid-1"
         assert edge_batch[0]["model"] == "all-MiniLM-L6-v2"
 
-    def test_batch_upsert_failure_still_returns_results(self):
-        """If batch_upsert_embeddings raises, process() should still return stored IDs."""
+    def test_batch_upsert_failure_propagates(self):
+        """A failed Milvus embedding write must NOT be silently swallowed.
+
+        Regression for #146: previously the flush wrapped batch_upsert in a
+        warn-only except, so a failed write was swallowed and ingestion
+        reported success while hcg_*_embeddings stayed empty. The failure must
+        now propagate as EmbeddingPersistenceError so the caller sees it.
+        """
+        import pytest
+
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "uuid-1"
         mock_milvus = MagicMock()
@@ -878,15 +886,82 @@ class TestBatchEmbeddings:
             "Milvus connection lost"
         )
 
-        from sophia.ingestion.proposal_processor import ProposalProcessor
+        from sophia.ingestion.proposal_processor import (
+            EmbeddingPersistenceError,
+            ProposalProcessor,
+        )
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
 
         proposal = self._make_proposal(nodes=[self._make_node("Gamma")])
-        result = processor.process(proposal)
 
-        assert "uuid-1" in result["stored_node_ids"]
-        assert "stored_edge_ids" in result
+        with pytest.raises(EmbeddingPersistenceError) as exc_info:
+            processor.process(proposal)
+
+        # The failing collection and its underlying error are surfaced.
+        assert "Entity" in exc_info.value.failures
+        assert "Milvus connection lost" in exc_info.value.failures["Entity"]
+        # The write was actually attempted, not skipped.
+        mock_milvus.batch_upsert_embeddings.assert_called()
+        # Partial graph writes are rolled back so the batch is cleanly retryable
+        # (an orphaned node with no embedding would otherwise dup on retry).
+        mock_hcg.delete_node.assert_called_once_with("uuid-1")
+
+    def test_rollback_also_deletes_edges(self):
+        """On embedding failure, stored edges are rolled back too, not just nodes.
+
+        Edges are reified as Node entities; an edge between two pre-existing nodes
+        isn't removed by deleting the batch's new nodes, so it must be deleted by
+        its own uuid (gemini asked to roll back stored_edge_ids).
+        """
+        import pytest
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "node-1"
+        mock_hcg.add_edge.return_value = "edge-1"
+        mock_hcg.find_nodes_by_names.return_value = {"France": {"uuid": "france-uuid"}}
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_location", "score": 0.1},
+        ]
+        mock_milvus.batch_upsert_embeddings.side_effect = RuntimeError("Milvus down")
+
+        from sophia.ingestion.proposal_processor import (
+            EmbeddingPersistenceError,
+            ProposalProcessor,
+        )
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        proposal = {
+            "proposal_id": "p-rollback",
+            "proposed_nodes": [
+                {
+                    "name": "Paris",
+                    "type": "location",
+                    "embedding": [0.1] * 384,
+                    "embedding_id": "emb-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                    "properties": {},
+                }
+            ],
+            "proposed_edges": [
+                {
+                    "source_name": "Paris",
+                    "target_name": "France",
+                    "relation": "LOCATED_IN",
+                    "confidence": 0.8,
+                }
+            ],
+        }
+
+        with pytest.raises(EmbeddingPersistenceError):
+            processor.process(proposal)
+
+        deleted = {c.args[0] for c in mock_hcg.delete_node.call_args_list}
+        assert "node-1" in deleted, "stored node not rolled back"
+        assert "edge-1" in deleted, "stored edge not rolled back"
 
     def test_no_embeddings_skips_batch_call(self):
         """If no nodes have embeddings, batch_upsert_embeddings should not be called."""
