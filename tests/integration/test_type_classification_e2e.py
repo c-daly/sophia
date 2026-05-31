@@ -72,6 +72,18 @@ def milvus_sync():
     sync = HCGMilvusSync(milvus_host=host, milvus_port=port)
     sync.connect()
 
+    # Isolation: start from a clean embedding space. Post-#146 a failed embedding
+    # write is no longer swallowed, so embeddings actually persist — which means
+    # nodes ingested by *earlier* integration modules survive in the shared test
+    # Milvus and get returned by this module's similarity/dedup search (e.g. an
+    # ENTITY_CENTROID node from test_embedding_persistence_e2e), causing this
+    # module's near-duplicate ingests to be skipped. Drop first so the module's
+    # assertions see only its own seeded centroids and ingested nodes.
+    from pymilvus import utility
+
+    for _name in utility.list_collections(using=sync.alias):
+        utility.drop_collection(_name, using=sync.alias)
+
     # Ensure all collections exist
     for node_type in ["Entity", "Concept", "State", "Process", "Edge", "TypeCentroid"]:
         sync.ensure_collection(node_type)

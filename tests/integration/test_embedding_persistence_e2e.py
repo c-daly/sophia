@@ -77,6 +77,16 @@ def milvus_sync():
     except Exception as e:  # pragma: no cover - infra gate
         pytest.skip(f"Milvus not available at {host}:{port}: {e}")
 
+    # Isolation: start from a clean embedding space. Post-#146 embeddings actually
+    # persist, so nodes ingested by earlier integration modules survive in the
+    # shared test Milvus and would skew this module's row-count delta assertions
+    # (and dedup an ingest down to zero growth). Drop first so the module sees
+    # only its own data.
+    from pymilvus import utility
+
+    for _name in utility.list_collections(using=sync.alias):
+        utility.drop_collection(_name, using=sync.alias)
+
     for node_type in COLLECTION_NAMES:
         sync.ensure_collection(node_type)
 
