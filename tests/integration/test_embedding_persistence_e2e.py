@@ -59,9 +59,14 @@ def _count_rows(sync: HCGMilvusSync, node_type: str) -> int:
     """Return the number of persisted rows in a collection.
 
     Uses ``num_entities`` after an explicit flush, which is reliable here
-    because ``batch_upsert_embeddings`` flushes on write.
+    because ``batch_upsert_embeddings`` flushes on write. Resolves the
+    collection from the public name + connection alias rather than the private
+    ``sync._get_collection`` accessor, so a rename there fails as a clean
+    assertion rather than an AttributeError.
     """
-    collection = sync._get_collection(node_type)
+    from pymilvus import Collection
+
+    collection = Collection(name=COLLECTION_NAMES[node_type], using=sync.alias)
     collection.flush()
     return int(collection.num_entities)
 

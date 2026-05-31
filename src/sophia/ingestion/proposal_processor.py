@@ -553,10 +553,36 @@ class ProposalProcessor:
                         embedding_failures[collection_type] = str(e)
 
             if embedding_failures:
+                # The Neo4j nodes/edges (steps 2-3) already committed, but their
+                # embeddings did not land in Milvus. Orphaned nodes are invisible
+                # to the dedup search (search_similar), so a retry would re-create
+                # duplicates -- and no batch event is emitted for writes that
+                # half-landed. Data is wipeable down to the type baseline, so
+                # best-effort roll the partial graph writes back; a retry then
+                # re-creates cleanly. (Centroid drift is left as-is: regenerable.)
+                rolled_back = 0
+                for uuid in stored_ids:
+                    try:
+                        # DETACH DELETE also removes the node's edges.
+                        self._hcg.delete_node(uuid)
+                        rolled_back += 1
+                    except Exception:
+                        logger.exception(
+                            "Rollback: failed to delete node %s after "
+                            "embedding-persistence failure",
+                            uuid,
+                        )
+                logger.critical(
+                    "Embedding persistence failed for %s; rolled back %d/%d graph "
+                    "node(s) so the batch is cleanly retryable.",
+                    sorted(embedding_failures),
+                    rolled_back,
+                    len(stored_ids),
+                )
                 raise EmbeddingPersistenceError(
                     "Failed to persist embeddings to Milvus for "
-                    f"{sorted(embedding_failures)}; ingestion did not complete "
-                    "and embedding collections may be empty.",
+                    f"{sorted(embedding_failures)}; ingestion did not complete and "
+                    "the partially-written graph nodes were rolled back.",
                     failures=embedding_failures,
                 )
 

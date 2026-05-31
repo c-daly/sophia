@@ -903,6 +903,9 @@ class TestBatchEmbeddings:
         assert "Milvus connection lost" in exc_info.value.failures["Entity"]
         # The write was actually attempted, not skipped.
         mock_milvus.batch_upsert_embeddings.assert_called()
+        # Partial graph writes are rolled back so the batch is cleanly retryable
+        # (an orphaned node with no embedding would otherwise dup on retry).
+        mock_hcg.delete_node.assert_called_once_with("uuid-1")
 
     def test_no_embeddings_skips_batch_call(self):
         """If no nodes have embeddings, batch_upsert_embeddings should not be called."""
