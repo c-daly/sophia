@@ -563,7 +563,7 @@ class ProposalProcessor:
                 rolled_back = 0
                 for uuid in stored_ids:
                     try:
-                        # DETACH DELETE also removes the node's edges.
+                        # delete_node also removes edge-nodes touching this node.
                         self._hcg.delete_node(uuid)
                         rolled_back += 1
                     except Exception:
@@ -572,12 +572,26 @@ class ProposalProcessor:
                             "embedding-persistence failure",
                             uuid,
                         )
+                # Edges are reified as Node entities. Deleting stored_ids drops the
+                # edges touching them, but an edge added this batch between two
+                # PRE-EXISTING nodes must be deleted by its own uuid too, or it
+                # survives the rollback (gemini asked to roll back stored_edge_ids).
+                for edge_uuid in stored_edge_ids:
+                    try:
+                        self._hcg.delete_node(edge_uuid)
+                        rolled_back += 1
+                    except Exception:
+                        logger.exception(
+                            "Rollback: failed to delete edge %s after "
+                            "embedding-persistence failure",
+                            edge_uuid,
+                        )
                 logger.critical(
                     "Embedding persistence failed for %s; rolled back %d/%d graph "
-                    "node(s) so the batch is cleanly retryable.",
+                    "node(s)+edge(s) so the batch is cleanly retryable.",
                     sorted(embedding_failures),
                     rolled_back,
-                    len(stored_ids),
+                    len(stored_ids) + len(stored_edge_ids),
                 )
                 raise EmbeddingPersistenceError(
                     "Failed to persist embeddings to Milvus for "
