@@ -45,12 +45,23 @@ jobs:
               const issueNum = parseInt(num);
               const statusLabels = ['status:todo', 'status:in-progress', 'status:in-review', 'status:blocked'];
 
-              // Get current issue labels
-              const issue = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNum,
-              });
+              // The issue number may come from the branch name (e.g. feat/505-...)
+              // and reference an issue tracked in ANOTHER repo (cross-repo work).
+              // In that case it won't exist here — skip it instead of failing the job.
+              let issue;
+              try {
+                issue = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNum,
+                });
+              } catch (err) {
+                if (err.status === 404) {
+                  core.info(`#${issueNum} not found in ${context.repo.repo} (likely cross-repo) — skipping.`);
+                  continue;
+                }
+                throw err;
+              }
               const currentLabels = issue.data.labels.map(l => l.name);
               const nonStatusLabels = currentLabels.filter(l => !statusLabels.includes(l));
 
