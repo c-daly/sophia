@@ -44,11 +44,17 @@ def load_type_members(hcg, milvus, type_uuid: str) -> list[Member]:
     outgoing reified edges (relation + resolved neighbor type). Nodes without an
     embedding are skipped (they can't be clustered).
     """
+    from sophia.ingestion.proposal_processor import _collection_for
+
     type_name = _type_name(type_uuid)
     members: list[Member] = []
     for row in hcg.list_all_nodes(node_type=type_name):
         uuid = row["uuid"]
-        emb = milvus.get_embedding(node_type=type_name, uuid=uuid)
+        # Embeddings live in a Milvus collection keyed by the canonical NodeType
+        # ('Entity'/'Concept'/...), not the semantic type string.
+        emb = milvus.get_embedding(
+            node_type=_collection_for(row.get("type") or type_name), uuid=uuid
+        )
         if not emb or not emb.get("embedding"):
             continue
         edges = hcg.query_edges_from(uuid)
