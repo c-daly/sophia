@@ -404,9 +404,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 milvus_port=str(milvus_config.port),
             )
             _milvus_sync.connect()
-            # Ensure HCG collections exist for proposal processing
-            for _nt in ALL_MILVUS_COLLECTIONS:
-                _milvus_sync.ensure_collection(_nt)  # type: ignore[attr-defined]
+            # Ensure HCG collections exist for proposal processing. Post-logos#542
+            # ensure_collection() requires the embedding dim: pre-create at an
+            # explicit LOGOS_EMBEDDING_DIM when set, otherwise defer to lazy
+            # creation at the *measured* dim on first write (HCGMilvusSync
+            # self-corrects), mirroring infra/init_milvus_collections.py.
+            from logos_config import get_embedding_dim_override
+
+            _dim_override = get_embedding_dim_override()
+            if _dim_override is not None:
+                for _nt in ALL_MILVUS_COLLECTIONS:
+                    _milvus_sync.ensure_collection(_nt, _dim_override)
+            else:
+                logger.info(
+                    "LOGOS_EMBEDDING_DIM unset — HCG embedding collections will be "
+                    "created lazily at the measured dimension on first write "
+                    "(logos#542)."
+                )
             # Initialize EventBus for pub/sub
             try:
                 import redis
