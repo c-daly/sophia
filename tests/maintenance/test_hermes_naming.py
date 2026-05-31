@@ -70,3 +70,52 @@ def test_name_cluster_returns_none_on_error(monkeypatch):
         hn.name_cluster(_cluster(), candidates=[], hermes_url="http://h", token="t")
         is None
     )
+
+
+def test_name_cluster_samples_down_large_clusters(monkeypatch):
+    members = [
+        Member(
+            uuid=f"u{i}",
+            name=f"n{i}",
+            embedding=[float(i)],
+            signature=Counter(),
+            current_type="entity",
+            hermes_type_hint=None,
+            neighbors=[],
+        )
+        for i in range(20)
+    ]
+    cluster = EmergentCluster(members=members)
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(json=json)
+        return _FakeResp({"label": "x", "confidence": 0.9})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    hn.name_cluster(
+        cluster,
+        candidates=[],
+        hermes_url="http://h",
+        token="t",
+        max_members=5,
+    )
+    assert len(captured["json"]["members"]) == 5
+
+
+def test_name_cluster_sends_all_when_under_max(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(json=json)
+        return _FakeResp({"label": "x", "confidence": 0.9})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    hn.name_cluster(
+        _cluster(),
+        candidates=[],
+        hermes_url="http://h",
+        token="t",
+        max_members=50,
+    )
+    assert len(captured["json"]["members"]) == 1

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from sophia.maintenance.emergence_types import EmergentCluster, NameResult
 
@@ -36,8 +37,15 @@ def mint_type(
     milvus: Any,
     source_cluster_id: str,
 ) -> str:
-    """Create the type-definition node, seed its centroid, and retype members."""
-    type_uuid = f"type_{name.label}"
+    """Create the type-definition node, seed its centroid, and retype members.
+
+    The type uuid carries a random suffix so that two clusters that Hermes
+    happens to name identically mint *distinct* type-definition nodes (and
+    distinct centroids) instead of overwriting each other -- members are tied
+    to a specific minted type via their ``IS_A`` edge to this uuid, not via the
+    shared label string.
+    """
+    type_uuid = f"type_{name.label}_{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
     name_history = [
         {

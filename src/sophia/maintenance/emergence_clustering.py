@@ -24,36 +24,85 @@ def _variance_of(members: list[Member]) -> float:
     return _variance(vectors, _mean_vector(vectors))
 
 
-def _embedding_groups(members: list[Member]) -> list[list[Member]]:
-    """Binary embedding split; returns the (1 or 2) non-empty sub-groups.
+def _resolve_group(vectors: list[list[float]], pool: dict[int, Member]) -> list[Member]:
+    """Map cluster vectors back to members, consuming each member at most once.
 
-    _kmeans_2 returns the original embedding objects, so members are recovered
-    by object identity.
+    ``_kmeans_2`` returns the original embedding objects, but we do not rely on
+    object identity (k-means could copy a vector, and two members may share an
+    equal embedding). Each returned vector claims the first still-unconsumed
+    member whose embedding is identical (by identity first, else by value).
     """
+    group: list[Member] = []
+    for vec in vectors:
+        match_key = next(
+            (k for k, m in pool.items() if m.embedding is vec),
+            None,
+        )
+        if match_key is None:
+            match_key = next(
+                (k for k, m in pool.items() if m.embedding == vec),
+                None,
+            )
+        if match_key is None:
+            continue
+        group.append(pool.pop(match_key))
+    return group
+
+
+def _embedding_groups(members: list[Member]) -> list[list[Member]]:
+    """Binary embedding split; returns the (1 or 2) non-empty sub-groups."""
     if len(members) < 2:
         return [members]
-    by_id = {id(m.embedding): m for m in members}
     c0, c1 = _kmeans_2([m.embedding for m in members])
-    g0 = [by_id[id(v)] for v in c0]
-    g1 = [by_id[id(v)] for v in c1]
+    pool = dict(enumerate(members))
+    g0 = _resolve_group(c0, pool)
+    g1 = _resolve_group(c1, pool)
+    # Any members not claimed (e.g. duplicate-value ambiguity) stay grouped with g0.
+    g0.extend(pool.values())
     return [g for g in (g0, g1) if g]
 
 
 def _structurally_coherent(group: list[Member]) -> bool:
+    """Whether the group's members agree on their neighbor-relation signature.
+
+    Robust to edge-less members: a node with an empty signature carries no
+    structural signal, so it neither anchors the comparison nor disqualifies the
+    cluster. We compare the members that *do* have a signature against each
+    other; a cluster where every member is edge-less is treated as coherent
+    (uniform, no contradicting structure) rather than rejected on index 0.
+    """
     if len(group) < 2:
         return True
-    ref = group[0].signature
+    with_sig = [m for m in group if m.signature]
+    if len(with_sig) < 2:
+        # 0 or 1 members carry structure -- nothing to contradict.
+        return True
+    ref = with_sig[0].signature
     return all(
         signature_similarity(ref, m.signature) >= _STRUCTURAL_SIM_THRESHOLD
-        for m in group[1:]
+        for m in with_sig[1:]
     )
 
 
-def _cohesion_improvement(parent: list[Member], group: list[Member]) -> float:
+def _split_improvement(parent: list[Member], groups: list[list[Member]]) -> float:
+    """Fractional reduction in *weighted* within-group variance from the split.
+
+    Uses the size-weighted average of the child variances (not the worst child),
+    so a split that tightens the membership overall is accepted even if one
+    child is only marginally more cohesive than the parent::
+
+        (parent_var - sum(len(g) * var(g)) / len(members)) / parent_var
+
+    Returns 0.0 when the parent has no variance (nothing to improve).
+    """
     pv = _variance_of(parent)
     if pv <= 0:
         return 0.0
-    return (pv - _variance_of(group)) / pv
+    n = sum(len(g) for g in groups)
+    if n == 0:
+        return 0.0
+    weighted_child_var = sum(len(g) * _variance_of(g) for g in groups) / n
+    return (pv - weighted_child_var) / pv
 
 
 def _recursive_clusters(
@@ -71,10 +120,7 @@ def _recursive_clusters(
     groups = _embedding_groups(members)
     if len(groups) < 2 or any(len(g) < min_cluster_size for g in groups):
         return [members]
-    if (
-        min(_cohesion_improvement(members, g) for g in groups)
-        < min_cohesion_improvement
-    ):
+    if _split_improvement(members, groups) < min_cohesion_improvement:
         return [members]  # split doesn't meaningfully help -> leaf
     leaves: list[list[Member]] = []
     for g in groups:

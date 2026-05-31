@@ -22,9 +22,17 @@ logger = logging.getLogger(__name__)
 
 ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 
+# The base "junk-drawer" type that holds un-specialised nodes. Its membership is
+# resolved by node-type scan; minted types resolve membership via IS_A edges.
+_BASE_TYPE = "entity"
+
 
 def _type_name(type_uuid: str) -> str:
-    """Convention: type-definition uuids are 'type_<name>'."""
+    """Best-effort label from a type-definition uuid.
+
+    Minted uuids are ``type_<label>_<hex8>`` and base/legacy ones ``type_<name>``.
+    Used only for the base junk-drawer scan and for embedding-collection routing.
+    """
     return type_uuid[len("type_") :] if type_uuid.startswith("type_") else type_uuid
 
 
@@ -39,53 +47,83 @@ def current_categories(hcg: Any) -> list[str]:
     return out
 
 
+def _member_rows(hcg: Any, type_uuid: str, type_name: str) -> list[dict[str, Any]]:
+    """Resolve the node rows that belong to ``type_uuid``.
+
+    The base junk-drawer (``entity``) is resolved by node-type scan. Any minted
+    type is resolved by the nodes that have an ``IS_A`` edge into *this specific*
+    type-definition uuid -- so two minted types that share a label do not bleed
+    members into one another.
+    """
+    if type_name == _BASE_TYPE:
+        return list(hcg.list_all_nodes(node_type=type_name))
+
+    edges = hcg.list_all_edges(relation_type="IS_A", target_uuid=type_uuid)
+    member_uuids = [e["source"] for e in (edges or []) if e and e.get("source")]
+    if not member_uuids:
+        return []
+    return [n for n in (hcg.get_nodes_batch(member_uuids) or []) if n and "uuid" in n]
+
+
+def _build_member(
+    hcg: Any, milvus: Any, row: dict[str, Any], type_name: str
+) -> Member | None:
+    """Build a Member from a node row, or None if it has no usable embedding."""
+    from sophia.ingestion.proposal_processor import _collection_for
+
+    uuid = row["uuid"]
+    # Embeddings live in a Milvus collection keyed by the canonical NodeType
+    # ('Entity'/'Concept'/...), not the semantic type string.
+    emb = milvus.get_embedding(
+        node_type=_collection_for(row.get("type") or type_name), uuid=uuid
+    )
+    if not emb or not emb.get("embedding"):
+        return None
+    edges = hcg.query_edges_from(uuid)
+    target_uuids = [e["target"] for e in edges if e.get("target")]
+    target_nodes = {
+        n["uuid"]: n
+        for n in ((hcg.get_nodes_batch(target_uuids) or []) if target_uuids else [])
+        if n and "uuid" in n
+    }
+    neighbors = [
+        {
+            "relation": e.get("relation"),
+            "neighbor_name": target_nodes.get(e.get("target"), {}).get("name"),
+            "neighbor_type": target_nodes.get(e.get("target"), {}).get("type"),
+        }
+        for e in edges
+    ]
+    props = row.get("properties", {}) or {}
+    return Member(
+        uuid=uuid,
+        name=row.get("name", uuid),
+        embedding=emb["embedding"],
+        signature=build_signature(neighbors),
+        current_type=row.get("type", type_name),
+        hermes_type_hint=props.get("hermes_type_hint"),
+        neighbors=neighbors,
+        model=emb.get("model"),
+    )
+
+
 def load_type_members(hcg: Any, milvus: Any, type_uuid: str) -> list[Member]:
     """Load all members of a type as Member objects (embedding + structural signature).
 
-    Embeddings come from Milvus; the structural signature is built from the node's
-    outgoing reified edges (relation + resolved neighbor type). Nodes without an
-    embedding are skipped (they can't be clustered).
+    Membership is resolved by :func:`_member_rows` (node-type scan for the base
+    junk-drawer, IS_A-edge lookup for minted types). Embeddings come from Milvus;
+    the structural signature is built from the node's outgoing reified edges
+    (relation + resolved neighbor type). Nodes without an embedding are skipped
+    (they can't be clustered).
     """
-    from sophia.ingestion.proposal_processor import _collection_for
-
     type_name = _type_name(type_uuid)
     members: list[Member] = []
-    for row in hcg.list_all_nodes(node_type=type_name):
-        uuid = row["uuid"]
-        # Embeddings live in a Milvus collection keyed by the canonical NodeType
-        # ('Entity'/'Concept'/...), not the semantic type string.
-        emb = milvus.get_embedding(
-            node_type=_collection_for(row.get("type") or type_name), uuid=uuid
-        )
-        if not emb or not emb.get("embedding"):
+    for row in _member_rows(hcg, type_uuid, type_name):
+        if not row or "uuid" not in row:
             continue
-        edges = hcg.query_edges_from(uuid)
-        target_uuids = [e["target"] for e in edges if e.get("target")]
-        target_nodes = {
-            n["uuid"]: n
-            for n in (hcg.get_nodes_batch(target_uuids) if target_uuids else [])
-        }
-        neighbors = [
-            {
-                "relation": e.get("relation"),
-                "neighbor_name": target_nodes.get(e.get("target"), {}).get("name"),
-                "neighbor_type": target_nodes.get(e.get("target"), {}).get("type"),
-            }
-            for e in edges
-        ]
-        props = row.get("properties", {}) or {}
-        members.append(
-            Member(
-                uuid=uuid,
-                name=row.get("name", uuid),
-                embedding=emb["embedding"],
-                signature=build_signature(neighbors),
-                current_type=row.get("type", type_name),
-                hermes_type_hint=props.get("hermes_type_hint"),
-                neighbors=neighbors,
-                model=emb.get("model"),
-            )
-        )
+        member = _build_member(hcg, milvus, row, type_name)
+        if member is not None:
+            members.append(member)
     return members
 
 
@@ -127,7 +165,10 @@ class EmergenceHandler:
             logger.info("emergence: no qualifying clusters in %s", type_uuid)
             return
 
-        candidates = self._candidates_fn()
+        # Mutable copy: each successful mint adds its label so later clusters in
+        # this same run see it as a candidate and don't silently re-mint a
+        # same-label sibling.
+        candidates = list(self._candidates_fn())
         for cluster in clusters:
             name = self._name_fn(cluster, candidates, self._hermes_url, self._token)
             if name is None or name.confidence < self._config.hermes_confidence_floor:
@@ -141,6 +182,8 @@ class EmergenceHandler:
                 milvus=self._milvus,
                 source_cluster_id=cluster_id,
             )
+            if name.label not in candidates:
+                candidates.append(name.label)
             if self._event_bus is not None:
                 self._event_bus.publish(
                     ONTOLOGY_CHANGED_CHANNEL,
@@ -177,7 +220,11 @@ def build_emergence_handler(
         token=token,
         load_members=lambda u: load_type_members(hcg, milvus, u),
         name_fn=lambda c, cand, url, tok: name_cluster(
-            c, candidates=cand, hermes_url=url, token=tok
+            c,
+            candidates=cand,
+            hermes_url=url,
+            token=tok,
+            max_members=config.max_cluster_size,
         ),
         mint_fn=mint_type,
         candidates_fn=lambda: current_categories(hcg),

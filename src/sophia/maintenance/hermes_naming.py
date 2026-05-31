@@ -7,12 +7,26 @@ they are. Existing category labels travel along for naming consistency.
 from __future__ import annotations
 
 import logging
+import random
 
 import httpx
 
-from sophia.maintenance.emergence_types import EmergentCluster, NameResult
+from sophia.maintenance.emergence_types import EmergentCluster, Member, NameResult
 
 logger = logging.getLogger(__name__)
+
+
+def _sample_members(members: list[Member], max_members: int | None) -> list[Member]:
+    """Down-sample a cluster's membership for the naming request.
+
+    Naming only needs a representative handful; sending thousands of members is
+    wasteful and can exceed Hermes' context. A deterministic seed keeps the
+    sample stable across retries of the same cluster.
+    """
+    if not max_members or len(members) <= max_members:
+        return members
+    rng = random.Random(" ".join(sorted(m.uuid for m in members)))
+    return rng.sample(members, max_members)
 
 
 def name_cluster(
@@ -22,8 +36,14 @@ def name_cluster(
     hermes_url: str,
     token: str,
     timeout: float = 30.0,
+    max_members: int | None = None,
 ) -> NameResult | None:
-    """Ask Hermes to name what binds the cluster. Returns None on failure."""
+    """Ask Hermes to name what binds the cluster. Returns None on failure.
+
+    When ``max_members`` is set, clusters larger than that are down-sampled to a
+    representative subset before the request.
+    """
+    members = _sample_members(cluster.members, max_members)
     payload = {
         "members": [
             {
@@ -32,7 +52,7 @@ def name_cluster(
                 "hermes_type_hint": m.hermes_type_hint,
                 "neighbors": m.neighbors,
             }
-            for m in cluster.members
+            for m in members
         ],
         "candidates": candidates,
     }

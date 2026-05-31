@@ -8,13 +8,17 @@ from sophia.maintenance.emergence_handler import current_categories, load_type_m
 
 
 class _FakeHCG:
-    def __init__(self, nodes_by_type, edges, batch):
+    def __init__(self, nodes_by_type, edges, batch, is_a_edges=None):
         self._nodes_by_type = nodes_by_type
         self._edges = edges
         self._batch = batch
+        self._is_a_edges = is_a_edges or {}
 
     def list_all_nodes(self, node_type=None):
         return self._nodes_by_type.get(node_type, [])
+
+    def list_all_edges(self, relation_type=None, target_uuid=None, **kw):
+        return self._is_a_edges.get((relation_type, target_uuid), [])
 
     def query_edges_from(self, uuid):
         return self._edges.get(uuid, [])
@@ -82,3 +86,50 @@ def test_load_type_members_skips_nodes_without_embedding():
     )
     milvus = _FakeMilvus({})  # no embedding for u1
     assert load_type_members(hcg, milvus, "type_entity") == []
+
+
+def test_load_type_members_minted_type_uses_is_a_edges():
+    # A minted type resolves membership via incoming IS_A edges to its uuid,
+    # NOT a label scan -- so a same-label sibling type cannot bleed members in.
+    type_uuid = "type_concept_abc12345"
+    hcg = _FakeHCG(
+        nodes_by_type={},
+        edges={},
+        batch={
+            "u1": {"uuid": "u1", "name": "deriv", "type": "concept"},
+            "u2": {"uuid": "u2", "name": "integ", "type": "concept"},
+        },
+        is_a_edges={
+            ("IS_A", type_uuid): [
+                {"source": "u1", "target": type_uuid},
+                {"source": "u2", "target": type_uuid},
+            ]
+        },
+    )
+    milvus = _FakeMilvus(
+        {
+            "u1": {"embedding": [0.1, 0.2], "model": "m"},
+            "u2": {"embedding": [0.3, 0.4], "model": "m"},
+        }
+    )
+    members = load_type_members(hcg, milvus, type_uuid)
+    assert {m.uuid for m in members} == {"u1", "u2"}
+
+
+def test_load_type_members_tolerates_dangling_is_a_edges():
+    # get_nodes_batch may not return every uuid (deleted node); those drop out.
+    type_uuid = "type_concept_deadbeef"
+    hcg = _FakeHCG(
+        nodes_by_type={},
+        edges={},
+        batch={"u1": {"uuid": "u1", "name": "x", "type": "concept"}},
+        is_a_edges={
+            ("IS_A", type_uuid): [
+                {"source": "u1", "target": type_uuid},
+                {"source": "gone", "target": type_uuid},
+            ]
+        },
+    )
+    milvus = _FakeMilvus({"u1": {"embedding": [0.1], "model": "m"}})
+    members = load_type_members(hcg, milvus, type_uuid)
+    assert {m.uuid for m in members} == {"u1"}

@@ -77,7 +77,9 @@ def test_mint_creates_type_node_centroid_and_retypes():
         _cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="cl1"
     )
 
-    assert type_uuid == "type_concept"
+    # Unique suffix avoids same-label mints overwriting each other.
+    assert type_uuid.startswith("type_concept_")
+    assert type_uuid != "type_concept"
 
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
     assert len(tdef) == 1
@@ -88,12 +90,28 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert props["name_history"][0]["hermes_confidence"] == 0.8
 
     # centroid = mean([0,2], [2,0]) = [1, 1]
-    centroid, model = milvus.centroids["type_concept"]
+    centroid, model = milvus.centroids[type_uuid]
     assert centroid == [1.0, 1.0]
     assert model == "all-MiniLM-L6-v2"
 
-    # members retyped + IS_A edges to the new type
+    # members retyped + IS_A edges to the new (unique) type uuid
     assert ("u1", {"type": "concept"}) in hcg.updated
     assert ("u2", {"type": "concept"}) in hcg.updated
-    assert ("u1", "type_concept", "IS_A") in hcg.edges
-    assert ("u2", "type_concept", "IS_A") in hcg.edges
+    assert ("u1", type_uuid, "IS_A") in hcg.edges
+    assert ("u2", type_uuid, "IS_A") in hcg.edges
+
+
+def test_same_label_mints_are_distinct_no_overwrite():
+    """Two clusters Hermes names identically must not collide on uuid/centroid."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="concept", description="", confidence=0.8)
+
+    uuid_a = mint_type(_cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="a")
+    uuid_b = mint_type(_cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="b")
+
+    assert uuid_a != uuid_b
+    assert uuid_a.startswith("type_concept_")
+    assert uuid_b.startswith("type_concept_")
+    assert uuid_a in milvus.centroids and uuid_b in milvus.centroids
+    assert ("u1", uuid_a, "IS_A") in hcg.edges
+    assert ("u1", uuid_b, "IS_A") in hcg.edges
