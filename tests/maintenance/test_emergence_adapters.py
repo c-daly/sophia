@@ -133,3 +133,30 @@ def test_load_type_members_tolerates_dangling_is_a_edges():
     milvus = _FakeMilvus({"u1": {"embedding": [0.1], "model": "m"}})
     members = load_type_members(hcg, milvus, type_uuid)
     assert {m.uuid for m in members} == {"u1"}
+
+
+def test_minted_member_embeddings_read_from_base_collection():
+    """A member retyped to a slug that maps to a non-Entity collection (e.g.
+    'concept' -> 'Concept') must still be read from the base 'entity' collection
+    where its embedding was actually stored. Otherwise re-emergence queries the
+    wrong collection, misses, and silently drops the member (greptile #149)."""
+    type_uuid = "type_concept_abc12345"
+    hcg = _FakeHCG(
+        nodes_by_type={},
+        edges={},
+        batch={"u1": {"uuid": "u1", "name": "deriv", "type": "concept"}},
+        is_a_edges={("IS_A", type_uuid): [{"source": "u1", "target": type_uuid}]},
+    )
+
+    class _CollectionAwareMilvus:
+        """Serves embeddings ONLY from the base 'Entity' collection, mirroring
+        where entity-derived vectors actually live."""
+
+        def get_embedding(self, node_type, uuid):
+            if node_type != "Entity":
+                return None
+            return {"embedding": [0.1, 0.2], "model": "m"}
+
+    members = load_type_members(hcg, _CollectionAwareMilvus(), type_uuid)
+    # Read from Entity (base), not Concept (the slug's mapping) -> member kept.
+    assert {m.uuid for m in members} == {"u1"}

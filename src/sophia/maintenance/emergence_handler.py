@@ -72,11 +72,13 @@ def _build_member(
     from sophia.ingestion.proposal_processor import _collection_for
 
     uuid = row["uuid"]
-    # Embeddings live in a Milvus collection keyed by the canonical NodeType
-    # ('Entity'/'Concept'/...), not the semantic type string.
-    emb = milvus.get_embedding(
-        node_type=_collection_for(row.get("type") or type_name), uuid=uuid
-    )
+    # Emergence members all descend from the `entity` junk drawer, so their
+    # embeddings physically live in that base collection. Retyping a node to a
+    # minted slug does NOT move its stored vector, so we must read from the base
+    # collection -- NOT _collection_for(current type). A minted slug that maps to
+    # a different collection (e.g. "concept" -> "Concept") would otherwise miss
+    # and silently drop the member on re-emergence (greptile #149).
+    emb = milvus.get_embedding(node_type=_collection_for(_BASE_TYPE), uuid=uuid)
     if not emb or not emb.get("embedding"):
         return None
     edges = hcg.query_edges_from(uuid)
