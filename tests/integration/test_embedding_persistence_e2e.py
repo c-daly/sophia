@@ -91,6 +91,10 @@ def milvus_sync():
 
     for _name in utility.list_collections(using=sync.alias):
         utility.drop_collection(_name, using=sync.alias)
+    # The drops above bypass HCGMilvusSync's internal collection cache; clear it
+    # so ensure_collection rebuilds fresh handles (v0.7.2 #542 fast-path would
+    # otherwise reuse a stale Collection id -> "collection not found" on upsert).
+    sync._collections.clear()
 
     for node_type in COLLECTION_NAMES:
         sync.ensure_collection(node_type, DIM)

@@ -83,6 +83,11 @@ def milvus_sync():
 
     for _name in utility.list_collections(using=sync.alias):
         utility.drop_collection(_name, using=sync.alias)
+    # The drops above bypass HCGMilvusSync's internal collection cache; clear it
+    # so ensure_collection rebuilds fresh handles. Without this, v0.7.2's #542
+    # fast-path returns a stale Collection pointing at the just-dropped id and
+    # upserts fail with "collection not found".
+    sync._collections.clear()
 
     # Ensure all collections exist
     for node_type in ["Entity", "Concept", "State", "Process", "Edge", "TypeCentroid"]:
