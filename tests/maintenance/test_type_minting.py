@@ -16,8 +16,12 @@ class FakeHCG:
 
     def add_node(self, name, node_type, uuid=None, properties=None, **kw):
         self.added_nodes.append(
-            {"name": name, "node_type": node_type, "uuid": uuid,
-             "properties": properties or {}}
+            {
+                "name": name,
+                "node_type": node_type,
+                "uuid": uuid,
+                "properties": properties or {},
+            }
         )
         return uuid
 
@@ -41,12 +45,26 @@ class FakeMilvus:
 def _cluster() -> EmergentCluster:
     return EmergentCluster(
         members=[
-            Member(uuid="u1", name="derivative", embedding=[0.0, 2.0],
-                   signature=Counter(), current_type="entity",
-                   hermes_type_hint="concept", neighbors=[], model="all-MiniLM-L6-v2"),
-            Member(uuid="u2", name="integral", embedding=[2.0, 0.0],
-                   signature=Counter(), current_type="entity",
-                   hermes_type_hint="concept", neighbors=[], model="all-MiniLM-L6-v2"),
+            Member(
+                uuid="u1",
+                name="derivative",
+                embedding=[0.0, 2.0],
+                signature=Counter(),
+                current_type="entity",
+                hermes_type_hint="concept",
+                neighbors=[],
+                model="all-MiniLM-L6-v2",
+            ),
+            Member(
+                uuid="u2",
+                name="integral",
+                embedding=[2.0, 0.0],
+                signature=Counter(),
+                current_type="entity",
+                hermes_type_hint="concept",
+                neighbors=[],
+                model="all-MiniLM-L6-v2",
+            ),
         ]
     )
 

@@ -43,9 +43,7 @@ def test_hermes_type_hint_persisted():
     )
 
     entity_calls = [
-        c
-        for c in mock_hcg.add_node.call_args_list
-        if c.kwargs.get("name") == "Paris"
+        c for c in mock_hcg.add_node.call_args_list if c.kwargs.get("name") == "Paris"
     ]
     assert entity_calls, "expected an add_node call for the Paris entity"
     props = entity_calls[0].kwargs["properties"]

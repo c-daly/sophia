@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 import uuid as uuid_lib
+from collections.abc import Callable
+from typing import Any
 
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_clusters
@@ -23,10 +25,10 @@ ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 
 def _type_name(type_uuid: str) -> str:
     """Convention: type-definition uuids are 'type_<name>'."""
-    return type_uuid[len("type_"):] if type_uuid.startswith("type_") else type_uuid
+    return type_uuid[len("type_") :] if type_uuid.startswith("type_") else type_uuid
 
 
-def current_categories(hcg) -> list[str]:
+def current_categories(hcg: Any) -> list[str]:
     """Existing type-definition labels, excluding `entity` and reserved_* types."""
     out: list[str] = []
     for node in hcg.list_all_nodes(node_type="type_definition"):
@@ -37,7 +39,7 @@ def current_categories(hcg) -> list[str]:
     return out
 
 
-def load_type_members(hcg, milvus, type_uuid: str) -> list[Member]:
+def load_type_members(hcg: Any, milvus: Any, type_uuid: str) -> list[Member]:
     """Load all members of a type as Member objects (embedding + structural signature).
 
     Embeddings come from Milvus; the structural signature is built from the node's
@@ -60,7 +62,8 @@ def load_type_members(hcg, milvus, type_uuid: str) -> list[Member]:
         edges = hcg.query_edges_from(uuid)
         target_uuids = [e["target"] for e in edges if e.get("target")]
         target_nodes = {
-            n["uuid"]: n for n in (hcg.get_nodes_batch(target_uuids) if target_uuids else [])
+            n["uuid"]: n
+            for n in (hcg.get_nodes_batch(target_uuids) if target_uuids else [])
         }
         neighbors = [
             {
@@ -91,16 +94,16 @@ class EmergenceHandler:
         self,
         *,
         config: MaintenanceConfig,
-        hcg,
-        milvus,
-        event_bus,
+        hcg: Any,
+        milvus: Any,
+        event_bus: Any,
         hermes_url: str,
         token: str,
-        load_members,
-        name_fn,
-        mint_fn,
-        candidates_fn,
-    ):
+        load_members: Any,
+        name_fn: Any,
+        mint_fn: Any,
+        candidates_fn: Any,
+    ) -> None:
         self._config = config
         self._hcg = hcg
         self._milvus = milvus
@@ -152,7 +155,15 @@ class EmergenceHandler:
             )
 
 
-def build_emergence_handler(*, config, hcg, milvus, event_bus, hermes_url, token):
+def build_emergence_handler(
+    *,
+    config: MaintenanceConfig,
+    hcg: Any,
+    milvus: Any,
+    event_bus: Any,
+    hermes_url: str,
+    token: str,
+) -> Callable[[str], None]:
     """Return the callable registered as handlers['type_emergence']."""
     from sophia.maintenance.hermes_naming import name_cluster
     from sophia.maintenance.type_minting import mint_type

@@ -18,8 +18,6 @@ class TestEmergenceTunables:
         assert 0.0 <= cfg.hermes_confidence_floor <= 1.0
 
     def test_env_override(self):
-        with mock.patch.dict(
-            os.environ, {"SOPHIA_MAINTENANCE_MIN_CLUSTER_SIZE": "5"}
-        ):
+        with mock.patch.dict(os.environ, {"SOPHIA_MAINTENANCE_MIN_CLUSTER_SIZE": "5"}):
             cfg = MaintenanceConfig()
             assert cfg.min_cluster_size == 5

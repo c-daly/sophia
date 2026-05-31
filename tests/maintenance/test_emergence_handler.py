@@ -11,15 +11,27 @@ from sophia.maintenance.emergence_types import Member, NameResult
 
 def _members():
     phys = [
-        Member(uuid=f"p{i}", name=f"p{i}", embedding=[0.0 + i * 0.01, 0.0],
-               signature=Counter({("MOVED_TO", "location"): 1}),
-               current_type="entity", hermes_type_hint="object", neighbors=[])
+        Member(
+            uuid=f"p{i}",
+            name=f"p{i}",
+            embedding=[0.0 + i * 0.01, 0.0],
+            signature=Counter({("MOVED_TO", "location"): 1}),
+            current_type="entity",
+            hermes_type_hint="object",
+            neighbors=[],
+        )
         for i in range(4)
     ]
     con = [
-        Member(uuid=f"c{i}", name=f"c{i}", embedding=[9.0 + i * 0.01, 9.0],
-               signature=Counter({("DEFINED_AS", "concept"): 1}),
-               current_type="entity", hermes_type_hint="concept", neighbors=[])
+        Member(
+            uuid=f"c{i}",
+            name=f"c{i}",
+            embedding=[9.0 + i * 0.01, 9.0],
+            signature=Counter({("DEFINED_AS", "concept"): 1}),
+            current_type="entity",
+            hermes_type_hint="concept",
+            neighbors=[],
+        )
         for i in range(4)
     ]
     return phys + con
@@ -41,9 +53,15 @@ def test_handler_mints_named_clusters_and_publishes():
             published.append((channel, msg))
 
     handler = EmergenceHandler(
-        config=MaintenanceConfig(), hcg=object(), milvus=object(), event_bus=EB(),
-        hermes_url="http://h", token="t",
-        load_members=lambda u: _members(), name_fn=fake_name, mint_fn=fake_mint,
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=object(),
+        event_bus=EB(),
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=fake_mint,
         candidates_fn=lambda: ["object", "location", "concept"],
     )
     handler.run(type_uuid="type_entity")
@@ -59,10 +77,16 @@ def test_handler_skips_low_confidence():
         return NameResult(label="x", description="", confidence=0.1)
 
     handler = EmergenceHandler(
-        config=MaintenanceConfig(), hcg=object(), milvus=object(), event_bus=None,
-        hermes_url="http://h", token="t",
-        load_members=lambda u: _members(), name_fn=fake_name,
-        mint_fn=lambda *a, **k: minted.append(1), candidates_fn=lambda: [],
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=object(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=lambda *a, **k: minted.append(1),
+        candidates_fn=lambda: [],
     )
     handler.run(type_uuid="type_entity")
 

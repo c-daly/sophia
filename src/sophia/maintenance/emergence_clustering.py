@@ -71,7 +71,10 @@ def _recursive_clusters(
     groups = _embedding_groups(members)
     if len(groups) < 2 or any(len(g) < min_cluster_size for g in groups):
         return [members]
-    if min(_cohesion_improvement(members, g) for g in groups) < min_cohesion_improvement:
+    if (
+        min(_cohesion_improvement(members, g) for g in groups)
+        < min_cohesion_improvement
+    ):
         return [members]  # split doesn't meaningfully help -> leaf
     leaves: list[list[Member]] = []
     for g in groups:

@@ -35,8 +35,10 @@ def test_current_categories_excludes_entity_and_reserved():
     hcg = _FakeHCG(
         nodes_by_type={
             "type_definition": [
-                {"name": "entity"}, {"name": "concept"},
-                {"name": "reserved_state"}, {"name": "object"},
+                {"name": "entity"},
+                {"name": "concept"},
+                {"name": "reserved_state"},
+                {"name": "object"},
             ]
         },
         edges={},
@@ -49,8 +51,12 @@ def test_load_type_members_builds_member_with_signature():
     hcg = _FakeHCG(
         nodes_by_type={
             "entity": [
-                {"uuid": "u1", "name": "derivative", "type": "entity",
-                 "properties": {"hermes_type_hint": "concept"}}
+                {
+                    "uuid": "u1",
+                    "name": "derivative",
+                    "type": "entity",
+                    "properties": {"hermes_type_hint": "concept"},
+                }
             ]
         },
         edges={"u1": [{"relation": "DEFINED_AS", "target": "u2"}]},

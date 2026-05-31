@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from sophia.maintenance.emergence_types import EmergentCluster, NameResult
 
@@ -31,8 +32,8 @@ def mint_type(
     cluster: EmergentCluster,
     name: NameResult,
     *,
-    hcg,
-    milvus,
+    hcg: Any,
+    milvus: Any,
     source_cluster_id: str,
 ) -> str:
     """Create the type-definition node, seed its centroid, and retype members."""

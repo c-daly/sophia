@@ -16,7 +16,11 @@ def _member(uuid: str = "u1") -> Member:
         current_type="entity",
         hermes_type_hint="concept",
         neighbors=[
-            {"relation": "DEFINED_AS", "neighbor_name": "limit", "neighbor_type": "entity"}
+            {
+                "relation": "DEFINED_AS",
+                "neighbor_name": "limit",
+                "neighbor_type": "entity",
+            }
         ],
     )
 

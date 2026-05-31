@@ -67,8 +67,6 @@ def test_name_cluster_returns_none_on_error(monkeypatch):
     monkeypatch.setattr(hn.httpx, "post", fake_post)
 
     assert (
-        hn.name_cluster(
-            _cluster(), candidates=[], hermes_url="http://h", token="t"
-        )
+        hn.name_cluster(_cluster(), candidates=[], hermes_url="http://h", token="t")
         is None
     )
