@@ -12,6 +12,7 @@ native string list. Reconciling members into an *existing* type is #504's job.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -21,6 +22,21 @@ from sophia.maintenance.emergence_types import EmergentCluster, NameResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "all-MiniLM-L6-v2"
+
+
+def _slugify(label: str) -> str:
+    """Normalize a free-text Hermes label into a slug-safe identifier component.
+
+    ``name.label`` comes verbatim from Hermes' JSON response and flows into the
+    ``type_uuid``, the node ``type`` property, and event payloads. A multi-word
+    or punctuated label (e.g. ``"living thing"``, ``"sub-class"``) would inject
+    spaces/punctuation into the graph's type namespace and corrupt subsequent
+    lookups (greptile review #149). Lowercase and collapse any run of
+    non-alphanumeric characters to a single underscore; fall back to ``unnamed``
+    so the identifier is never empty (uniqueness still comes from the uuid suffix).
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+    return slug or "unnamed"
 
 
 def _mean_vector(vectors: list[list[float]]) -> list[float]:
@@ -45,7 +61,8 @@ def mint_type(
     to a specific minted type via their ``IS_A`` edge to this uuid, not via the
     shared label string.
     """
-    type_uuid = f"type_{name.label}_{uuid4().hex[:8]}"
+    slug = _slugify(name.label)
+    type_uuid = f"type_{slug}_{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
     name_history = [
         {
@@ -76,7 +93,7 @@ def mint_type(
     )
 
     for member in cluster.members:
-        hcg.update_node(member.uuid, {"type": name.label})
+        hcg.update_node(member.uuid, {"type": slug})
         hcg.add_edge(member.uuid, type_uuid, "IS_A")
 
     logger.info(

@@ -115,3 +115,24 @@ def test_same_label_mints_are_distinct_no_overwrite():
     assert uuid_a in milvus.centroids and uuid_b in milvus.centroids
     assert ("u1", uuid_a, "IS_A") in hcg.edges
     assert ("u1", uuid_b, "IS_A") in hcg.edges
+
+
+def test_messy_label_is_slugified_into_identifiers():
+    """A multi-word/punctuated Hermes label must not inject spaces into the
+    type_uuid or the member `type` string (greptile #149). The human-readable
+    label is still preserved in name_history."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="Living Thing!", description="", confidence=0.7)
+
+    type_uuid = mint_type(
+        _cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="cl1"
+    )
+
+    assert type_uuid.startswith("type_living_thing_")
+    assert " " not in type_uuid and "!" not in type_uuid
+    # Members retyped with the slug, never the raw label.
+    assert ("u1", {"type": "living_thing"}) in hcg.updated
+    assert ("u2", {"type": "living_thing"}) in hcg.updated
+    # Human-readable label preserved for display/lineage.
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    assert tdef[0]["properties"]["name_history"][0]["name"] == "Living Thing!"
