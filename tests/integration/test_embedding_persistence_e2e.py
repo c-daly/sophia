@@ -93,7 +93,7 @@ def milvus_sync():
         utility.drop_collection(_name, using=sync.alias)
 
     for node_type in COLLECTION_NAMES:
-        sync.ensure_collection(node_type)
+        sync.ensure_collection(node_type, DIM)
 
     for type_uuid, centroid in SEED_TYPES.items():
         sync.update_centroid(

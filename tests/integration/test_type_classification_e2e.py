@@ -86,7 +86,7 @@ def milvus_sync():
 
     # Ensure all collections exist
     for node_type in ["Entity", "Concept", "State", "Process", "Edge", "TypeCentroid"]:
-        sync.ensure_collection(node_type)
+        sync.ensure_collection(node_type, DIM)
 
     # Seed type centroids
     for type_uuid, centroid in SEED_TYPES.items():
