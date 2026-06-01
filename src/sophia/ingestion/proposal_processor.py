@@ -460,6 +460,7 @@ class ProposalProcessor:
             # 3. Ingest proposed edges
             with tracer.start_as_current_span("proposal_processor.ingest_edges"):
                 stored_edge_ids: list[str] = []
+                dropped_count = 0
                 proposed_edges = proposal.get("proposed_edges") or []
 
                 # Pre-resolve unresolved edge names in batch
@@ -488,10 +489,18 @@ class ProposalProcessor:
                     tgt_uuid = name_to_uuid.get(tgt_name)
 
                     if not src_uuid or not tgt_uuid:
+                        dropped_count += 1
+                        # Do not log entity names: source/target names are derived
+                        # from arbitrary ingested documents (potential PII). Key the
+                        # diagnostic on the proposal id, the relation type, and which
+                        # endpoint failed to resolve.
                         logger.debug(
-                            "Skipping edge %s -> %s: missing node UUID",
-                            src_name,
-                            tgt_name,
+                            "Dropping edge in proposal %s: relation=%s "
+                            "unresolved src=%s tgt=%s",
+                            proposal.get("proposal_id", ""),
+                            edge.get("relation", "RELATED_TO"),
+                            not src_uuid,
+                            not tgt_uuid,
                         )
                         continue
 
@@ -533,6 +542,27 @@ class ProposalProcessor:
                                 "model": model,
                             }
                         )
+
+                # Only emit at INFO when something dropped (the signal we care
+                # about); the all-resolved case is already covered by the
+                # per-proposal summary logged in the API layer.
+                if dropped_count:
+                    # received = created + dropped_unresolved + errored (every
+                    # proposed edge takes exactly one of those three paths), so
+                    # surface the errored term too — otherwise the counts don't
+                    # reconcile when an edge resolves but add_edge raises.
+                    errored_count = (
+                        len(proposed_edges) - dropped_count - len(stored_edge_ids)
+                    )
+                    logger.info(
+                        "Edge ingestion for proposal %s: received=%d created=%d "
+                        "dropped_unresolved=%d errored=%d",
+                        proposal.get("proposal_id", ""),
+                        len(proposed_edges),
+                        len(stored_edge_ids),
+                        dropped_count,
+                        errored_count,
+                    )
 
             # Flush all pending embeddings in batch.
             #
