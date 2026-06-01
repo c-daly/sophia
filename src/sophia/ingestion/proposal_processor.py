@@ -547,13 +547,21 @@ class ProposalProcessor:
                 # about); the all-resolved case is already covered by the
                 # per-proposal summary logged in the API layer.
                 if dropped_count:
+                    # received = created + dropped_unresolved + errored (every
+                    # proposed edge takes exactly one of those three paths), so
+                    # surface the errored term too — otherwise the counts don't
+                    # reconcile when an edge resolves but add_edge raises.
+                    errored_count = (
+                        len(proposed_edges) - dropped_count - len(stored_edge_ids)
+                    )
                     logger.info(
                         "Edge ingestion for proposal %s: received=%d created=%d "
-                        "dropped_unresolved=%d",
+                        "dropped_unresolved=%d errored=%d",
                         proposal.get("proposal_id", ""),
                         len(proposed_edges),
                         len(stored_edge_ids),
                         dropped_count,
+                        errored_count,
                     )
 
             # Flush all pending embeddings in batch.
