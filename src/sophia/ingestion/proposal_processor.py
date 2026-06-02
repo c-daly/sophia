@@ -117,7 +117,7 @@ def _squared_l2_distance(a: list[float], b: list[float]) -> float:
     computed here are directly comparable to ``ENTITY_MATCH_THRESHOLD`` and to
     ``search_similar`` scores. Lower is more similar.
     """
-    return sum((x - y) ** 2 for x, y in zip(a, b))
+    return sum((x - y) ** 2 for x, y in zip(a, b, strict=True))
 
 
 class ProposalProcessor:
@@ -306,14 +306,18 @@ class ProposalProcessor:
                     if embedding:
                         best_uuid: str | None = None
                         best_dist = ENTITY_MATCH_THRESHOLD
-                        for _coll, pending in pending_embeddings.items():
-                            for pending_node in pending:
-                                dist = _squared_l2_distance(
-                                    embedding, pending_node["embedding"]
-                                )
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_uuid = pending_node["uuid"]
+                        # Scope to THIS node's collection only. The persisted
+                        # Milvus dedup (2a) searches node_type=collection, so
+                        # cross-collection merges must not happen here either --
+                        # batch membership must not change whether two nodes
+                        # collapse into one (#151 review).
+                        for pending_node in pending_embeddings.get(collection, []):
+                            dist = _squared_l2_distance(
+                                embedding, pending_node["embedding"]
+                            )
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_uuid = pending_node["uuid"]
                         if best_uuid is not None:
                             logger.info(
                                 "Entity '%s' matches a sibling created earlier in "

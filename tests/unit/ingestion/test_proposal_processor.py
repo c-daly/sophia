@@ -274,6 +274,78 @@ class TestProposalProcessor:
             "embedding-less entity; expected exactly 2 (no name-based dedup)"
         )
 
+    def test_similar_embeddings_in_different_collections_not_merged(self):
+        """Cross-collection nodes must not be merged by in-process dedup (#151).
+
+        Two mentions with (near-)identical embeddings but classified into
+        different collections (Entity vs Concept) are distinct identities. The
+        persisted Milvus dedup (2a) is collection-scoped, so the in-process pass
+        must be too -- batch membership alone must not collapse two nodes that
+        separate batches would keep apart.
+        """
+        from types import SimpleNamespace
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.side_effect = [f"uuid-{i}" for i in range(10)]
+        mock_hcg.get_node.return_value = None
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        # Force two different collections for identical embeddings.
+        processor._classifier = MagicMock()
+        processor._classifier.classify.side_effect = [
+            SimpleNamespace(
+                type_name="entity",
+                type_uuid="type_entity",
+                confidence=0.9,
+                needs_reclassification=False,
+            ),
+            SimpleNamespace(
+                type_name="concept",
+                type_uuid="type_concept",
+                confidence=0.9,
+                needs_reclassification=False,
+            ),
+        ]
+
+        emb = [0.1] * 384
+        result = processor.process(
+            {
+                "proposal_id": "p-xcoll",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "raw_text": "x",
+                "proposed_nodes": [
+                    {
+                        "name": "Alpha",
+                        "type": "entity",
+                        "embedding": list(emb),
+                        "embedding_id": "e1",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                    {
+                        "name": "Beta",
+                        "type": "concept",
+                        "embedding": list(emb),
+                        "embedding_id": "e2",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                ],
+                "proposed_edges": [],
+            }
+        )
+
+        # Identical embeddings but different collections => two distinct nodes.
+        assert len(result["stored_node_ids"]) == 2, result["stored_node_ids"]
+
     def test_skips_empty_name_nodes(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
