@@ -110,6 +110,16 @@ def _collection_for(node_type: str) -> str:
     return _NODE_TYPE_TO_COLLECTION.get(node_type.lower(), "Entity")
 
 
+def _squared_l2_distance(a: list[float], b: list[float]) -> float:
+    """Squared Euclidean (L2) distance between two vectors.
+
+    Matches Milvus' L2 metric (which returns squared distance), so distances
+    computed here are directly comparable to ``ENTITY_MATCH_THRESHOLD`` and to
+    ``search_similar`` scores. Lower is more similar.
+    """
+    return sum((x - y) ** 2 for x, y in zip(a, b))
+
+
 class ProposalProcessor:
     """Processes proposals from Hermes into graph knowledge."""
 
@@ -280,6 +290,41 @@ class ProposalProcessor:
                         node_type = proposed.get("type", "entity")
 
                     collection = _collection_for(node_type)
+
+                    # 2a-pre. In-process dedup against siblings created earlier
+                    # in THIS ingest. The Milvus index (2a) is only flushed after
+                    # the node loop (see pending_embeddings, 2d), so the search
+                    # below cannot see a node created moments ago in the same
+                    # batch -- the same entity proposed twice would mint two
+                    # nodes (#148). Identity is embedding-based, never name-based:
+                    # compare this mention's embedding (squared L2) against the
+                    # pending embeddings of nodes already created this ingest and
+                    # reuse the closest sibling below ENTITY_MATCH_THRESHOLD. A
+                    # node with NO embedding carries no meaning signal, so it is
+                    # deliberately not deduped here -- the downstream resolver
+                    # handles that later.
+                    if embedding:
+                        best_uuid: str | None = None
+                        best_dist = ENTITY_MATCH_THRESHOLD
+                        for _coll, pending in pending_embeddings.items():
+                            for pending_node in pending:
+                                dist = _squared_l2_distance(
+                                    embedding, pending_node["embedding"]
+                                )
+                                if dist < best_dist:
+                                    best_dist = dist
+                                    best_uuid = pending_node["uuid"]
+                        if best_uuid is not None:
+                            logger.info(
+                                "Entity '%s' matches a sibling created earlier in "
+                                "this ingest (%s, L2=%.3f); reusing, skipping "
+                                "creation",
+                                name,
+                                best_uuid,
+                                best_dist,
+                            )
+                            name_to_uuid[name] = best_uuid
+                            continue
 
                     # 2a. Search for existing node with similar embedding
                     if embedding:
