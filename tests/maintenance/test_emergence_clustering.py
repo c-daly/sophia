@@ -120,3 +120,38 @@ def test_duplicate_value_embeddings_do_not_crash():
     # No KeyError; every input member is accounted for exactly once.
     out = [m.uuid for c in clusters for m in c.members]
     assert len(out) == len(set(out))
+
+
+def test_real_scale_unit_embeddings_cluster():
+    """Regression for #505: near-unit high-dim embeddings still cluster.
+
+    The prior recursive-binary-split returned 0 clusters on real OpenAI
+    embeddings -- a binary split reduces absolute variance only marginally, so
+    the cohesion-improvement gate was never met. Agglomerative + silhouette
+    recovers the latent groups. Three orthogonal-ish unit groups -> 3 clusters.
+    """
+    import math
+
+    def unit(v: list[float]) -> list[float]:
+        n = math.sqrt(sum(x * x for x in v)) or 1.0
+        return [x / n for x in v]
+
+    dim = 8
+    members = []
+    for g in range(3):
+        for i in range(4):
+            v = [0.0] * dim
+            v[g] = 1.0
+            v[(g + 4) % dim] = 0.12 * (i + 1)  # small within-group spread
+            members.append(_m(f"g{g}_{i}", unit(v), (f"R{g}", "t")))
+
+    clusters = find_emergent_clusters(
+        members,
+        min_cluster_size=MIN,
+        variance_threshold=0.6,
+        min_cohesion_improvement=IMPROVE,
+    )
+    assert len(clusters) == 3
+    for c in clusters:
+        groups = {m.uuid.split("_")[0] for m in c.members}
+        assert len(groups) == 1  # each cluster is exactly one group
