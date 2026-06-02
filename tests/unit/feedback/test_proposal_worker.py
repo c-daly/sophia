@@ -20,6 +20,7 @@ class TestProposalWorkerResilience:
         queue = MagicMock()
         queue.dequeue.side_effect = ConnectionError("redis down")
         worker = ProposalWorker(queue=queue, processor=MagicMock())
+        worker._running = True
 
         slept: list[float] = []
 
@@ -31,7 +32,9 @@ class TestProposalWorkerResilience:
         # Must not raise -- previously this killed the worker task.
         await worker._process_one()
 
-        assert slept, "worker should back off after a dequeue error"
+        # Backed off by exactly _error_backoff (the sleep is guarded by
+        # self._running, set True above).
+        assert slept == [worker._error_backoff]
 
     async def test_worker_resumes_after_dequeue_error(self, monkeypatch):
         """After a transient dequeue error, the next message is processed."""
@@ -47,6 +50,7 @@ class TestProposalWorkerResilience:
             "stored_edge_ids": [],
         }
         worker = ProposalWorker(queue=queue, processor=processor)
+        worker._running = True
         monkeypatch.setattr(asyncio, "sleep", AsyncMock())
 
         await worker._process_one()  # errors, backs off, returns

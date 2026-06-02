@@ -56,8 +56,11 @@ class ProposalWorker:
                 "Proposal dequeue failed (Redis unavailable?); backing off %.1fs: %s",
                 self._error_backoff,
                 e,
+                exc_info=True,
             )
-            await asyncio.sleep(self._error_backoff)
+            # Don't burn the full backoff if we're shutting down mid-outage.
+            if self._running:
+                await asyncio.sleep(self._error_backoff)
             return
         if not message:
             return
