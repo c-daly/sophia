@@ -22,10 +22,14 @@ class ProposalWorker:
         queue: ProposalQueue,
         processor: ProposalProcessor,
         context_ttl: int = 3600,
+        error_backoff: float = 1.0,
     ):
         self.queue = queue
         self.processor = processor
         self.context_ttl = context_ttl
+        # Seconds to wait after a dequeue error before retrying, so a Redis
+        # outage throttles the loop instead of spinning hot.
+        self._error_backoff = error_backoff
         self._running = False
 
     async def start(self) -> None:
@@ -40,7 +44,21 @@ class ProposalWorker:
         logger.info("Proposal worker stopping")
 
     async def _process_one(self) -> None:
-        message = await asyncio.to_thread(self.queue.dequeue, timeout=1)
+        try:
+            message = await asyncio.to_thread(self.queue.dequeue, timeout=1)
+        except Exception as e:
+            # Redis unavailable (e.g. a transient outage): log, back off, and
+            # keep the loop alive so the worker resumes when Redis recovers.
+            # The dequeue is a blocking brpop; previously this call sat outside
+            # any guard, so a dropped connection killed the worker task and
+            # silently stopped the cache pipeline until a sophia restart.
+            logger.warning(
+                "Proposal dequeue failed (Redis unavailable?); backing off %.1fs: %s",
+                self._error_backoff,
+                e,
+            )
+            await asyncio.sleep(self._error_backoff)
+            return
         if not message:
             return
 
