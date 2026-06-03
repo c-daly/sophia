@@ -36,7 +36,7 @@ _ENTITY_ANCESTORS = ["root", "node"]
 
 def _cosine(a: list[float], b: list[float]) -> float:
     """Cosine similarity of two equal-length vectors (0.0 if either is zero)."""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = sum(x * x for x in a) ** 0.5
     nb = sum(y * y for y in b) ** 0.5
     return dot / (na * nb) if na and nb else 0.0
@@ -200,7 +200,8 @@ class EmergenceHandler:
         else:
             parent_type_uuid = type_uuid
             parent_node = self._hcg.get_node(type_uuid) or {}
-            parent_ancestors = list(parent_node.get("ancestors") or _ENTITY_ANCESTORS)
+            parent_props = parent_node.get("properties") or {}
+            parent_ancestors = list(parent_props.get("ancestors") or _ENTITY_ANCESTORS)
 
         # Mutable copy: each successful mint adds its label so later clusters in
         # this same run see it as a candidate and don't silently re-mint a
@@ -241,8 +242,9 @@ class EmergenceHandler:
                 # it using its stored ancestors.
                 type_uuid = existing
                 existing_node = self._hcg.get_node(type_uuid) or {}
+                existing_props = existing_node.get("properties") or {}
                 child_ancestors = list(
-                    existing_node.get("ancestors") or parent_ancestors
+                    existing_props.get("ancestors") or parent_ancestors
                 )
                 if is_leaf:
                     self._attach_members(node.members, type_uuid, existing_node)

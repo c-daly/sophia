@@ -330,7 +330,7 @@ def test_handler_reconciles_into_existing_type(monkeypatch):
 
     class FakeHCG:
         def get_node(self, uuid):
-            return {"uuid": uuid, "name": "vehicle", "ancestors": ["root", "node", "entity"]}
+            return {"uuid": uuid, "name": "vehicle", "properties": {"ancestors": ["root", "node", "entity"]}}
 
         def update_node(self, uuid, props):
             retyped[uuid] = props
@@ -369,7 +369,7 @@ def test_handler_subdivides_minted_type_nests_under_it(monkeypatch):
 
     class FakeHCG:
         def get_node(self, uuid):
-            return {"uuid": uuid, "name": "vehicle", "ancestors": ["root", "node", "entity"]}
+            return {"uuid": uuid, "name": "vehicle", "properties": {"ancestors": ["root", "node", "entity"]}}
 
         def update_node(self, *a, **k):
             pass
