@@ -14,7 +14,6 @@ class TestEmergenceTunables:
         assert cfg.variance_threshold > 0
         assert cfg.min_cluster_size >= 2
         assert cfg.max_cluster_size >= cfg.min_cluster_size
-        assert 0.0 < cfg.min_cohesion_improvement <= 1.0
         assert 0.0 <= cfg.hermes_confidence_floor <= 1.0
 
     def test_env_override(self):

@@ -97,7 +97,7 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert len(tdef) == 1
     props = tdef[0]["properties"]
     assert props["is_type_definition"] is True
-    assert props["ancestors"] == ["root"]
+    assert props["ancestors"] == ["root", "node", "entity"]
     assert props["name_history"][0]["name"] == "concept"
     assert props["name_history"][0]["hermes_confidence"] == 0.8
 
@@ -106,11 +106,69 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert centroid == [1.0, 1.0]
     assert model == "all-MiniLM-L6-v2"
 
-    # members retyped + IS_A edges to the new (unique) type uuid
+    # members retyped via the authoritative `type_uuid` property (membership is
+    # the property -- emergence no longer creates instance->type IS_A edges).
     assert ("u1", {"type": "concept", "type_uuid": type_uuid}) in hcg.updated
     assert ("u2", {"type": "concept", "type_uuid": type_uuid}) in hcg.updated
-    assert ("u1", type_uuid, "IS_A") in hcg.edges
-    assert ("u2", type_uuid, "IS_A") in hcg.edges
+    # No member->type IS_A edge is created (#505).
+    assert ("u1", type_uuid, "IS_A") not in hcg.edges
+    assert ("u2", type_uuid, "IS_A") not in hcg.edges
+    assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
+
+    # The minted type IS_A its default parent (type_entity), mirroring the
+    # seeder IS_A type-hierarchy chain so ancestors match the graph -- this
+    # taxonomy edge (type-definition -> parent type-definition) is KEPT (#505).
+    assert (type_uuid, "type_entity", "IS_A") in hcg.edges
+
+
+def test_mint_under_explicit_parent_sets_lineage_and_is_a_edge():
+    """An explicit parent_type_uuid / parent_ancestors must drive both the
+    stored ancestors list and the IS_A edge to that parent (#505)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="mammal", description="", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="type_animal",
+        parent_ancestors=["root", "node", "entity"],
+    )
+
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    assert tdef[0]["properties"]["ancestors"] == [
+        "root",
+        "node",
+        "entity",
+        "animal",
+    ]
+    assert (type_uuid, "type_animal", "IS_A") in hcg.edges
+
+
+def test_mint_uses_clean_parent_name_not_uuid_suffix():
+    """When the parent is a minted type, its uuid carries a random `_<hex>`
+    suffix (`type_<slug>_<hex>`). The child's stored ancestors must use the
+    parent's clean name passed via `parent_name`, not the suffixed uuid
+    (greptile #159)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="sedan", description="", confidence=0.8)
+
+    mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="type_vehicle_a1b2c3d4",
+        parent_ancestors=["root", "node", "entity"],
+        parent_name="vehicle",
+    )
+
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    # Clean "vehicle" -- NOT "vehicle_a1b2c3d4".
+    assert tdef[0]["properties"]["ancestors"] == ["root", "node", "entity", "vehicle"]
 
 
 def test_same_label_mints_are_distinct_no_overwrite():
@@ -125,8 +183,14 @@ def test_same_label_mints_are_distinct_no_overwrite():
     assert uuid_a.startswith("type_concept_")
     assert uuid_b.startswith("type_concept_")
     assert uuid_a in milvus.centroids and uuid_b in milvus.centroids
-    assert ("u1", uuid_a, "IS_A") in hcg.edges
-    assert ("u1", uuid_b, "IS_A") in hcg.edges
+    # Members are tied to each distinct mint via their `type_uuid` property
+    # (overwritten on each retype), not via instance->type IS_A edges (#505).
+    assert ("u1", {"type": "concept", "type_uuid": uuid_a}) in hcg.updated
+    assert ("u1", {"type": "concept", "type_uuid": uuid_b}) in hcg.updated
+    # Only taxonomy IS_A edges (minted type -> parent) exist; no member edges.
+    assert (uuid_a, "type_entity", "IS_A") in hcg.edges
+    assert (uuid_b, "type_entity", "IS_A") in hcg.edges
+    assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
 
 
 def test_messy_label_is_slugified_into_identifiers():
@@ -147,9 +211,11 @@ def test_messy_label_is_slugified_into_identifiers():
     assert ("u2", {"type": "living_thing", "type_uuid": type_uuid}) in hcg.updated
 
 
-def test_mint_removes_stale_is_a_edge_before_adding_new():
-    """Retyping a member deletes its prior IS_A edge (a reified edge node) so
-    re-emergence on the old parent no longer re-includes it (#149 review)."""
+def test_mint_does_not_touch_member_is_a_edges():
+    """Membership is the `type_uuid` property, so mint creates NO member->type
+    IS_A edge and does NOT delete a member's prior IS_A edges. A member split
+    out of a parent is excluded from the parent at load time purely because its
+    `type_uuid` now points at the new type (#505)."""
     parent = "type_tool_parent01"
     hcg = FakeHCG(
         existing_edges={
@@ -167,10 +233,38 @@ def test_mint_removes_stale_is_a_edge_before_adding_new():
         _cluster(), name, hcg=hcg, milvus=FakeMilvus(), source_cluster_id="cl"
     )
 
-    # Stale IS_A edge nodes deleted; fresh IS_A edge points at the new type.
-    assert "e_old1" in hcg.deleted and "e_old2" in hcg.deleted
-    assert ("u1", new_uuid, "IS_A") in hcg.edges
-    assert ("u2", new_uuid, "IS_A") in hcg.edges
+    # No member IS_A edges are deleted (nothing to clean up) or created.
+    assert hcg.deleted == []
+    assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
+    # Membership is recorded purely via the `type_uuid` property.
+    assert ("u1", {"type": "hammer", "type_uuid": new_uuid}) in hcg.updated
+    assert ("u2", {"type": "hammer", "type_uuid": new_uuid}) in hcg.updated
+    # Only the taxonomy IS_A (new type -> parent) is created.
+    assert (new_uuid, "type_entity", "IS_A") in hcg.edges
     # Human-readable label preserved for display/lineage.
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
     assert tdef[0]["properties"]["name_history"][0]["name"] == "hammer"
+
+
+def test_mint_type_only_skips_member_retype_for_super_types():
+    """An internal super-type mints with retype_members=False: the type node,
+    centroid and IS_A edge are created, but no member is retyped (its members
+    belong to the leaf subtypes below it) (#505)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="mathematics", description="", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl",
+        retype_members=False,
+    )
+
+    # No members were retyped.
+    assert hcg.updated == []
+    # But the type node, its centroid and the taxonomy IS_A edge still exist.
+    assert any(n["uuid"] == type_uuid for n in hcg.added_nodes)
+    assert type_uuid in milvus.centroids
+    assert (type_uuid, "type_entity", "IS_A") in hcg.edges

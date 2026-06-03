@@ -9,6 +9,17 @@ from sophia.maintenance.emergence_handler import EmergenceHandler
 from sophia.maintenance.emergence_types import Member, NameResult
 
 
+class _NoMatchMilvus:
+    """Milvus stub for which match-before-mint (#504) never finds an existing
+    type, so every cluster mints fresh."""
+
+    def find_nearest_types(self, centroid, top_k=1):
+        return []
+
+    def get_embedding(self, node_type, uuid):
+        return None
+
+
 def _members():
     phys = [
         Member(
@@ -44,7 +55,7 @@ def test_handler_mints_named_clusters_and_publishes():
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
         return NameResult(label=label, description="", confidence=0.9)
 
-    def fake_mint(cluster, name, hcg, milvus, source_cluster_id):
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
         minted.append(name.label)
         return f"type_{name.label}"
 
@@ -55,7 +66,7 @@ def test_handler_mints_named_clusters_and_publishes():
     handler = EmergenceHandler(
         config=MaintenanceConfig(),
         hcg=object(),
-        milvus=object(),
+        milvus=_NoMatchMilvus(),
         event_bus=EB(),
         hermes_url="http://h",
         token="t",
@@ -78,7 +89,7 @@ def test_handler_isolates_failing_cluster():
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
         return NameResult(label=label, description="", confidence=0.9)
 
-    def flaky_mint(cluster, name, hcg, milvus, source_cluster_id):
+    def flaky_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
         if name.label == "object":
             raise RuntimeError("transient HCG write error")
         minted.append(name.label)
@@ -87,7 +98,7 @@ def test_handler_isolates_failing_cluster():
     handler = EmergenceHandler(
         config=MaintenanceConfig(),
         hcg=object(),
-        milvus=object(),
+        milvus=_NoMatchMilvus(),
         event_bus=None,
         hermes_url="http://h",
         token="t",
@@ -113,7 +124,7 @@ def test_handler_skips_low_confidence():
     handler = EmergenceHandler(
         config=MaintenanceConfig(),
         hcg=object(),
-        milvus=object(),
+        milvus=_NoMatchMilvus(),
         event_bus=None,
         hermes_url="http://h",
         token="t",
@@ -138,13 +149,13 @@ def test_handler_feeds_minted_labels_into_later_candidates():
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
         return NameResult(label=label, description="", confidence=0.9)
 
-    def fake_mint(cluster, name, hcg, milvus, source_cluster_id):
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
         return f"type_{name.label}_x"
 
     handler = EmergenceHandler(
         config=MaintenanceConfig(),
         hcg=object(),
-        milvus=object(),
+        milvus=_NoMatchMilvus(),
         event_bus=None,
         hermes_url="http://h",
         token="t",
@@ -159,3 +170,309 @@ def test_handler_feeds_minted_labels_into_later_candidates():
     assert seen_candidates[0] == ["location"]
     assert seen_candidates[1][-1] in {"object", "concept"}
     assert len(seen_candidates[1]) == 2
+
+
+def test_handler_mints_under_entity_via_hierarchy(monkeypatch):
+    """Emergence must (a) drive minting off the hierarchy roll-up and (b) parent
+    every minted type under `type_entity` with the entity lineage (#505)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+    from sophia.maintenance.emergence_types import EmergentCluster
+
+    seen_members, mint_kwargs = [], []
+
+    def fake_hierarchy(members, *, min_cluster_size, variance_threshold):
+        # Two top-level hierarchy nodes, one per disjoint group of members.
+        phys = [m for m in members if m.uuid.startswith("p")]
+        con = [m for m in members if m.uuid.startswith("c")]
+        return [
+            HierarchyNode(members=phys, centroid=[0.0, 0.0]),
+            HierarchyNode(members=con, centroid=[9.0, 9.0]),
+        ]
+
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", fake_hierarchy)
+
+    def fake_name(cluster, candidates, hermes_url, token):
+        assert isinstance(cluster, EmergentCluster)
+        seen_members.append([m.uuid for m in cluster.members])
+        label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
+        return NameResult(label=label, description="", confidence=0.9)
+
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
+        mint_kwargs.append(kwargs)
+        return f"type_{name.label}_x"
+
+    published = []
+
+    class EB:
+        def publish(self, channel, msg):
+            published.append(msg)
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=_NoMatchMilvus(),
+        event_bus=EB(),
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=fake_mint,
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    # Each top-level hierarchy node became its own EmergentCluster.
+    assert seen_members == [["p0", "p1", "p2", "p3"], ["c0", "c1", "c2", "c3"]]
+    # Every mint is parented under entity with the entity lineage. Both nodes are
+    # leaves (no children), so their members are retyped onto them.
+    assert mint_kwargs == [
+        {
+            "parent_type_uuid": "type_entity",
+            "parent_ancestors": ["root", "node"],
+            "parent_name": "entity",
+            "retype_members": True,
+        },
+        {
+            "parent_type_uuid": "type_entity",
+            "parent_ancestors": ["root", "node"],
+            "parent_name": "entity",
+            "retype_members": True,
+        },
+    ]
+    # The published lineage descends root -> node -> entity.
+    assert all(p["ancestors"] == ["root", "node", "entity"] for p in published)
+
+
+def test_handler_mints_nested_hierarchy(monkeypatch):
+    """An internal super-type node mints type-only (retype_members=False) and its
+    leaf children mint *under it* (retype_members=True), so the tree nests (#505)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    leaf_a = HierarchyNode(
+        members=[m for m in _members() if m.uuid.startswith("p")], centroid=[0.0, 0.0]
+    )
+    leaf_b = HierarchyNode(
+        members=[m for m in _members() if m.uuid.startswith("c")], centroid=[9.0, 9.0]
+    )
+    supertype = HierarchyNode(
+        members=leaf_a.members + leaf_b.members,
+        centroid=[4.5, 4.5],
+        children=[leaf_a, leaf_b],
+    )
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", lambda *a, **k: [supertype])
+
+    calls = []  # (label, parent_type_uuid, retype_members)
+
+    def fake_name(cluster, candidates, hermes_url, token):
+        if len(cluster.members) == 8:
+            label = "science"
+        elif cluster.members[0].uuid.startswith("p"):
+            label = "object"
+        else:
+            label = "concept"
+        return NameResult(label=label, description="", confidence=0.9)
+
+    def fake_mint(
+        cluster,
+        name,
+        hcg,
+        milvus,
+        source_cluster_id,
+        *,
+        parent_type_uuid,
+        parent_ancestors,
+        parent_name,
+        retype_members,
+    ):
+        calls.append((name.label, parent_type_uuid, parent_name, retype_members))
+        return f"type_{name.label}_x"
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=_NoMatchMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=fake_mint,
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    # Super-type minted first, under entity, type-only (members live in leaves).
+    assert calls[0] == ("science", "type_entity", "entity", False)
+    # Leaves mint under the freshly-minted super-type and retype their members.
+    # parent_name is the super-type's CLEAN name ("science"), never its
+    # `_<hex>`-suffixed uuid ("science_x") -- otherwise the suffix leaks into
+    # the leaves' ancestors lineage (greptile #159).
+    assert ("object", "type_science_x", "science", True) in calls
+    assert ("concept", "type_science_x", "science", True) in calls
+
+
+def test_handler_reconciles_into_existing_type(monkeypatch):
+    """A cluster whose centroid matches an existing type is retyped onto it; no
+    duplicate type is minted (#504 match-before-mint)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    leaf = HierarchyNode(
+        members=[m for m in _members() if m.uuid.startswith("p")], centroid=[1.0, 0.0]
+    )
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+
+    minted, retyped = [], {}
+
+    class FakeMilvus:
+        def find_nearest_types(self, centroid, top_k=1):
+            return [{"uuid": "type_vehicle_abc", "score": 0.0}]
+
+        def get_embedding(self, node_type, uuid):
+            # Same direction as the cluster centroid -> cosine 1.0 (>= threshold).
+            return {"uuid": uuid, "embedding": [2.0, 0.0]}
+
+    class FakeHCG:
+        def get_node(self, uuid):
+            return {
+                "uuid": uuid,
+                "name": "vehicle",
+                "properties": {"ancestors": ["root", "node", "entity"]},
+            }
+
+        def update_node(self, uuid, props):
+            retyped[uuid] = props
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=FakeHCG(),
+        milvus=FakeMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=lambda *a: NameResult(label="vehicle", description="", confidence=0.9),
+        mint_fn=lambda *a, **k: minted.append(1) or "type_should_not_mint",
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    assert minted == []  # reconciled into the existing type, not minted
+    assert len(retyped) == 4  # the four "p" members retyped
+    assert all(p["type_uuid"] == "type_vehicle_abc" for p in retyped.values())
+
+
+def test_handler_subdivides_minted_type_nests_under_it(monkeypatch):
+    """Re-emergence on an already-minted type parents new subtypes under *it* (with
+    its stored ancestors), deepening the hierarchy instead of flattening (#505)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    leaf = HierarchyNode(
+        members=[m for m in _members() if m.uuid.startswith("p")], centroid=[0.0, 0.0]
+    )
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+
+    mint_kwargs = []
+
+    class FakeHCG:
+        def get_node(self, uuid):
+            return {
+                "uuid": uuid,
+                "name": "vehicle",
+                "properties": {"ancestors": ["root", "node", "entity"]},
+            }
+
+        def update_node(self, *a, **k):
+            pass
+
+    def fake_mint(
+        cluster,
+        name,
+        hcg,
+        milvus,
+        source_cluster_id,
+        *,
+        parent_type_uuid,
+        parent_ancestors,
+        **k,
+    ):
+        mint_kwargs.append((parent_type_uuid, parent_ancestors))
+        return "type_sedan_x"
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=FakeHCG(),
+        milvus=_NoMatchMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=lambda *a: NameResult(label="sedan", description="", confidence=0.9),
+        mint_fn=fake_mint,
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_vehicle_abc")
+
+    # Parent is the subdivided type itself, with that type's ancestors.
+    assert mint_kwargs == [("type_vehicle_abc", ["root", "node", "entity"])]
+
+
+def test_handler_dim_mismatch_declines_match_and_mints_fresh(monkeypatch):
+    """A candidate type centroid of a different dimension must not abort the
+    cluster. `_cosine(strict=True)` raises on the mismatch, but
+    `_match_existing_type` swallows it and declines the match, so the cluster
+    mints fresh instead of being skipped by `_mint_subtree`'s catch-all
+    (greptile #159)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    leaf = HierarchyNode(
+        members=[m for m in _members() if m.uuid.startswith("p")], centroid=[1.0, 0.0]
+    )
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+
+    minted = []
+
+    class DimMismatchMilvus:
+        def find_nearest_types(self, centroid, top_k=1):
+            return [{"uuid": "type_other_abc", "score": 0.0}]
+
+        def get_embedding(self, node_type, uuid):
+            # 3-dim candidate centroid vs the cluster's 2-dim centroid -> the
+            # strict zip in _cosine raises ValueError.
+            return {"uuid": uuid, "embedding": [1.0, 0.0, 0.0]}
+
+    class FakeHCG:
+        def get_node(self, uuid):
+            return {
+                "uuid": uuid,
+                "name": "other",
+                "properties": {"ancestors": ["root", "node", "entity"]},
+            }
+
+        def update_node(self, *a, **k):
+            pass
+
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **k):
+        minted.append(name.label)
+        return f"type_{name.label}_x"
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=FakeHCG(),
+        milvus=DimMismatchMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=lambda *a: NameResult(label="object", description="", confidence=0.9),
+        mint_fn=fake_mint,
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    # Dim mismatch -> match declined -> minted fresh (cluster NOT skipped).
+    assert minted == ["object"]
