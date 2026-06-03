@@ -70,9 +70,21 @@ class TypeClassifier:
         # Use the type-definition's clean human label (e.g. "organism"), NOT
         # the uuid stripped of "type_": minted uuids carry a random hex suffix,
         # so deriving the name from the uuid produced "organism_<hex>" labels
-        # that then overwrote the clean emergence name on the type-def.
-        best_node = self._hcg.get_node(best_uuid) if self._hcg else None
-        best_name = (best_node or {}).get("name") or best_uuid.removeprefix("type_")
+        # that then overwrote the clean emergence name on the type-def. The
+        # lookup is best-effort: a graph error must fall back to the uuid-derived
+        # name rather than abort classification (the caller may be mid-ingest
+        # with Neo4j flaky).
+        best_name = best_uuid.removeprefix("type_")
+        if self._hcg is not None:
+            try:
+                best_node = self._hcg.get_node(best_uuid)
+                if best_node and best_node.get("name"):
+                    best_name = best_node["name"]
+            except Exception:
+                logger.debug(
+                    "type name lookup failed for %s; using uuid-derived name",
+                    best_uuid,
+                )
 
         # Confidence: inverse of distance, clamped to [0, 1]
         if best_distance <= 0:

@@ -745,16 +745,19 @@ class TestProposalProcessor:
 
         assert len(result["stored_node_ids"]) == 3
 
-        # get_node should be called exactly once for the type_uuid during centroid flush
-        # (not 3 times -- once per node as in the old code)
+        # get_node("type_entity") is called once per node by the classifier
+        # (resolving the type's clean label) plus once by the batched centroid
+        # flush -> 3 + 1 for this 3-node proposal. The flush itself stays batched
+        # regardless: that guarantee is asserted via the single update_node call
+        # (and final member_count) below, not via the get_node count.
         type_get_calls = [
             c
             for c in mock_hcg.get_node.call_args_list
             if c.args == ("type_entity",) or c.kwargs.get("uuid") == "type_entity"
         ]
         assert (
-            len(type_get_calls) == 1
-        ), f"Expected 1 get_node call for type_entity, got {len(type_get_calls)}"
+            len(type_get_calls) == 4
+        ), f"Expected 4 get_node calls for type_entity, got {len(type_get_calls)}"
 
         # update_node for the type should be called once with the final member_count
         type_update_calls = [
