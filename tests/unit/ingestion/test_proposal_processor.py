@@ -151,6 +151,201 @@ class TestProposalProcessor:
             c["node_uuid"] == "existing-paris" for c in result["relevant_context"]
         )
 
+    def test_same_entity_twice_in_one_ingest_yields_one_node(self):
+        """A repeated entity within a single ingest must not double the node count.
+
+        Acceptance criterion for #148: when the same entity is proposed twice in
+        one proposal -- with (near-)identical embeddings -- exactly one graph
+        node is created. The Milvus dedup search cannot catch this because the
+        first node's embedding is only flushed to the index AFTER the node loop
+        completes, so ``search_similar`` returns no match for the second mention
+        (modeled here as []). Dedup must instead compare the second mention's
+        embedding against the in-process embeddings of nodes already created in
+        this same ingest (L2 distance below ENTITY_MATCH_THRESHOLD => reuse).
+        Identity is embedding-based, never name-based: Sophia is non-linguistic.
+        """
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        # Distinct uuids per add_node call: the bug mints a second entity uuid.
+        mock_hcg.add_node.side_effect = [f"uuid-{i}" for i in range(10)]
+        mock_hcg.get_node.return_value = None
+
+        mock_milvus = MagicMock()
+        # Empty index throughout: the first node's embedding has not been flushed
+        # yet when the second mention is processed, so the search misses it. The
+        # in-process embedding dedup must catch it instead.
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        node = {
+            "name": "Plate Tectonics",
+            "type": "entity",
+            "embedding": [0.1] * 384,
+            "embedding_id": "emb-1",
+            "dimension": 384,
+            "model": "all-MiniLM-L6-v2",
+            "properties": {},
+        }
+        result = processor.process(
+            {
+                "proposal_id": "p-dup",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "raw_text": "Plate tectonics, plate tectonics.",
+                # Same entity (identical embedding) proposed twice in one ingest.
+                "proposed_nodes": [dict(node), dict(node)],
+                "proposed_edges": [],
+            }
+        )
+
+        # Exactly one entity node, despite two mentions.
+        assert len(result["stored_node_ids"]) == 1, (
+            f"expected 1 entity node, got {len(result['stored_node_ids'])}: "
+            f"{result['stored_node_ids']}"
+        )
+        # The repeat resolves to the already-created node's uuid (no new uuid).
+        entity_add_calls = [
+            c
+            for c in mock_hcg.add_node.call_args_list
+            if c.kwargs.get("name") == "Plate Tectonics"
+        ]
+        assert len(entity_add_calls) == 1, (
+            f"add_node called {len(entity_add_calls)} times for the repeated "
+            "entity; expected exactly 1"
+        )
+
+    def test_same_entity_twice_without_embeddings_yields_two_nodes(self):
+        """Embedding-less repeats are NOT deduped within ingest -- by design.
+
+        A node with no embedding carries no meaning signal, so within-ingest
+        dedup (which is embedding-based, #148) deliberately does not collapse it.
+        Two embedding-less mentions of the same name therefore create TWO nodes;
+        any later consolidation is the downstream resolver's job, not the
+        recorder's. This test pins that intent so it is explicit rather than a
+        silent regression -- and guards against any name-based fallback creeping
+        back in (Sophia is non-linguistic; identity is never name-based).
+        """
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.side_effect = [f"uuid-{i}" for i in range(10)]
+        mock_hcg.get_node.return_value = None
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [
+            {"uuid": "type_entity", "score": 0.1},
+        ]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        # No "embedding" key: these mentions have no meaning signal.
+        node = {
+            "name": "Plate Tectonics",
+            "type": "entity",
+            "properties": {},
+        }
+        result = processor.process(
+            {
+                "proposal_id": "p-dup-noemb",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "raw_text": "Plate tectonics, plate tectonics.",
+                "proposed_nodes": [dict(node), dict(node)],
+                "proposed_edges": [],
+            }
+        )
+
+        # Two nodes: embedding-less repeats are deferred to the resolver.
+        assert len(result["stored_node_ids"]) == 2, (
+            f"expected 2 nodes (no within-ingest dedup without embeddings), got "
+            f"{len(result['stored_node_ids'])}: {result['stored_node_ids']}"
+        )
+        entity_add_calls = [
+            c
+            for c in mock_hcg.add_node.call_args_list
+            if c.kwargs.get("name") == "Plate Tectonics"
+        ]
+        assert len(entity_add_calls) == 2, (
+            f"add_node called {len(entity_add_calls)} times for the repeated "
+            "embedding-less entity; expected exactly 2 (no name-based dedup)"
+        )
+
+    def test_similar_embeddings_in_different_collections_not_merged(self):
+        """Cross-collection nodes must not be merged by in-process dedup (#151).
+
+        Two mentions with (near-)identical embeddings but classified into
+        different collections (Entity vs Concept) are distinct identities. The
+        persisted Milvus dedup (2a) is collection-scoped, so the in-process pass
+        must be too -- batch membership alone must not collapse two nodes that
+        separate batches would keep apart.
+        """
+        from types import SimpleNamespace
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.side_effect = [f"uuid-{i}" for i in range(10)]
+        mock_hcg.get_node.return_value = None
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        # Force two different collections for identical embeddings.
+        processor._classifier = MagicMock()
+        processor._classifier.classify.side_effect = [
+            SimpleNamespace(
+                type_name="entity",
+                type_uuid="type_entity",
+                confidence=0.9,
+                needs_reclassification=False,
+            ),
+            SimpleNamespace(
+                type_name="concept",
+                type_uuid="type_concept",
+                confidence=0.9,
+                needs_reclassification=False,
+            ),
+        ]
+
+        emb = [0.1] * 384
+        result = processor.process(
+            {
+                "proposal_id": "p-xcoll",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "raw_text": "x",
+                "proposed_nodes": [
+                    {
+                        "name": "Alpha",
+                        "type": "entity",
+                        "embedding": list(emb),
+                        "embedding_id": "e1",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                    {
+                        "name": "Beta",
+                        "type": "concept",
+                        "embedding": list(emb),
+                        "embedding_id": "e2",
+                        "dimension": 384,
+                        "model": "m",
+                        "properties": {},
+                    },
+                ],
+                "proposed_edges": [],
+            }
+        )
+
+        # Identical embeddings but different collections => two distinct nodes.
+        assert len(result["stored_node_ids"]) == 2, result["stored_node_ids"]
+
     def test_skips_empty_name_nodes(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
@@ -798,10 +993,15 @@ class TestBatchEmbeddings:
 
         processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
 
+        # Distinct embeddings: these are different entities in different
+        # collections. (The default _make_node embedding is identical for every
+        # node, which the within-ingest embedding dedup would correctly collapse
+        # into one node -- defeating this test's purpose of exercising separate
+        # per-collection batches.)
         proposal = self._make_proposal(
             nodes=[
-                self._make_node("Alpha", node_type="entity"),
-                self._make_node("Beta", node_type="concept"),
+                self._make_node("Alpha", node_type="entity", embedding=[0.1] * 384),
+                self._make_node("Beta", node_type="concept", embedding=[0.9] * 384),
             ]
         )
         processor.process(proposal)

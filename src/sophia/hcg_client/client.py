@@ -113,17 +113,15 @@ class HCGClient(LogosHCGClient):
             raise ValueError("node_type cannot be empty")
 
         # Generate UUID if not provided, reject empty string.
-        # When no uuid is given, check for an existing node with the same
-        # name+type to avoid creating duplicates on repeated ingestion.
+        # #148: identity is never name-based. Sophia is non-linguistic, so the
+        # literal name string is not an identity key -- omitting the uuid always
+        # mints a fresh uuid4. Entity deduplication is decided in embedding space
+        # by the upstream resolver (proposal_processor), not by name+type
+        # equality; folding two distinct entities together on a shared name would
+        # be a lossy, text-based merge. Duplicates are recoverable; false merges
+        # are not.
         if uuid is None:
-            existing = self._execute_query(
-                "MATCH (n:Node {name: $name, type: $type}) RETURN n.uuid AS uuid LIMIT 1",
-                {"name": name, "type": node_type},
-            )
-            if existing:
-                uuid = existing[0]["uuid"]
-            else:
-                uuid = str(uuid4())
+            uuid = str(uuid4())
         elif uuid == "":
             raise ValueError("uuid cannot be empty")
 
