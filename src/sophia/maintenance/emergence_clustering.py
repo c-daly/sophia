@@ -61,7 +61,14 @@ def _silhouette(dmat: list[list[float]], labels: list[int]) -> float:
     scores = []
     for i, li in enumerate(labels):
         same = [j for j in members_by_label[li] if j != i]
-        a = sum(dmat[i][j] for j in same) / len(same) if same else 0.0
+        if not same:
+            # Singleton cluster: silhouette is defined as 0, not (b - 0)/b = 1.
+            # Scoring a lone point 1.0 would bias k-selection toward partitions
+            # full of singletons (which are then dropped by min_cluster_size,
+            # yielding "no clusters found"). See #505 review.
+            scores.append(0.0)
+            continue
+        a = sum(dmat[i][j] for j in same) / len(same)
         b = min(
             sum(dmat[i][j] for j in members_by_label[c]) / len(members_by_label[c])
             for c in uniq
