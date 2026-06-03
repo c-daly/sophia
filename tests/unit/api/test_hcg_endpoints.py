@@ -76,6 +76,79 @@ class TestHCGSnapshotEndpoint:
         assert "entities" in data
         assert "edges" in data
 
+    @patch("sophia.api.app._hcg_client")
+    def test_snapshot_embeddings_batched_and_routed_by_collection(
+        self, mock_hcg, client, auth_headers
+    ):
+        """include_embeddings looks each node up in the collection that holds its
+        vector (Entity vs Concept), and batches the `uuid in [...]` filter so the
+        expression stays under Milvus's length cap (greptile #158 + collection
+        sharding)."""
+        import re
+
+        # 3 entity nodes + 1 concept node. With the batch size forced to 2, the
+        # entity collection must be queried in 2 chunks; concept in 1.
+        mock_hcg.list_all_nodes.return_value = [
+            {"uuid": "e1", "type": "entity", "name": "e1", "properties": {}},
+            {"uuid": "e2", "type": "entity", "name": "e2", "properties": {}},
+            {"uuid": "e3", "type": "entity", "name": "e3", "properties": {}},
+            {"uuid": "c1", "type": "concept", "name": "c1", "properties": {}},
+        ]
+        mock_hcg.list_all_edges.return_value = []
+
+        store = {
+            "hcg_entity_embeddings": {
+                "e1": [0.1, 0.2],
+                "e2": [0.3, 0.4],
+                "e3": [0.5, 0.6],
+            },
+            "hcg_concept_embeddings": {"c1": [0.7, 0.8]},
+        }
+
+        class FakeCollection:
+            instances: list = []
+
+            def __init__(self, name):
+                self.name = name
+                self.queries = []
+                FakeCollection.instances.append(self)
+
+            def load(self):
+                pass
+
+            def query(self, expr, output_fields, limit):
+                uuids = re.findall(r'"([^"]+)"', expr)
+                assert len(uuids) <= 2  # batched: never the whole list at once
+                assert limit == len(uuids)
+                self.queries.append(uuids)
+                col = store.get(self.name, {})
+                return [{"uuid": u, "embedding": col[u]} for u in uuids if u in col]
+
+        with (
+            patch("pymilvus.Collection", FakeCollection),
+            patch("sophia.api.app._SNAPSHOT_EMB_BATCH", 2),
+        ):
+            response = client.get(
+                "/hcg/snapshot",
+                params={"include_embeddings": "true"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        ents = {e["id"]: e["embedding"] for e in response.json()["entities"]}
+        # Every node got its vector -- including the concept node, whose vector
+        # lives in a different collection than hcg_entity_embeddings.
+        assert ents == {
+            "e1": [0.1, 0.2],
+            "e2": [0.3, 0.4],
+            "e3": [0.5, 0.6],
+            "c1": [0.7, 0.8],
+        }
+        by_name = {c.name: c for c in FakeCollection.instances}
+        # Entity collection queried in 2 batches ([e1,e2], [e3]); concept once.
+        assert by_name["hcg_entity_embeddings"].queries == [["e1", "e2"], ["e3"]]
+        assert by_name["hcg_concept_embeddings"].queries == [["c1"]]
+
 
 class TestHCGEntitiesEndpoint:
     """Tests for GET /hcg/entities endpoint."""

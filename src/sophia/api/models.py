@@ -616,6 +616,11 @@ class HCGEntityResponse(BaseModel):
     created_at: Optional[str] = Field(
         default=None, description="ISO timestamp of creation"
     )
+    embedding: Optional[List[float]] = Field(
+        default=None,
+        description="Entity vector; populated only when include_embeddings=true, "
+        "for semantic (embedding-positioned) layout in the explorer",
+    )
 
 
 class HCGEdgeResponse(BaseModel):
