@@ -139,22 +139,28 @@ class TestEmbeddingPersistenceE2E:
         """
         before = _count_rows(milvus_sync, "Entity")
 
-        # Two nodes, both near the entity centroid -> both land in the Entity
-        # collection (hcg_entity_embeddings). Unique names avoid dedup collisions.
+        # Two DISTINCT entities. Identity is embedding-based (#148), so two nodes
+        # sharing one vector now correctly dedup to a single node. Give each a
+        # distinct vector that still classifies as Entity (only the entity centroid
+        # is seeded) but sits well beyond ENTITY_MATCH_THRESHOLD, so both persist.
         run = uuid_lib.uuid4().hex[:8]
         node_names = [f"PersistNodeA_{run}", f"PersistNodeB_{run}"]
-        emb = _make_near(ENTITY_CENTROID)
+        node_embeddings = [
+            _make_near(ENTITY_CENTROID, noise=0.05),
+            _make_near(ENTITY_CENTROID, noise=0.40),
+        ]
+        emb = node_embeddings[0]
         proposed_nodes = [
             {
                 "name": name,
                 "type": "entity",
-                "embedding": emb,
+                "embedding": node_emb,
                 "embedding_id": f"emb-{name}",
                 "dimension": DIM,
                 "model": "synthetic-test",
                 "properties": {},
             }
-            for name in node_names
+            for name, node_emb in zip(node_names, node_embeddings)
         ]
 
         proposal = {
