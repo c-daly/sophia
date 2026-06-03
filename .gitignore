@@ -74,3 +74,4 @@ logs/
 # Claude session artifacts
 .claude_handoff.md
 .claude/docs/scratch/
+src/sophia/experiments/data/

@@ -1,138 +1,126 @@
-"""Dual-signal, full-membership clustering for emergent type discovery (#505).
+"""Flat agglomerative clustering for emergent type discovery (#505).
 
-Clusters the ENTIRE membership of a type (never outliers): recursively binary-
-splits with type_emergence._kmeans_2 while a split (a) leaves a group still above
-``variance_threshold`` (i.e. not yet cohesive), (b) improves cohesion by at least
-``min_cohesion_improvement``, and (c) keeps both halves >= ``min_cluster_size``.
-A group at/below ``variance_threshold`` is a cohesive leaf and is not split.
+Replaces the prior recursive binary-split + absolute-variance gating, which did
+not work on real high-dimensional embeddings: a single binary split reduces
+absolute within-cluster variance only marginally (curse of dimensionality), so
+the cohesion-improvement gate was never met and *no* clusters were ever found
+(verified: 235 diverse entities -> 0 clusters). This uses average-linkage
+agglomerative clustering with the cut chosen by silhouette -- scale-invariant,
+so it recovers domain clusters from real embeddings.
 
-A returned cluster must also be structurally coherent (members mutually similar
-on their neighbor-relation signature) -- the second of the two agreeing signals.
+Validated empirically via ``sophia.experiments.run_cluster_sweep``: agglomerative
+scored purity 0.97 / ARI 0.45 against domain ground truth, vs the prior
+algorithm's 0 clusters on the same data.
+
+Distance is Euclidean; on unit-norm embeddings (OpenAI) this is monotonic with
+cosine distance, so the clustering matches cosine geometry while remaining valid
+for the small non-unit fixtures used in tests.
+
+Structural coherence (neighbor-relation signature agreement) is now ADVISORY,
+not a hard veto -- as a veto it rejected every real cluster (#505 review).
 """
 
 from __future__ import annotations
 
-from sophia.ingestion.type_emergence import _kmeans_2, _mean_vector, _variance
-from sophia.maintenance.emergence_types import EmergentCluster, Member
-from sophia.maintenance.structural_signature import signature_similarity
+from collections import Counter
+from dataclasses import dataclass, field
 
-_STRUCTURAL_SIM_THRESHOLD = 0.5
+from sophia.ingestion.type_emergence import _mean_vector, _variance
+from sophia.maintenance.emergence_types import EmergentCluster, Member
+
+# Above this membership we sample (seeded) before clustering, to bound the
+# O(n^2) distance matrix / O(n^3) agglomeration in this pure-Python impl.
+_MAX_CLUSTER_INPUT = 800
 
 
 def _variance_of(members: list[Member]) -> float:
     vectors = [m.embedding for m in members]
-    return _variance(vectors, _mean_vector(vectors))
+    return float(_variance(vectors, _mean_vector(vectors)))
 
 
-def _resolve_group(vectors: list[list[float]], pool: dict[int, Member]) -> list[Member]:
-    """Map cluster vectors back to members, consuming each member at most once.
+def _euclidean(a: list[float], b: list[float]) -> float:
+    return float(sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5)
 
-    ``_kmeans_2`` returns the original embedding objects, but we do not rely on
-    object identity (k-means could copy a vector, and two members may share an
-    equal embedding). Each returned vector claims the first still-unconsumed
-    member whose embedding is identical (by identity first, else by value).
-    """
-    group: list[Member] = []
-    for vec in vectors:
-        match_key = next(
-            (k for k, m in pool.items() if m.embedding is vec),
-            None,
-        )
-        if match_key is None:
-            match_key = next(
-                (k for k, m in pool.items() if m.embedding == vec),
-                None,
-            )
-        if match_key is None:
+
+def _distance_matrix(vectors: list[list[float]]) -> list[list[float]]:
+    n = len(vectors)
+    d = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = _euclidean(vectors[i], vectors[j])
+            d[i][j] = d[j][i] = dist
+    return d
+
+
+def _silhouette(dmat: list[list[float]], labels: list[int]) -> float:
+    """Mean silhouette over a precomputed distance matrix; -1 if < 2 clusters."""
+    uniq = sorted(set(labels))
+    if len(uniq) < 2:
+        return -1.0
+    members_by_label = {c: [i for i, v in enumerate(labels) if v == c] for c in uniq}
+    scores = []
+    for i, li in enumerate(labels):
+        same = [j for j in members_by_label[li] if j != i]
+        if not same:
+            # Singleton cluster: silhouette is defined as 0, not (b - 0)/b = 1.
+            # Scoring a lone point 1.0 would bias k-selection toward partitions
+            # full of singletons (which are then dropped by min_cluster_size,
+            # yielding "no clusters found"). See #505 review.
+            scores.append(0.0)
             continue
-        group.append(pool.pop(match_key))
-    return group
-
-
-def _embedding_groups(members: list[Member]) -> list[list[Member]]:
-    """Binary embedding split; returns the (1 or 2) non-empty sub-groups."""
-    if len(members) < 2:
-        return [members]
-    c0, c1 = _kmeans_2([m.embedding for m in members])
-    pool = dict(enumerate(members))
-    g0 = _resolve_group(c0, pool)
-    g1 = _resolve_group(c1, pool)
-    # Any members not claimed (e.g. duplicate-value ambiguity) stay grouped with g0.
-    g0.extend(pool.values())
-    return [g for g in (g0, g1) if g]
-
-
-def _structurally_coherent(group: list[Member]) -> bool:
-    """Whether the group's members agree on their neighbor-relation signature.
-
-    Robust to edge-less members: a node with an empty signature carries no
-    structural signal, so it neither anchors the comparison nor disqualifies the
-    cluster. We compare the members that *do* have a signature against each
-    other; a cluster where every member is edge-less is treated as coherent
-    (uniform, no contradicting structure) rather than rejected on index 0.
-    """
-    if len(group) < 2:
-        return True
-    with_sig = [m for m in group if m.signature]
-    if len(with_sig) < 2:
-        # 0 or 1 members carry structure -- nothing to contradict.
-        return True
-    ref = with_sig[0].signature
-    return all(
-        signature_similarity(ref, m.signature) >= _STRUCTURAL_SIM_THRESHOLD
-        for m in with_sig[1:]
-    )
-
-
-def _split_improvement(parent: list[Member], groups: list[list[Member]]) -> float:
-    """Fractional reduction in *weighted* within-group variance from the split.
-
-    Uses the size-weighted average of the child variances (not the worst child),
-    so a split that tightens the membership overall is accepted even if one
-    child is only marginally more cohesive than the parent::
-
-        (parent_var - sum(len(g) * var(g)) / len(members)) / parent_var
-
-    Returns 0.0 when the parent has no variance (nothing to improve).
-    """
-    pv = _variance_of(parent)
-    if pv <= 0:
-        return 0.0
-    n = sum(len(g) for g in groups)
-    if n == 0:
-        return 0.0
-    weighted_child_var = sum(len(g) * _variance_of(g) for g in groups) / n
-    return (pv - weighted_child_var) / pv
-
-
-def _recursive_clusters(
-    members: list[Member],
-    *,
-    min_cluster_size: int,
-    variance_threshold: float,
-    min_cohesion_improvement: float,
-) -> list[list[Member]]:
-    """Recursively split the full set; stop when a group is cohesive or too small."""
-    if _variance_of(members) <= variance_threshold:
-        return [members]  # already cohesive -> leaf
-    if len(members) < 2 * min_cluster_size:
-        return [members]
-    groups = _embedding_groups(members)
-    if len(groups) < 2 or any(len(g) < min_cluster_size for g in groups):
-        return [members]
-    if _split_improvement(members, groups) < min_cohesion_improvement:
-        return [members]  # split doesn't meaningfully help -> leaf
-    leaves: list[list[Member]] = []
-    for g in groups:
-        leaves.extend(
-            _recursive_clusters(
-                g,
-                min_cluster_size=min_cluster_size,
-                variance_threshold=variance_threshold,
-                min_cohesion_improvement=min_cohesion_improvement,
-            )
+        a = sum(dmat[i][j] for j in same) / len(same)
+        b = min(
+            sum(dmat[i][j] for j in members_by_label[c]) / len(members_by_label[c])
+            for c in uniq
+            if c != li
         )
-    return leaves
+        scores.append((b - a) / max(a, b) if max(a, b) > 0 else 0.0)
+    return sum(scores) / len(labels)
+
+
+def _agglomerative_partitions(
+    dmat: list[list[float]], k_min: int, k_max: int
+) -> dict[int, list[int]]:
+    """Average-linkage agglomeration; return {k: labels} for k in [k_min, k_max]."""
+    n = len(dmat)
+    members = {i: [i] for i in range(n)}
+    sizes = {i: 1 for i in range(n)}
+    dist = {(i, j): dmat[i][j] for i in range(n) for j in range(i + 1, n)}
+
+    def key(a: int, b: int) -> tuple[int, int]:
+        return (a, b) if a < b else (b, a)
+
+    active = set(range(n))
+    next_id = n
+    partitions: dict[int, list[int]] = {}
+    while len(active) > 1:
+        best_pair = None
+        best_d = None
+        for (a, b), d in dist.items():
+            if a in active and b in active and (best_d is None or d < best_d):
+                best_d, best_pair = d, (a, b)
+        a, b = best_pair  # type: ignore[misc]
+        new = next_id
+        next_id += 1
+        members[new] = members[a] + members[b]
+        sizes[new] = sizes[a] + sizes[b]
+        for c in active:
+            if c in (a, b):
+                continue
+            dac = dist.get(key(a, c), 0.0)
+            dbc = dist.get(key(b, c), 0.0)
+            dist[key(new, c)] = (sizes[a] * dac + sizes[b] * dbc) / sizes[new]
+        active.discard(a)
+        active.discard(b)
+        active.add(new)
+        k = len(active)
+        if k_min <= k <= k_max:
+            labels = [0] * n
+            for ci, cid in enumerate(active):
+                for m in members[cid]:
+                    labels[m] = ci
+            partitions[k] = labels
+    return partitions
 
 
 def find_emergent_clusters(
@@ -140,25 +128,144 @@ def find_emergent_clusters(
     *,
     min_cluster_size: int,
     variance_threshold: float,
-    min_cohesion_improvement: float,
+    min_cohesion_improvement: float = 0.0,
 ) -> list[EmergentCluster]:
-    """Cluster the full membership; return cohesive, structurally-coherent groups.
+    """Cluster the full membership into cohesive sub-groups via agglomeration.
 
-    No outlier step. Returns [] when the membership is already one cohesive group
-    (nothing split out) -- which also makes the job idempotent on tidy types.
+    Returns [] when the type is already cohesive (variance at/below
+    ``variance_threshold`` -- a junk-drawer pre-filter) or when fewer than two
+    sub-clusters of >= ``min_cluster_size`` emerge. ``min_cohesion_improvement``
+    is accepted for backward compatibility but unused (the cut is silhouette-
+    chosen, not gated on a fixed improvement).
     """
-    if len(members) < 2 * min_cluster_size:
+    n = len(members)
+    if n < 2 * min_cluster_size:
         return []
-    leaves = _recursive_clusters(
+    if _variance_of(members) <= variance_threshold:
+        return []  # cohesive type -> nothing to split out
+
+    work = members
+    if n > _MAX_CLUSTER_INPUT:
+        import random
+
+        work = random.Random(0).sample(members, _MAX_CLUSTER_INPUT)
+
+    vectors = [m.embedding for m in work]
+    dmat = _distance_matrix(vectors)
+    k_max = max(2, len(work) // min_cluster_size)
+    partitions = _agglomerative_partitions(dmat, 2, k_max)
+    if not partitions:
+        return []
+    _, labels = max(partitions.items(), key=lambda kv: _silhouette(dmat, kv[1]))
+
+    groups: dict[int, list[Member]] = {}
+    for m, lab in zip(work, labels):
+        groups.setdefault(lab, []).append(m)
+    clusters = [
+        EmergentCluster(members=g)
+        for g in groups.values()
+        if len(g) >= min_cluster_size
+    ]
+    return clusters if len(clusters) >= 2 else []
+
+
+@dataclass
+class HierarchyNode:
+    """A node in the emergent type hierarchy.
+
+    Leaf nodes (``children == []``) are the fine clusters from
+    :func:`find_emergent_clusters`; internal nodes group child nodes discovered
+    by running the SAME clustering on the children's centroids (treating each
+    cluster as a point). This rolls fine types up into super-types -- e.g.
+    "linear algebra" + "calculus" -> a "mathematics" super-type.
+    """
+
+    members: list[Member]  # all leaf members beneath this node
+    centroid: list[float]
+    children: list["HierarchyNode"] = field(default_factory=list)
+
+
+def _centroid(vectors: list[list[float]]) -> list[float]:
+    n = len(vectors)
+    dim = len(vectors[0])
+    acc = [0.0] * dim
+    for v in vectors:
+        for i, x in enumerate(v):
+            acc[i] += x
+    return [x / n for x in acc]
+
+
+def find_emergent_hierarchy(
+    members: list[Member],
+    *,
+    min_cluster_size: int,
+    variance_threshold: float,
+    min_supercluster_size: int = 2,
+    max_depth: int = 4,
+) -> list[HierarchyNode]:
+    """Discover a multi-level type hierarchy from the junk-drawer membership.
+
+    Level 0 is the fine clusters from :func:`find_emergent_clusters`. Each higher
+    level re-runs the clustering on the previous level's centroids -- the same
+    algorithm, with clusters as points -- so related fine types roll up into
+    super-types. A node that doesn't join any super-cluster carries up unchanged.
+    Stops when the level no longer consolidates, there are too few nodes to form
+    a super-cluster, or ``max_depth`` is reached. Returns the root nodes (``[]``
+    when there's no structure to organise).
+    """
+    leaf_clusters = find_emergent_clusters(
         members,
         min_cluster_size=min_cluster_size,
         variance_threshold=variance_threshold,
-        min_cohesion_improvement=min_cohesion_improvement,
     )
-    if len(leaves) < 2:
-        return []  # nothing split out -> no new sub-types
-    return [
-        EmergentCluster(members=leaf)
-        for leaf in leaves
-        if len(leaf) >= min_cluster_size and _structurally_coherent(leaf)
+    if len(leaf_clusters) < 2:
+        return []
+
+    nodes = [
+        HierarchyNode(
+            members=list(c.members),
+            centroid=_centroid([m.embedding for m in c.members]),
+        )
+        for c in leaf_clusters
     ]
+
+    depth = 1
+    while depth < max_depth and len(nodes) >= 2 * min_supercluster_size:
+        synthetic = [
+            Member(
+                uuid=str(i),
+                name=str(i),
+                embedding=node.centroid,
+                signature=Counter(),
+                current_type="type",
+                hermes_type_hint=None,
+                neighbors=[],
+                model=None,
+            )
+            for i, node in enumerate(nodes)
+        ]
+        # No junk-drawer pre-filter at the super level (centroids always vary).
+        groups = find_emergent_clusters(
+            synthetic, min_cluster_size=min_supercluster_size, variance_threshold=0.0
+        )
+        if len(groups) < 2:
+            break
+        grouped = [sorted(int(m.name) for m in g.members) for g in groups]
+        used = {i for g in grouped for i in g}
+        new_nodes: list[HierarchyNode] = []
+        for g in grouped:
+            children = [nodes[i] for i in g]
+            child_members = [m for ch in children for m in ch.members]
+            new_nodes.append(
+                HierarchyNode(
+                    members=child_members,
+                    centroid=_centroid([m.embedding for m in child_members]),
+                    children=children,
+                )
+            )
+        new_nodes.extend(nodes[i] for i in range(len(nodes)) if i not in used)
+        if len(new_nodes) >= len(nodes):
+            break  # no consolidation this level -> done
+        nodes = new_nodes
+        depth += 1
+    return nodes

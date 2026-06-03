@@ -120,3 +120,87 @@ def test_duplicate_value_embeddings_do_not_crash():
     # No KeyError; every input member is accounted for exactly once.
     out = [m.uuid for c in clusters for m in c.members]
     assert len(out) == len(set(out))
+
+
+def test_real_scale_unit_embeddings_cluster():
+    """Regression for #505: near-unit high-dim embeddings still cluster.
+
+    The prior recursive-binary-split returned 0 clusters on real OpenAI
+    embeddings -- a binary split reduces absolute variance only marginally, so
+    the cohesion-improvement gate was never met. Agglomerative + silhouette
+    recovers the latent groups. Three orthogonal-ish unit groups -> 3 clusters.
+    """
+    import math
+
+    def unit(v: list[float]) -> list[float]:
+        n = math.sqrt(sum(x * x for x in v)) or 1.0
+        return [x / n for x in v]
+
+    dim = 8
+    members = []
+    for g in range(3):
+        for i in range(4):
+            v = [0.0] * dim
+            v[g] = 1.0
+            v[(g + 4) % dim] = 0.12 * (i + 1)  # small within-group spread
+            members.append(_m(f"g{g}_{i}", unit(v), (f"R{g}", "t")))
+
+    clusters = find_emergent_clusters(
+        members,
+        min_cluster_size=MIN,
+        variance_threshold=0.6,
+        min_cohesion_improvement=IMPROVE,
+    )
+    assert len(clusters) == 3
+    for c in clusters:
+        groups = {m.uuid.split("_")[0] for m in c.members}
+        assert len(groups) == 1  # each cluster is exactly one group
+
+
+def test_hierarchy_rolls_up_subdomains():
+    """find_emergent_hierarchy groups related fine clusters into super-types.
+
+    Four fine groups: A1/A2 share a base direction (sub-domains of A), B1/B2
+    share another. Leaf clustering finds the 4 fine groups; rolling up their
+    centroids (same algorithm, clusters as points) recovers the 2 super-types --
+    the "linear algebra + calculus -> mathematics" pattern.
+    """
+    import math
+
+    from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
+
+    def unit(v: list[float]) -> list[float]:
+        n = math.sqrt(sum(x * x for x in v)) or 1.0
+        return [x / n for x in v]
+
+    members = []
+    for name, (base, sub) in {
+        "A1": (0, 2),
+        "A2": (0, 3),
+        "B1": (1, 2),
+        "B2": (1, 3),
+    }.items():
+        for k in range(4):
+            v = [0.0] * 6
+            v[base] = 1.0
+            v[sub] = 0.35
+            v[5] = 0.02 * k  # tiny within-group spread
+            members.append(_m(f"{name}_{k}", unit(v), ("R", "t")))
+
+    roots = find_emergent_hierarchy(
+        members,
+        min_cluster_size=3,
+        variance_threshold=0.3,
+        min_supercluster_size=2,
+        max_depth=3,
+    )
+    assert len(roots) == 2  # two super-types (A and B)
+    for r in roots:
+        assert len(r.children) == 2  # each rolls up two fine sub-types
+    # every leaf child is exactly one of the original fine groups
+    leaf_groups = {
+        frozenset(m.uuid.split("_")[0] for m in ch.members)
+        for r in roots
+        for ch in r.children
+    }
+    assert all(len(g) == 1 for g in leaf_groups)
