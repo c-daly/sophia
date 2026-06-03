@@ -1,16 +1,20 @@
 """Mint an emergent type from a named cluster: type node + centroid + retype (#505).
 
-Emergence always mints a NEW type from a cluster of the unmatched residue:
-- create a `:Node` type-definition under `root` with name_history lineage,
+`mint_type` creates one NEW type-definition from a cluster:
+- create a `:Node` type-definition under its parent with name_history lineage,
 - seed its Milvus centroid (= mean of member embeddings),
-- retype each member (authoritative `type_uuid` property via update_node).
+- retype each member (authoritative `type_uuid` property via update_node),
+  unless `retype_members=False` (an internal super-type whose members are
+  retyped at the leaf subtypes below it).
 
 Membership is the `type_uuid` property -- emergence does NOT create an
 instance->type IS_A edge (it was redundant with `type_uuid`). The taxonomy
-IS_A (new type-definition -> parent type-definition) is still created below.
+IS_A (new type-definition -> parent type-definition) is created below.
 
 HCGClient encodes nested properties (name_history) transparently; ancestors is a
-native string list. Reconciling members into an *existing* type is #504's job.
+native string list. Deciding whether to mint here vs. reconcile a cluster into
+an *existing* type (#504 match-before-mint) is the caller's job -- see
+`EmergenceHandler._match_existing_type`.
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ def mint_type(
     source_cluster_id: str,
     parent_type_uuid: str = "type_entity",
     parent_ancestors: list[str] | None = None,
+    retype_members: bool = True,
 ) -> str:
     """Create the type-definition node, seed its centroid, and retype members.
 
@@ -107,15 +112,18 @@ def mint_type(
         model=model,
     )
 
-    for member in cluster.members:
-        # Membership is a pure property: stamp the authoritative current-type
-        # pointer (`type_uuid`, overwritten on each retype) and the human-facing
-        # `type` slug. We deliberately do NOT create an instance->type IS_A edge
-        # -- that edge was redundant bookkeeping over `type_uuid` and only
-        # polluted the edge graph. _member_rows now loads members directly by
-        # this `type_uuid` property, so a member retyped away from a parent is
-        # excluded automatically (no stale-edge cleanup needed) (#505).
-        hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
+    # Retype members onto this type, unless this is an internal super-type whose
+    # members belong to its child subtypes (the caller retypes them at the
+    # leaves). Membership is a pure property: stamp the authoritative current-type
+    # pointer (`type_uuid`, overwritten on each retype) and the human-facing
+    # `type` slug. We deliberately do NOT create an instance->type IS_A edge --
+    # that edge was redundant bookkeeping over `type_uuid` and only polluted the
+    # edge graph. _member_rows loads members directly by this `type_uuid`
+    # property, so a member retyped away from a parent is excluded automatically
+    # (no stale-edge cleanup needed) (#505).
+    if retype_members:
+        for member in cluster.members:
+            hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
 
     logger.info(
         "Minted type %s (%s) from %d members", name.label, type_uuid, cluster.size

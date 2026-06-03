@@ -63,3 +63,11 @@ class MaintenanceConfig(BaseSettings):
         le=1.0,
         description="Discard Hermes cluster names below this confidence.",
     )
+    type_match_threshold: float = Field(
+        default=0.9,
+        ge=0,
+        le=1.0,
+        description="Cosine similarity above which an emergent cluster is "
+        "reconciled into an existing type (its members are retyped to that type) "
+        "instead of minting a new duplicate type (#504 match-before-mint).",
+    )

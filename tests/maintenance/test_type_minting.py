@@ -220,3 +220,27 @@ def test_mint_does_not_touch_member_is_a_edges():
     # Human-readable label preserved for display/lineage.
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
     assert tdef[0]["properties"]["name_history"][0]["name"] == "hammer"
+
+
+def test_mint_type_only_skips_member_retype_for_super_types():
+    """An internal super-type mints with retype_members=False: the type node,
+    centroid and IS_A edge are created, but no member is retyped (its members
+    belong to the leaf subtypes below it) (#505)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="mathematics", description="", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl",
+        retype_members=False,
+    )
+
+    # No members were retyped.
+    assert hcg.updated == []
+    # But the type node, its centroid and the taxonomy IS_A edge still exist.
+    assert any(n["uuid"] == type_uuid for n in hcg.added_nodes)
+    assert type_uuid in milvus.centroids
+    assert (type_uuid, "type_entity", "IS_A") in hcg.edges

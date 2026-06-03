@@ -17,6 +17,7 @@ from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
 from sophia.maintenance.emergence_types import EmergentCluster, Member
 from sophia.maintenance.structural_signature import build_signature
+from sophia.maintenance.type_minting import _slugify
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,14 @@ _BASE_TYPE = "entity"
 # directly under `type_entity`, so a minted type's parent ancestors are these
 # two prefixes and its own full ancestors append "entity" (#505).
 _ENTITY_ANCESTORS = ["root", "node"]
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity of two equal-length vectors (0.0 if either is zero)."""
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
 
 
 def _type_name(type_uuid: str) -> str:
@@ -168,8 +177,9 @@ class EmergenceHandler:
 
     def run(self, type_uuid: str) -> None:
         members = self._load_members(type_uuid)
-        # Roll the fine clusters up into a hierarchy and mint from the top-level
-        # nodes, so related fine groups consolidate into super-types (#505).
+        # Roll the fine clusters up into a multi-level hierarchy: leaves are the
+        # fine clusters, internal nodes are super-types grouping related leaves
+        # (e.g. "linear algebra" + "calculus" -> "mathematics") (#505).
         hierarchy = find_emergent_hierarchy(
             members,
             min_cluster_size=self._config.min_cluster_size,
@@ -178,50 +188,147 @@ class EmergenceHandler:
         if not hierarchy:
             logger.info("emergence: no qualifying clusters in %s", type_uuid)
             return
-        clusters = [EmergentCluster(members=node.members) for node in hierarchy]
+
+        # Mint the whole tree *under the type being subdivided*. For the base
+        # `entity` junk-drawer that parent is `type_entity`; when re-emergence
+        # runs on an already-minted type we nest the new subtypes under it, so
+        # the hierarchy actually deepens instead of everything landing flat under
+        # `entity` (#505).
+        if _type_name(type_uuid) == _BASE_TYPE:
+            parent_type_uuid = f"type_{_BASE_TYPE}"
+            parent_ancestors = _ENTITY_ANCESTORS
+        else:
+            parent_type_uuid = type_uuid
+            parent_node = self._hcg.get_node(type_uuid) or {}
+            parent_ancestors = list(parent_node.get("ancestors") or _ENTITY_ANCESTORS)
 
         # Mutable copy: each successful mint adds its label so later clusters in
         # this same run see it as a candidate and don't silently re-mint a
         # same-label sibling.
         candidates = list(self._candidates_fn())
-        for cluster in clusters:
-            # Per-cluster isolation: a transient HCG/Milvus/Redis error while
-            # minting one cluster must not abort the whole run -- log it and move
-            # on so the remaining clusters still get minted (greptile #149).
-            try:
-                name = self._name_fn(cluster, candidates, self._hermes_url, self._token)
-                if (
-                    name is None
-                    or name.confidence < self._config.hermes_confidence_floor
-                ):
-                    logger.info("emergence: skip cluster (no/low-confidence name)")
-                    continue
+        for node in hierarchy:
+            self._mint_subtree(node, parent_type_uuid, parent_ancestors, candidates)
+
+    def _mint_subtree(
+        self,
+        node: Any,
+        parent_type_uuid: str,
+        parent_ancestors: list[str],
+        candidates: list[str],
+    ) -> None:
+        """Mint (or reconcile) one hierarchy node, then recurse into its children.
+
+        Leaf nodes carry real instance members and get them retyped onto the
+        minted/reconciled type. Internal nodes are pure super-types: their type
+        node is created but members are retyped at the leaves below. Every level
+        is named by Hermes, and children are minted under their freshly-created
+        parent so the IS_A chain and `ancestors` nest correctly.
+        """
+        # Per-node isolation: a transient HCG/Milvus/Redis error on one node must
+        # not abort the whole run -- log it and let siblings proceed (#149).
+        try:
+            cluster = EmergentCluster(members=node.members)
+            name = self._name_fn(cluster, candidates, self._hermes_url, self._token)
+            if name is None or name.confidence < self._config.hermes_confidence_floor:
+                logger.info("emergence: skip cluster (no/low-confidence name)")
+                return
+
+            is_leaf = not node.children
+            existing = self._match_existing_type(node.centroid, parent_type_uuid)
+            if existing is not None:
+                # Reconcile into the existing type rather than mint a duplicate
+                # (#504): retype the leaf's members onto it; children nest under
+                # it using its stored ancestors.
+                type_uuid = existing
+                existing_node = self._hcg.get_node(type_uuid) or {}
+                child_ancestors = list(
+                    existing_node.get("ancestors") or parent_ancestors
+                )
+                if is_leaf:
+                    self._attach_members(node.members, type_uuid, existing_node)
+                logger.info(
+                    "emergence: reconciled %d members into existing type %s",
+                    len(node.members),
+                    type_uuid,
+                )
+            else:
                 cluster_id = uuid_lib.uuid4().hex[:8]
-                new_type_uuid = self._mint_fn(
+                type_uuid = self._mint_fn(
                     cluster,
                     name,
                     hcg=self._hcg,
                     milvus=self._milvus,
                     source_cluster_id=cluster_id,
-                    parent_type_uuid=f"type_{_BASE_TYPE}",
-                    parent_ancestors=_ENTITY_ANCESTORS,
+                    parent_type_uuid=parent_type_uuid,
+                    parent_ancestors=parent_ancestors,
+                    retype_members=is_leaf,
                 )
                 if name.label not in candidates:
                     candidates.append(name.label)
+                # The minted type's own ancestors are parent_ancestors + its
+                # parent's name -- that's the chain its children descend from.
+                child_ancestors = list(parent_ancestors) + [
+                    parent_type_uuid.removeprefix("type_")
+                ]
                 if self._event_bus is not None:
                     self._event_bus.publish(
                         ONTOLOGY_CHANGED_CHANNEL,
                         {
-                            "type_uuid": new_type_uuid,
+                            "type_uuid": type_uuid,
                             "name": name.label,
-                            "ancestors": _ENTITY_ANCESTORS + [_BASE_TYPE],
+                            "ancestors": child_ancestors,
                         },
                     )
                 logger.info(
                     "emergence: minted %s from %d members", name.label, cluster.size
                 )
-            except Exception:
-                logger.exception("emergence: cluster failed, skipping")
+
+            for child in node.children:
+                self._mint_subtree(child, type_uuid, child_ancestors, candidates)
+        except Exception:
+            logger.exception("emergence: node failed, skipping")
+
+    def _match_existing_type(
+        self, centroid: list[float], parent_type_uuid: str
+    ) -> str | None:
+        """Nearest existing type whose centroid is within the match threshold of
+        ``centroid``, or None to mint fresh (#504 match-before-mint).
+
+        The parent being subdivided is excluded -- a cluster matching its own
+        parent isn't a distinct type, so we mint/keep rather than self-attach.
+        """
+        try:
+            nearest = self._milvus.find_nearest_types(centroid, top_k=1)
+        except Exception:
+            logger.exception("emergence: find_nearest_types failed")
+            return None
+        if not nearest:
+            return None
+        cand_uuid = nearest[0].get("uuid")
+        if not cand_uuid or cand_uuid == parent_type_uuid:
+            return None
+        try:
+            row = self._milvus.get_embedding(node_type="TypeCentroid", uuid=cand_uuid)
+        except Exception:
+            logger.exception("emergence: get_embedding failed for %s", cand_uuid)
+            return None
+        if not row or not row.get("embedding"):
+            return None
+        if _cosine(centroid, row["embedding"]) < self._config.type_match_threshold:
+            return None
+        return str(cand_uuid)
+
+    def _attach_members(
+        self, members: list[Member], type_uuid: str, type_node: dict[str, Any]
+    ) -> None:
+        """Retype members onto an existing type when reconciling (#504).
+
+        Membership is the authoritative `type_uuid` property plus the `type`
+        slug -- the same convention mint_type uses; no IS_A edge.
+        """
+        slug = _slugify(type_node.get("name") or _type_name(type_uuid))
+        for member in members:
+            self._hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
 
 
 def build_emergence_handler(
