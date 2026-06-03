@@ -1935,17 +1935,26 @@ def create_app() -> FastAPI:
             # Optionally attach stored entity vectors (one batch Milvus query) so
             # Apollo's explorer can lay nodes out by embedding (semantic layout).
             emb_by_uuid: Dict[str, Any] = {}
-            if include_embeddings:
+            if include_embeddings and nodes:
                 try:
                     # Default Milvus connection is established at startup.
                     from pymilvus import Collection
 
                     _col = Collection("hcg_entity_embeddings")
                     _col.load()
+                    # Filter by the UUIDs of the nodes we are actually rendering
+                    # rather than fetching an arbitrary slice of the collection;
+                    # otherwise, once the collection holds more rows than the
+                    # current batch, stored vectors for these nodes would be
+                    # missed. uuid is a VARCHAR primary key, so each value is
+                    # quoted (idiom mirrors logos_hcg.sync HCGMilvusSync).
+                    _node_uuids = [str(n["uuid"]) for n in nodes]
+                    qu = chr(34)  # double-quote char for VARCHAR literals
+                    _uuid_list = ", ".join(qu + u + qu for u in _node_uuids)
                     for _row in _col.query(
-                        expr="",
+                        expr=f"uuid in [{_uuid_list}]",
                         output_fields=["uuid", "embedding"],
-                        limit=max(len(nodes), 1),
+                        limit=len(_node_uuids),
                     ):
                         emb_by_uuid[_row["uuid"]] = _row.get("embedding")
                 except Exception as _e:
