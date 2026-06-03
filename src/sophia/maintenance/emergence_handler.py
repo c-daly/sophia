@@ -14,8 +14,8 @@ from collections.abc import Callable
 from typing import Any
 
 from sophia.maintenance.config import MaintenanceConfig
-from sophia.maintenance.emergence_clustering import find_emergent_clusters
-from sophia.maintenance.emergence_types import Member
+from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
+from sophia.maintenance.emergence_types import EmergentCluster, Member
 from sophia.maintenance.structural_signature import build_signature
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,11 @@ ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 # The base "junk-drawer" type that holds un-specialised nodes. Its membership is
 # resolved by node-type scan; minted types resolve membership via IS_A edges.
 _BASE_TYPE = "entity"
+
+# Lineage of the `entity` junk-drawer (root -> node -> entity). Emergence mints
+# directly under `type_entity`, so a minted type's parent ancestors are these
+# two prefixes and its own full ancestors append "entity" (#505).
+_ENTITY_ANCESTORS = ["root", "node"]
 
 
 def _type_name(type_uuid: str) -> str:
@@ -168,15 +173,17 @@ class EmergenceHandler:
 
     def run(self, type_uuid: str) -> None:
         members = self._load_members(type_uuid)
-        clusters = find_emergent_clusters(
+        # Roll the fine clusters up into a hierarchy and mint from the top-level
+        # nodes, so related fine groups consolidate into super-types (#505).
+        hierarchy = find_emergent_hierarchy(
             members,
             min_cluster_size=self._config.min_cluster_size,
             variance_threshold=self._config.variance_threshold,
-            min_cohesion_improvement=self._config.min_cohesion_improvement,
         )
-        if not clusters:
+        if not hierarchy:
             logger.info("emergence: no qualifying clusters in %s", type_uuid)
             return
+        clusters = [EmergentCluster(members=node.members) for node in hierarchy]
 
         # Mutable copy: each successful mint adds its label so later clusters in
         # this same run see it as a candidate and don't silently re-mint a
@@ -201,6 +208,8 @@ class EmergenceHandler:
                     hcg=self._hcg,
                     milvus=self._milvus,
                     source_cluster_id=cluster_id,
+                    parent_type_uuid=f"type_{_BASE_TYPE}",
+                    parent_ancestors=_ENTITY_ANCESTORS,
                 )
                 if name.label not in candidates:
                     candidates.append(name.label)
@@ -210,7 +219,7 @@ class EmergenceHandler:
                         {
                             "type_uuid": new_type_uuid,
                             "name": name.label,
-                            "ancestors": ["root"],
+                            "ancestors": _ENTITY_ANCESTORS + [_BASE_TYPE],
                         },
                     )
                 logger.info(

@@ -97,7 +97,7 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert len(tdef) == 1
     props = tdef[0]["properties"]
     assert props["is_type_definition"] is True
-    assert props["ancestors"] == ["root"]
+    assert props["ancestors"] == ["root", "node", "entity"]
     assert props["name_history"][0]["name"] == "concept"
     assert props["name_history"][0]["hermes_confidence"] == 0.8
 
@@ -111,6 +111,36 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert ("u2", {"type": "concept", "type_uuid": type_uuid}) in hcg.updated
     assert ("u1", type_uuid, "IS_A") in hcg.edges
     assert ("u2", type_uuid, "IS_A") in hcg.edges
+
+    # The minted type IS_A its default parent (type_entity), mirroring the
+    # seeder IS_A type-hierarchy chain so ancestors match the graph (#505).
+    assert (type_uuid, "type_entity", "IS_A") in hcg.edges
+
+
+def test_mint_under_explicit_parent_sets_lineage_and_is_a_edge():
+    """An explicit parent_type_uuid / parent_ancestors must drive both the
+    stored ancestors list and the IS_A edge to that parent (#505)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="mammal", description="", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="type_animal",
+        parent_ancestors=["root", "node", "entity"],
+    )
+
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    assert tdef[0]["properties"]["ancestors"] == [
+        "root",
+        "node",
+        "entity",
+        "animal",
+    ]
+    assert (type_uuid, "type_animal", "IS_A") in hcg.edges
 
 
 def test_same_label_mints_are_distinct_no_overwrite():

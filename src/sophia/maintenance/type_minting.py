@@ -52,6 +52,8 @@ def mint_type(
     hcg: Any,
     milvus: Any,
     source_cluster_id: str,
+    parent_type_uuid: str = "type_entity",
+    parent_ancestors: list[str] | None = None,
 ) -> str:
     """Create the type-definition node, seed its centroid, and retype members.
 
@@ -73,17 +75,26 @@ def mint_type(
             "hermes_confidence": name.confidence,
         }
     ]
+    # Descend from the parent type (default `type_entity`) rather than `root`:
+    # the seeder represents the type hierarchy via IS_A edges, and spec 21.3
+    # expects a minted type's `ancestors` to match that IS_A chain. For the
+    # default entity parent this yields ["root", "node", "entity"].
+    _anc = parent_ancestors or ["root", "node"]
+    parent_name = parent_type_uuid.removeprefix("type_")
     hcg.add_node(
         name=name.label,
         node_type="type_definition",
         uuid=type_uuid,
         properties={
             "is_type_definition": True,
-            "ancestors": ["root"],
+            "ancestors": _anc + [parent_name],
             "name_history": name_history,
         },
         source="emergence",
     )
+    # Wire the minted type into the IS_A hierarchy under its parent so the
+    # graph chain matches the stored `ancestors` (new_type IS_A parent).
+    hcg.add_edge(type_uuid, parent_type_uuid, "IS_A")
 
     model = next((m.model for m in cluster.members if m.model), _DEFAULT_MODEL)
     milvus.update_centroid(

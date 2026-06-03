@@ -44,7 +44,7 @@ def test_handler_mints_named_clusters_and_publishes():
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
         return NameResult(label=label, description="", confidence=0.9)
 
-    def fake_mint(cluster, name, hcg, milvus, source_cluster_id):
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
         minted.append(name.label)
         return f"type_{name.label}"
 
@@ -78,7 +78,7 @@ def test_handler_isolates_failing_cluster():
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
         return NameResult(label=label, description="", confidence=0.9)
 
-    def flaky_mint(cluster, name, hcg, milvus, source_cluster_id):
+    def flaky_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
         if name.label == "object":
             raise RuntimeError("transient HCG write error")
         minted.append(name.label)
@@ -138,7 +138,7 @@ def test_handler_feeds_minted_labels_into_later_candidates():
         label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
         return NameResult(label=label, description="", confidence=0.9)
 
-    def fake_mint(cluster, name, hcg, milvus, source_cluster_id):
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
         return f"type_{name.label}_x"
 
     handler = EmergenceHandler(
@@ -159,3 +159,64 @@ def test_handler_feeds_minted_labels_into_later_candidates():
     assert seen_candidates[0] == ["location"]
     assert seen_candidates[1][-1] in {"object", "concept"}
     assert len(seen_candidates[1]) == 2
+
+
+def test_handler_mints_under_entity_via_hierarchy(monkeypatch):
+    """Emergence must (a) drive minting off the hierarchy roll-up and (b) parent
+    every minted type under `type_entity` with the entity lineage (#505)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+    from sophia.maintenance.emergence_types import EmergentCluster
+
+    seen_members, mint_kwargs = [], []
+
+    def fake_hierarchy(members, *, min_cluster_size, variance_threshold):
+        # Two top-level hierarchy nodes, one per disjoint group of members.
+        phys = [m for m in members if m.uuid.startswith("p")]
+        con = [m for m in members if m.uuid.startswith("c")]
+        return [
+            HierarchyNode(members=phys, centroid=[0.0, 0.0]),
+            HierarchyNode(members=con, centroid=[9.0, 9.0]),
+        ]
+
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", fake_hierarchy)
+
+    def fake_name(cluster, candidates, hermes_url, token):
+        assert isinstance(cluster, EmergentCluster)
+        seen_members.append([m.uuid for m in cluster.members])
+        label = "object" if cluster.members[0].uuid.startswith("p") else "concept"
+        return NameResult(label=label, description="", confidence=0.9)
+
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
+        mint_kwargs.append(kwargs)
+        return f"type_{name.label}_x"
+
+    published = []
+
+    class EB:
+        def publish(self, channel, msg):
+            published.append(msg)
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=object(),
+        event_bus=EB(),
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=fake_mint,
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    # Each top-level hierarchy node became its own EmergentCluster.
+    assert seen_members == [["p0", "p1", "p2", "p3"], ["c0", "c1", "c2", "c3"]]
+    # Every mint is parented under entity with the entity lineage.
+    assert mint_kwargs == [
+        {"parent_type_uuid": "type_entity", "parent_ancestors": ["root", "node"]},
+        {"parent_type_uuid": "type_entity", "parent_ancestors": ["root", "node"]},
+    ]
+    # The published lineage descends root -> node -> entity.
+    assert all(p["ancestors"] == ["root", "node", "entity"] for p in published)
