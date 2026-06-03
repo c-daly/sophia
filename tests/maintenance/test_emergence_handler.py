@@ -330,7 +330,11 @@ def test_handler_reconciles_into_existing_type(monkeypatch):
 
     class FakeHCG:
         def get_node(self, uuid):
-            return {"uuid": uuid, "name": "vehicle", "properties": {"ancestors": ["root", "node", "entity"]}}
+            return {
+                "uuid": uuid,
+                "name": "vehicle",
+                "properties": {"ancestors": ["root", "node", "entity"]},
+            }
 
         def update_node(self, uuid, props):
             retyped[uuid] = props
@@ -369,13 +373,25 @@ def test_handler_subdivides_minted_type_nests_under_it(monkeypatch):
 
     class FakeHCG:
         def get_node(self, uuid):
-            return {"uuid": uuid, "name": "vehicle", "properties": {"ancestors": ["root", "node", "entity"]}}
+            return {
+                "uuid": uuid,
+                "name": "vehicle",
+                "properties": {"ancestors": ["root", "node", "entity"]},
+            }
 
         def update_node(self, *a, **k):
             pass
 
     def fake_mint(
-        cluster, name, hcg, milvus, source_cluster_id, *, parent_type_uuid, parent_ancestors, **k
+        cluster,
+        name,
+        hcg,
+        milvus,
+        source_cluster_id,
+        *,
+        parent_type_uuid,
+        parent_ancestors,
+        **k,
     ):
         mint_kwargs.append((parent_type_uuid, parent_ancestors))
         return "type_sedan_x"
