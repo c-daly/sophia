@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
+from typing import Any, Callable, cast
 
 import numpy as np
 
@@ -57,7 +58,9 @@ def purity(true: list, pred: list) -> float:
     return sum(Counter(v).most_common(1)[0][1] for v in groups.values()) / len(true)
 
 
-def run_variant(name: str, factory, cfg: dict, embeddings: list) -> list[list[int]]:
+def run_variant(
+    name: str, factory: Callable[..., Any], cfg: dict[str, Any], embeddings: list
+) -> list[list[int]]:
     """Run one clustering algorithm THROUGH the experiment harness."""
     config = ExperimentConfig(
         name=name,
@@ -67,7 +70,7 @@ def run_variant(name: str, factory, cfg: dict, embeddings: list) -> list[list[in
     runner = ExperimentRunner(config)
     runner.arrange(factories={"cluster": lambda c: factory(**c)})
     runner.act([embeddings])  # single-item corpus = the whole member set
-    return runner.assert_results()["results"][0]
+    return cast("list[list[int]]", runner.assert_results()["results"][0])
 
 
 def main() -> None:
@@ -81,7 +84,7 @@ def main() -> None:
 
     # NOTE: the prior recursive-binary-split algorithm scored 0 clusters on this
     # data (curse of dimensionality -- see #505); it was replaced by agglomerative.
-    variants = [
+    variants: list[tuple[str, Callable[..., Any], dict[str, Any]]] = [
         (
             "cosine_kmeans_silhouette",
             CosineKMeansAgent,

@@ -8,11 +8,14 @@ experiment harness. Pure numpy; cosine geometry (embeddings are unit vectors).
 
 from __future__ import annotations
 
+from collections import Counter
+from typing import cast
+
 import numpy as np
 
 
 def _normalize(x: np.ndarray) -> np.ndarray:
-    return x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-9)
+    return cast(np.ndarray, x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-9))
 
 
 def _cosine_kmeans(x: np.ndarray, k: int, seed: int, iters: int = 30) -> np.ndarray:
@@ -107,7 +110,7 @@ class ProductionAgglomerativeAgent:
                 uuid=str(i),
                 name=str(i),
                 embedding=list(e),
-                signature=set(),
+                signature=Counter(),
                 current_type="entity",
                 hermes_type_hint=None,
                 neighbors=[],
