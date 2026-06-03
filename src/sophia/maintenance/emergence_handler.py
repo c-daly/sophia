@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 
 # The base "junk-drawer" type that holds un-specialised nodes. Its membership is
-# resolved by node-type scan; minted types resolve membership via IS_A edges.
+# resolved by node-type scan; minted types resolve membership via the
+# authoritative `type_uuid` property (no instance->type IS_A edges -- #505).
 _BASE_TYPE = "entity"
 
 # Lineage of the `entity` junk-drawer (root -> node -> entity). Emergence mints
@@ -56,28 +57,21 @@ def _member_rows(hcg: Any, type_uuid: str, type_name: str) -> list[dict[str, Any
     """Resolve the node rows that belong to ``type_uuid``.
 
     The base junk-drawer (``entity``) is resolved by node-type scan. Any minted
-    type is resolved by the nodes that have an ``IS_A`` edge into *this specific*
-    type-definition uuid -- so two minted types that share a label do not bleed
-    members into one another.
+    type is resolved by the nodes whose authoritative ``type_uuid`` property
+    points at *this specific* type-definition uuid -- so two minted types that
+    share a label do not bleed members into one another, and a member retyped
+    out of this type (its ``type_uuid`` now points elsewhere) is excluded
+    automatically.
 
-    IS_A edges are additive (mint_type cannot delete the old edge), so a member
-    that was split out of this type into a *child* type still carries its stale
-    IS_A edge here. We therefore also require the node's authoritative
-    ``type_uuid`` pointer (overwritten on each retype) to still equal this type --
-    otherwise a re-emergence run would re-include and re-mint already-retyped
-    members (#149 review).
+    Membership is the ``type_uuid`` property; emergence no longer creates an
+    instance->type IS_A edge, so there is nothing to traverse or guard against
+    here (#505).
     """
     if type_name == _BASE_TYPE:
         return list(hcg.list_all_nodes(node_type=type_name))
 
-    edges = hcg.list_all_edges(relation_type="IS_A", target_uuid=type_uuid)
-    member_uuids = [e["source"] for e in (edges or []) if e and e.get("source")]
-    if not member_uuids:
-        return []
     return [
-        n
-        for n in (hcg.get_nodes_batch(member_uuids) or [])
-        if n and "uuid" in n and n.get("type_uuid") == type_uuid
+        n for n in (hcg.get_nodes_by_type_uuid(type_uuid) or []) if n and "uuid" in n
     ]
 
 
@@ -129,7 +123,8 @@ def load_type_members(hcg: Any, milvus: Any, type_uuid: str) -> list[Member]:
     """Load all members of a type as Member objects (embedding + structural signature).
 
     Membership is resolved by :func:`_member_rows` (node-type scan for the base
-    junk-drawer, IS_A-edge lookup for minted types). Embeddings come from Milvus;
+    junk-drawer, `type_uuid`-property lookup for minted types). Embeddings come
+    from Milvus;
     the structural signature is built from the node's outgoing reified edges
     (relation + resolved neighbor type). Nodes without an embedding are skipped
     (they can't be clustered).

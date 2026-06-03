@@ -436,6 +436,42 @@ class HCGClient(LogosHCGClient):
             )
         return results
 
+    def get_nodes_by_type_uuid(self, type_uuid: str) -> list[dict]:
+        """Fetch all content nodes whose ``type_uuid`` property equals *type_uuid*.
+
+        Type membership is a pure node property: a node belongs to a minted
+        type iff its authoritative ``type_uuid`` points at that type-definition.
+        This replaces the prior instance->type ``IS_A`` edge bookkeeping -- the
+        edge was redundant with this property and only polluted the edge graph
+        (#505). Returns node dicts with the standard ``uuid``/``name``/``type``/
+        ``properties`` keys plus a top-level ``type_uuid`` for the membership
+        guard in the emergence handler. Edge nodes are excluded.
+        """
+        query = """
+        MATCH (n:Node {type_uuid: $type_uuid})
+        WHERE n.relation IS NULL
+        RETURN n.uuid as uuid, n.name as name, n.type as type,
+               n.type_uuid as type_uuid, properties(n) as props
+        """
+        records = self._execute_read(query, {"type_uuid": type_uuid})
+
+        results: list[dict] = []
+        for record in records:
+            props = dict(record["props"])
+            for key in ["uuid", "name", "type"]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            results.append(
+                {
+                    "uuid": record["uuid"],
+                    "name": record["name"],
+                    "type": record["type"],
+                    "type_uuid": record["type_uuid"],
+                    "properties": props,
+                }
+            )
+        return results
+
     def find_nodes_by_names(self, names: list[str]) -> dict[str, dict]:
         """Find multiple content nodes by exact name match in a single query.
 

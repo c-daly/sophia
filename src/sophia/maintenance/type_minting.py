@@ -3,7 +3,11 @@
 Emergence always mints a NEW type from a cluster of the unmatched residue:
 - create a `:Node` type-definition under `root` with name_history lineage,
 - seed its Milvus centroid (= mean of member embeddings),
-- retype each member (`type` property via update_node) and add an `IS_A` edge.
+- retype each member (authoritative `type_uuid` property via update_node).
+
+Membership is the `type_uuid` property -- emergence does NOT create an
+instance->type IS_A edge (it was redundant with `type_uuid`). The taxonomy
+IS_A (new type-definition -> parent type-definition) is still created below.
 
 HCGClient encodes nested properties (name_history) transparently; ancestors is a
 native string list. Reconciling members into an *existing* type is #504's job.
@@ -60,8 +64,8 @@ def mint_type(
     The type uuid carries a random suffix so that two clusters that Hermes
     happens to name identically mint *distinct* type-definition nodes (and
     distinct centroids) instead of overwriting each other -- members are tied
-    to a specific minted type via their ``IS_A`` edge to this uuid, not via the
-    shared label string.
+    to a specific minted type via their ``type_uuid`` property pointing at this
+    uuid, not via the shared label string.
     """
     slug = _slugify(name.label)
     type_uuid = f"type_{slug}_{uuid4().hex[:8]}"
@@ -104,21 +108,14 @@ def mint_type(
     )
 
     for member in cluster.members:
-        # Remove the member's prior type-membership IS_A edge(s) before adding the
-        # new one. Edges are reified :Node records, so delete_edge(edge_uuid)
-        # removes the edge -- without this, a member split out of a parent type
-        # keeps a stale IS_A->parent edge and re-emergence on the parent would
-        # re-include and re-mint it (#149 review).
-        for e in hcg.query_edges_from(member.uuid):
-            if e.get("relation") == "IS_A":
-                edge_uuid = e.get("id") or e.get("uuid")
-                if edge_uuid:
-                    hcg.delete_edge(edge_uuid)
-        # Also stamp the authoritative current-membership pointer (type_uuid,
-        # overwritten on each retype); _member_rows filters by it as
-        # defense-in-depth should an edge delete above ever be missed.
+        # Membership is a pure property: stamp the authoritative current-type
+        # pointer (`type_uuid`, overwritten on each retype) and the human-facing
+        # `type` slug. We deliberately do NOT create an instance->type IS_A edge
+        # -- that edge was redundant bookkeeping over `type_uuid` and only
+        # polluted the edge graph. _member_rows now loads members directly by
+        # this `type_uuid` property, so a member retyped away from a parent is
+        # excluded automatically (no stale-edge cleanup needed) (#505).
         hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
-        hcg.add_edge(member.uuid, type_uuid, "IS_A")
 
     logger.info(
         "Minted type %s (%s) from %d members", name.label, type_uuid, cluster.size

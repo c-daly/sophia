@@ -388,6 +388,14 @@ class ProposalProcessor:
                         # is the centroid-classified one above.
                         node_props["hermes_type_hint"] = proposed.get("type")
 
+                        # Membership is a pure property: stamp the authoritative
+                        # `type_uuid` pointer at the node's type-definition. This
+                        # replaces the old instance->type IS_A edge (redundant
+                        # bookkeeping over `type_uuid` that only polluted the edge
+                        # graph); emergence loads members by this property (#505).
+                        type_def_uuid = f"type_{node_type}"
+                        node_props["type_uuid"] = type_def_uuid
+
                         node_uuid = self._hcg.add_node(
                             name=name,
                             node_type=node_type,
@@ -403,9 +411,11 @@ class ProposalProcessor:
                         logger.error(f"Failed to create node '{name}': {e}")
                         continue
 
-                    # 2c. Connect to type definition via IS_A edge.
-                    # Ensure the type-definition node exists (MERGE is idempotent).
-                    type_def_uuid = f"type_{node_type}"
+                    # 2c. Ensure the type-definition node exists (MERGE is
+                    # idempotent). The node's membership in this type is the
+                    # `type_uuid` property stamped above -- we deliberately do NOT
+                    # create an instance->type IS_A edge (redundant bookkeeping
+                    # over `type_uuid` that only polluted the edge graph) (#505).
                     _is_new_type = type_def_uuid not in self._seen_type_uuids
                     self._seen_type_uuids.add(type_def_uuid)
                     try:
@@ -416,14 +426,9 @@ class ProposalProcessor:
                             source="sophia",
                             derivation="observed",
                         )
-                        self._hcg.add_edge(
-                            source_uuid=node_uuid,
-                            target_uuid=type_def_uuid,
-                            relation="IS_A",
-                        )
                     except Exception as e:
                         logger.warning(
-                            "Could not create IS_A edge to type '%s': %s",
+                            "Could not ensure type-definition node for '%s': %s",
                             node_type,
                             e,
                         )
