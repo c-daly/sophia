@@ -230,11 +230,13 @@ def test_handler_mints_under_entity_via_hierarchy(monkeypatch):
         {
             "parent_type_uuid": "type_entity",
             "parent_ancestors": ["root", "node"],
+            "parent_name": "entity",
             "retype_members": True,
         },
         {
             "parent_type_uuid": "type_entity",
             "parent_ancestors": ["root", "node"],
+            "parent_name": "entity",
             "retype_members": True,
         },
     ]
@@ -281,9 +283,10 @@ def test_handler_mints_nested_hierarchy(monkeypatch):
         *,
         parent_type_uuid,
         parent_ancestors,
+        parent_name,
         retype_members,
     ):
-        calls.append((name.label, parent_type_uuid, retype_members))
+        calls.append((name.label, parent_type_uuid, parent_name, retype_members))
         return f"type_{name.label}_x"
 
     handler = EmergenceHandler(
@@ -301,10 +304,13 @@ def test_handler_mints_nested_hierarchy(monkeypatch):
     handler.run(type_uuid="type_entity")
 
     # Super-type minted first, under entity, type-only (members live in leaves).
-    assert calls[0] == ("science", "type_entity", False)
+    assert calls[0] == ("science", "type_entity", "entity", False)
     # Leaves mint under the freshly-minted super-type and retype their members.
-    assert ("object", "type_science_x", True) in calls
-    assert ("concept", "type_science_x", True) in calls
+    # parent_name is the super-type's CLEAN name ("science"), never its
+    # `_<hex>`-suffixed uuid ("science_x") -- otherwise the suffix leaks into
+    # the leaves' ancestors lineage (greptile #159).
+    assert ("object", "type_science_x", "science", True) in calls
+    assert ("concept", "type_science_x", "science", True) in calls
 
 
 def test_handler_reconciles_into_existing_type(monkeypatch):
@@ -412,3 +418,61 @@ def test_handler_subdivides_minted_type_nests_under_it(monkeypatch):
 
     # Parent is the subdivided type itself, with that type's ancestors.
     assert mint_kwargs == [("type_vehicle_abc", ["root", "node", "entity"])]
+
+
+def test_handler_dim_mismatch_declines_match_and_mints_fresh(monkeypatch):
+    """A candidate type centroid of a different dimension must not abort the
+    cluster. `_cosine(strict=True)` raises on the mismatch, but
+    `_match_existing_type` swallows it and declines the match, so the cluster
+    mints fresh instead of being skipped by `_mint_subtree`'s catch-all
+    (greptile #159)."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    leaf = HierarchyNode(
+        members=[m for m in _members() if m.uuid.startswith("p")], centroid=[1.0, 0.0]
+    )
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+
+    minted = []
+
+    class DimMismatchMilvus:
+        def find_nearest_types(self, centroid, top_k=1):
+            return [{"uuid": "type_other_abc", "score": 0.0}]
+
+        def get_embedding(self, node_type, uuid):
+            # 3-dim candidate centroid vs the cluster's 2-dim centroid -> the
+            # strict zip in _cosine raises ValueError.
+            return {"uuid": uuid, "embedding": [1.0, 0.0, 0.0]}
+
+    class FakeHCG:
+        def get_node(self, uuid):
+            return {
+                "uuid": uuid,
+                "name": "other",
+                "properties": {"ancestors": ["root", "node", "entity"]},
+            }
+
+        def update_node(self, *a, **k):
+            pass
+
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **k):
+        minted.append(name.label)
+        return f"type_{name.label}_x"
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=FakeHCG(),
+        milvus=DimMismatchMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=lambda *a: NameResult(label="object", description="", confidence=0.9),
+        mint_fn=fake_mint,
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    # Dim mismatch -> match declined -> minted fresh (cluster NOT skipped).
+    assert minted == ["object"]

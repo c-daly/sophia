@@ -147,6 +147,30 @@ def test_mint_under_explicit_parent_sets_lineage_and_is_a_edge():
     assert (type_uuid, "type_animal", "IS_A") in hcg.edges
 
 
+def test_mint_uses_clean_parent_name_not_uuid_suffix():
+    """When the parent is a minted type, its uuid carries a random `_<hex>`
+    suffix (`type_<slug>_<hex>`). The child's stored ancestors must use the
+    parent's clean name passed via `parent_name`, not the suffixed uuid
+    (greptile #159)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="sedan", description="", confidence=0.8)
+
+    mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="type_vehicle_a1b2c3d4",
+        parent_ancestors=["root", "node", "entity"],
+        parent_name="vehicle",
+    )
+
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    # Clean "vehicle" -- NOT "vehicle_a1b2c3d4".
+    assert tdef[0]["properties"]["ancestors"] == ["root", "node", "entity", "vehicle"]
+
+
 def test_same_label_mints_are_distinct_no_overwrite():
     """Two clusters Hermes names identically must not collide on uuid/centroid."""
     hcg, milvus = FakeHCG(), FakeMilvus()

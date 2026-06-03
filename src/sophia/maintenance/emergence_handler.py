@@ -197,18 +197,25 @@ class EmergenceHandler:
         if _type_name(type_uuid) == _BASE_TYPE:
             parent_type_uuid = f"type_{_BASE_TYPE}"
             parent_ancestors = _ENTITY_ANCESTORS
+            parent_name = _BASE_TYPE
         else:
             parent_type_uuid = type_uuid
             parent_node = self._hcg.get_node(type_uuid) or {}
             parent_props = parent_node.get("properties") or {}
             parent_ancestors = list(parent_props.get("ancestors") or _ENTITY_ANCESTORS)
+            # Clean name of the type being subdivided. Never derive it from the
+            # uuid -- minted type uuids carry a random `_<hex>` suffix that would
+            # leak into descendants' ancestors (greptile #159).
+            parent_name = parent_node.get("name") or _type_name(type_uuid)
 
         # Mutable copy: each successful mint adds its label so later clusters in
         # this same run see it as a candidate and don't silently re-mint a
         # same-label sibling.
         candidates = list(self._candidates_fn())
         for node in hierarchy:
-            self._mint_subtree(node, parent_type_uuid, parent_ancestors, candidates)
+            self._mint_subtree(
+                node, parent_type_uuid, parent_ancestors, candidates, parent_name
+            )
 
     def _mint_subtree(
         self,
@@ -216,6 +223,7 @@ class EmergenceHandler:
         parent_type_uuid: str,
         parent_ancestors: list[str],
         candidates: list[str],
+        parent_name: str,
     ) -> None:
         """Mint (or reconcile) one hierarchy node, then recurse into its children.
 
@@ -246,6 +254,7 @@ class EmergenceHandler:
                 child_ancestors = list(
                     existing_props.get("ancestors") or parent_ancestors
                 )
+                minted_name = existing_node.get("name") or _type_name(type_uuid)
                 if is_leaf:
                     self._attach_members(node.members, type_uuid, existing_node)
                 logger.info(
@@ -263,15 +272,15 @@ class EmergenceHandler:
                     source_cluster_id=cluster_id,
                     parent_type_uuid=parent_type_uuid,
                     parent_ancestors=parent_ancestors,
+                    parent_name=parent_name,
                     retype_members=is_leaf,
                 )
                 if name.label not in candidates:
                     candidates.append(name.label)
+                minted_name = name.label
                 # The minted type's own ancestors are parent_ancestors + its
-                # parent's name -- that's the chain its children descend from.
-                child_ancestors = list(parent_ancestors) + [
-                    parent_type_uuid.removeprefix("type_")
-                ]
+                # parent's clean name -- the chain its children descend from.
+                child_ancestors = list(parent_ancestors) + [parent_name]
                 if self._event_bus is not None:
                     self._event_bus.publish(
                         ONTOLOGY_CHANGED_CHANNEL,
@@ -286,7 +295,9 @@ class EmergenceHandler:
                 )
 
             for child in node.children:
-                self._mint_subtree(child, type_uuid, child_ancestors, candidates)
+                self._mint_subtree(
+                    child, type_uuid, child_ancestors, candidates, minted_name
+                )
         except Exception:
             logger.exception("emergence: node failed, skipping")
 
@@ -316,7 +327,18 @@ class EmergenceHandler:
             return None
         if not row or not row.get("embedding"):
             return None
-        if _cosine(centroid, row["embedding"]) < self._config.type_match_threshold:
+        try:
+            similarity = _cosine(centroid, row["embedding"])
+        except ValueError:
+            # Dimension mismatch (e.g. a candidate centroid stored under a
+            # different embedding model). Decline the match here so the cluster
+            # mints fresh, rather than letting the error bubble up to
+            # _mint_subtree's catch-all and skip the whole node (greptile #159).
+            logger.warning(
+                "emergence: centroid dim mismatch vs %s; minting fresh", cand_uuid
+            )
+            return None
+        if similarity < self._config.type_match_threshold:
             return None
         return str(cand_uuid)
 

@@ -62,6 +62,7 @@ def mint_type(
     source_cluster_id: str,
     parent_type_uuid: str = "type_entity",
     parent_ancestors: list[str] | None = None,
+    parent_name: str | None = None,
     retype_members: bool = True,
 ) -> str:
     """Create the type-definition node, seed its centroid, and retype members.
@@ -89,14 +90,22 @@ def mint_type(
     # expects a minted type's `ancestors` to match that IS_A chain. For the
     # default entity parent this yields ["root", "node", "entity"].
     _anc = parent_ancestors or ["root", "node"]
-    parent_name = parent_type_uuid.removeprefix("type_")
+    # Prefer the parent's clean name. Minted parent uuids carry a random
+    # `_<hex>` suffix (`type_<slug>_<hex>`), so stripping "type_" off the uuid
+    # would pollute the lineage with that suffix (greptile #159). Fall back to
+    # the stripped uuid only for legacy/base parents like `type_entity`.
+    _pname = (
+        parent_name
+        if parent_name is not None
+        else parent_type_uuid.removeprefix("type_")
+    )
     hcg.add_node(
         name=name.label,
         node_type="type_definition",
         uuid=type_uuid,
         properties={
             "is_type_definition": True,
-            "ancestors": _anc + [parent_name],
+            "ancestors": _anc + [_pname],
             "name_history": name_history,
         },
         source="emergence",

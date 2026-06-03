@@ -50,13 +50,6 @@ class MaintenanceConfig(BaseSettings):
         description="Largest membership sent verbatim to Hermes name_cluster; "
         "larger clusters are sampled.",
     )
-    min_cohesion_improvement: float = Field(
-        default=0.15,
-        gt=0,
-        le=1.0,
-        description="Minimum fractional variance reduction a split must achieve "
-        "to be accepted.",
-    )
     hermes_confidence_floor: float = Field(
         default=0.5,
         ge=0,
