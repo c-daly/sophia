@@ -67,7 +67,12 @@ class TypeClassifier:
         best = results[0]
         best_distance = best["score"]
         best_uuid = best["uuid"]
-        best_name = best_uuid.removeprefix("type_")
+        # Use the type-definition's clean human label (e.g. "organism"), NOT
+        # the uuid stripped of "type_": minted uuids carry a random hex suffix,
+        # so deriving the name from the uuid produced "organism_<hex>" labels
+        # that then overwrote the clean emergence name on the type-def.
+        best_node = self._hcg.get_node(best_uuid) if self._hcg else None
+        best_name = (best_node or {}).get("name") or best_uuid.removeprefix("type_")
 
         # Confidence: inverse of distance, clamped to [0, 1]
         if best_distance <= 0:
