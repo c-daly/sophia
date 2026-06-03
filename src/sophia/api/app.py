@@ -1907,6 +1907,10 @@ def create_app() -> FastAPI:
             le=10000,
             description="Maximum number of entities/edges to return",
         ),
+        include_embeddings: bool = Query(
+            default=False,
+            description="Attach each entity's stored vector (for semantic layout)",
+        ),
     ) -> HCGGraphSnapshotResponse:
         """Get a snapshot of the entire HCG graph for visualization.
 
@@ -1928,6 +1932,25 @@ def create_app() -> FastAPI:
             # Fetch all nodes
             nodes = _hcg_client.list_all_nodes(node_type=entity_type, limit=limit)
 
+            # Optionally attach stored entity vectors (one batch Milvus query) so
+            # Apollo's explorer can lay nodes out by embedding (semantic layout).
+            emb_by_uuid: Dict[str, Any] = {}
+            if include_embeddings:
+                try:
+                    # Default Milvus connection is established at startup.
+                    from pymilvus import Collection
+
+                    _col = Collection("hcg_entity_embeddings")
+                    _col.load()
+                    for _row in _col.query(
+                        expr="",
+                        output_fields=["uuid", "embedding"],
+                        limit=max(len(nodes), 1),
+                    ):
+                        emb_by_uuid[_row["uuid"]] = _row.get("embedding")
+                except Exception as _e:
+                    logger.warning(f"snapshot embeddings unavailable: {_e}")
+
             # Convert to response format
             entities: List[HCGEntityResponse] = []
             for node in nodes:
@@ -1940,6 +1963,7 @@ def create_app() -> FastAPI:
                         properties=props,
                         labels=[],
                         created_at=props.get("created"),
+                        embedding=emb_by_uuid.get(node["uuid"]),
                     )
                 )
 
