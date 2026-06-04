@@ -571,9 +571,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                         len(node_uuids),
                     )
 
+                from sophia.maintenance.type_rollup_handler import (
+                    build_type_rollup_handler,
+                )
+
+                _rollup_run = build_type_rollup_handler(
+                    config=_maintenance_config,
+                    hcg=_hcg_client,
+                    milvus=_milvus_sync,
+                    event_bus=_event_bus,
+                    hermes_url=feedback_config.hermes_url,
+                    token=get_env_value("SOPHIA_API_TOKEN") or "",
+                )
+
                 _handlers = {
                     "type_emergence": _handle_type_emergence,
                     "relationship_discovery": _handle_relationship_discovery,
+                    "type_rollup": _rollup_run,
                 }
 
             if not _handlers:
@@ -1904,8 +1918,9 @@ def create_app() -> FastAPI:
         limit: int = Query(
             default=1000,
             ge=1,
-            le=10000,
-            description="Maximum number of entities/edges to return",
+            le=100000,
+            description="Maximum number of entities/edges to return. Soft cap: "
+            "with include_embeddings the payload is ~3072 floats/node.",
         ),
     ) -> HCGGraphSnapshotResponse:
         """Get a snapshot of the entire HCG graph for visualization.

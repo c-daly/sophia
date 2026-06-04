@@ -56,6 +56,21 @@ class MaintenanceConfig(BaseSettings):
         le=1.0,
         description="Discard Hermes cluster names below this confidence.",
     )
+    rollup_enabled: bool = Field(
+        default=True,
+        description="Run the periodic type-level rollup that groups the flat "
+        "layer of emergent types into super-types (#160).",
+    )
+    rollup_interval_seconds: int = Field(
+        default=600,
+        description="How often the type_rollup pass trolls the type layer.",
+    )
+    rollup_min_cluster_size: int = Field(
+        default=2, ge=2, description="Min types in a leaf group during rollup."
+    )
+    rollup_min_supercluster_size: int = Field(
+        default=2, ge=2, description="Min child groups needed to mint a super-type."
+    )
     type_match_threshold: float = Field(
         default=0.9,
         ge=0,
