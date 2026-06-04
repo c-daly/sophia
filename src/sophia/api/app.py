@@ -1919,8 +1919,9 @@ def create_app() -> FastAPI:
             default=1000,
             ge=1,
             le=100000,
-            description="Maximum number of entities/edges to return. Soft cap: "
-            "with include_embeddings the payload is ~3072 floats/node.",
+            description="Maximum number of entities/edges to return. This "
+            "endpoint returns node/edge metadata only (no embedding vectors), "
+            "so the payload stays modest even at the cap.",
         ),
     ) -> HCGGraphSnapshotResponse:
         """Get a snapshot of the entire HCG graph for visualization.

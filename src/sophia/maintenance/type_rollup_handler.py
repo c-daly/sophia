@@ -206,7 +206,12 @@ class TypeRollupHandler:
             p_row = next((r for r in rows if r["uuid"] == parent), None)
             if p_row is None:
                 continue
-            # Guard against a 2-cycle (A parent-of B and B parent-of A): keep the heavier.
+            # Guard against a 2-cycle (A parent-of B and B parent-of A): keep the
+            # heavier direction. On an exact tie the strict `>` deliberately lets
+            # both through -- the second reparent then hits the structural cycle
+            # guard in _reparent_one and is recorded as AMBIGUOUS_SUBSUMPTION
+            # rather than silently dropped. Do NOT change to `>=`, which would lose
+            # that ambiguity signal (gemini #161).
             if votes.get(parent, Counter()).get(child, 0) > parent_counter.get(
                 parent, 0
             ):
@@ -221,18 +226,22 @@ class TypeRollupHandler:
         return explicit_children
 
     def _type_uuid_map(self, node_uuids: list[str]) -> dict[str, str]:
+        # Resolve in chunks: a single get_nodes_batch over every member uuid can
+        # exceed query-size/timeout limits on a large graph (gemini #161).
         out: dict[str, str] = {}
-        try:
-            nodes = self._hcg.get_nodes_batch(node_uuids) or []
-        except Exception:
-            logger.exception("type_rollup: get_nodes_batch failed")
-            return out
-        for n in nodes:
-            if not n or "uuid" not in n:
+        chunk = 500
+        for i in range(0, len(node_uuids), chunk):
+            try:
+                nodes = self._hcg.get_nodes_batch(node_uuids[i : i + chunk]) or []
+            except Exception:
+                logger.exception("type_rollup: get_nodes_batch failed")
                 continue
-            tu = n.get("type_uuid") or (n.get("properties") or {}).get("type_uuid")
-            if tu:
-                out[n["uuid"]] = tu
+            for n in nodes:
+                if not n or "uuid" not in n:
+                    continue
+                tu = n.get("type_uuid") or (n.get("properties") or {}).get("type_uuid")
+                if tu:
+                    out[n["uuid"]] = tu
         return out
 
     # ------------------------------------------------------------ tier 2

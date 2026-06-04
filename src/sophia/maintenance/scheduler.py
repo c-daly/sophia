@@ -275,7 +275,10 @@ class MaintenanceScheduler:
 
         Decoupled from the per-type emergence cadence: the rollup is idempotent,
         so a plain timer is enough -- if there are new types to organise it does,
-        otherwise it is a cheap no-op.
+        otherwise it is a cheap no-op. Unlike _periodic_loop it sleeps BEFORE the
+        first pass by design: there is nothing to roll up until ingestion and
+        emergence have populated the type layer, so an immediate fire would be a
+        guaranteed no-op (greptile #161).
         """
         interval = self._config.rollup_interval_seconds
         while self._running:
