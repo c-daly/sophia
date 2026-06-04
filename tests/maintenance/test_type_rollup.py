@@ -60,9 +60,24 @@ class FakeHCG:
         return eid
 
     def delete_edge(self, edge_uuid):
-        self.edges = [e for e in self.edges if e["id"] != edge_uuid]
+        self.edges = [e for e in self.edges if e.get("id") != edge_uuid]
         self.writes.append(("delete_edge", edge_uuid))
         return True
+
+    def delete_edges_between(self, source, target, relation):
+        before = len(self.edges)
+        self.edges = [
+            e
+            for e in self.edges
+            if not (
+                e["source"] == source
+                and e["target"] == target
+                and e["relation"] == relation
+            )
+        ]
+        removed = before - len(self.edges)
+        self.writes.append(("delete_edges_between", source, target, relation))
+        return removed
 
     def update_node(self, uuid, properties=None):
         self.nodes.setdefault(uuid, {"uuid": uuid, "properties": {}})
@@ -709,3 +724,39 @@ def test_centroid_match_never_selects_a_cluster_member_as_its_own_super(monkeypa
             and e["relation"] == "IS_A"
             for e in hcg.edges
         )
+
+
+def test_reparent_drops_stale_is_a_even_without_edge_id():
+    """A type must never end up with two IS_A parents. When the stale edge was
+    persisted without an id/uuid, _current_is_a returns a parent but no edge
+    handle; delete_edge(None) would silently no-op. _reparent_one must fall
+    back to a (source, target, relation) delete so the old parent is removed
+    before the new IS_A is added (greptile #161)."""
+    tds = [_td("type_child_aa", "child", ["root", "node", "entity"])]
+    # Pre-existing IS_A edge to an OLD parent, persisted WITHOUT an id.
+    stale = [
+        {"source": "type_child_aa", "target": "type_oldparent_xx", "relation": "IS_A"}
+    ]
+    hcg = FakeHCG(tds, is_a=stale)
+    milvus = FakeMilvus({"type_child_aa": [1.0, 0.0]})
+    handler = _handler(hcg, milvus)
+    # Mirror what run() would build: the child sits under the old parent.
+    handler._children_of = {"type_oldparent_xx": ["type_child_aa"]}
+    handler._name_of = {"type_child_aa": "child"}
+
+    handler._reparent_one(
+        "type_child_aa", "type_newparent_bb", ["root", "node", "entity"], "newparent"
+    )
+
+    is_a_targets = [
+        e["target"]
+        for e in hcg.edges
+        if e["source"] == "type_child_aa" and e["relation"] == "IS_A"
+    ]
+    # Exactly one IS_A parent, and it is the new one (stale edge removed).
+    assert is_a_targets == ["type_newparent_bb"]
+    assert "type_oldparent_xx" not in is_a_targets
+    # The id-less stale edge was removed via the triple-delete fallback.
+    assert ("delete_edges_between", "type_child_aa", "type_oldparent_xx", "IS_A") in (
+        hcg.writes
+    )

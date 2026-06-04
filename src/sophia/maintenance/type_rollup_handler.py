@@ -424,14 +424,20 @@ class TypeRollupHandler:
         if cur_parent == new_parent_uuid and cur_anc == target_ancestors:
             return  # already correct -> true no-op
         # 1. swing the IS_A edge
-        if cur_parent is not None and cur_parent != new_parent_uuid and cur_edge:
+        if cur_parent is not None and cur_parent != new_parent_uuid:
             try:
-                self._hcg.delete_edge(cur_edge)
-                (
-                    self._children_of.get(cur_parent, []).remove(child_uuid)
-                    if child_uuid in self._children_of.get(cur_parent, [])
-                    else None
-                )
+                # Drop the stale parent edge by its own id when we have one;
+                # fall back to a (source, target, relation) match when the edge
+                # was persisted without an id/uuid. delete_edge(None) would
+                # silently no-op and leave the old IS_A in place, so the child
+                # would end up with two IS_A parents (greptile #161).
+                if cur_edge:
+                    self._hcg.delete_edge(cur_edge)
+                else:
+                    self._hcg.delete_edges_between(child_uuid, cur_parent, "IS_A")
+                siblings = self._children_of.get(cur_parent)
+                if siblings and child_uuid in siblings:
+                    siblings.remove(child_uuid)
             except Exception:
                 logger.exception(
                     "type_rollup: delete stale IS_A failed for %s", child_uuid

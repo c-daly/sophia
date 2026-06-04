@@ -872,6 +872,31 @@ class HCGClient(LogosHCGClient):
         """
         return self.delete_node(edge_uuid)
 
+    def delete_edges_between(
+        self, source_uuid: str, target_uuid: str, relation: str
+    ) -> int:
+        """Delete every reified edge matching (source, target, relation).
+
+        A fallback for callers that must drop a specific edge but lack its
+        uuid -- e.g. an edge persisted without one. :meth:`add_edge` MERGEs on
+        exactly this triple, so at most one edge normally matches. Returns the
+        number of edge nodes removed.
+        """
+        query = """
+        MATCH (edge:Node)
+        WHERE edge.source = $source
+          AND edge.target = $target
+          AND edge.relation = $relation
+        DETACH DELETE edge
+        RETURN count(edge) AS deleted
+        """
+        records = self._execute_query(
+            query,
+            {"source": source_uuid, "target": target_uuid, "relation": relation},
+        )
+        deleted = records[0]["deleted"] if records else 0
+        return int(deleted)
+
     def clear_all(self) -> None:
         """Remove all nodes/edges from the graph."""
         self._execute_query("MATCH (n) DETACH DELETE n")
