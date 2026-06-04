@@ -379,9 +379,13 @@ class ProposalProcessor:
                         }
                         if classification:
                             node_props["type_confidence"] = classification.confidence
-                            node_props["needs_reclassification"] = (
-                                classification.needs_reclassification
-                            )
+                            # Ternary flag: only persist an explicit True/False.
+                            # None ("who knows") is left unset -> absent property
+                            # reads as null, the honest uncertain default.
+                            if classification.needs_reclassification is not None:
+                                node_props["needs_reclassification"] = (
+                                    classification.needs_reclassification
+                                )
 
                         # Preserve Hermes' initial NER type pick as provenance / a
                         # weak prior for emergence (#505); the authoritative `type`

@@ -6,7 +6,7 @@ Sophia owns the type vocabulary — Hermes type hints are ignored.
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,17 @@ class TypeAssignment:
     type_uuid: str
     type_name: str
     confidence: float
-    needs_reclassification: bool
+    # Ternary work-queue flag for #504 type correction:
+    #   True  = needs reclassifying (the routine queue). First-pass placement is
+    #           provisional, so every freshly ingested node starts True.
+    #   False = nowhere better to put it right now -- #504 considered it and had
+    #           no better home. NOT "settled"; revisitable as the vocab grows.
+    #   None  = has a problem that needs fixing -- #504 hit a cycle / something
+    #           unusual it couldn't resolve, and flagged it for resolution (the
+    #           node-level cousin of an AMBIGUOUS_SUBSUMPTION cycle).
+    # First-pass classification only ever yields True; False and None are written
+    # only by #504.
+    needs_reclassification: Optional[bool]
 
 
 class TypeClassifier:
@@ -94,17 +104,19 @@ class TypeClassifier:
         else:
             confidence = 1.0 - (best_distance / MAX_DISTANCE)
 
-        # Ambiguity check: if runner-up is close, lower confidence
-        needs_reclass = False
+        # Ambiguity check: if the runner-up is close, lower confidence.
         if len(results) >= 2:
             runner_up_distance = results[1]["score"]
             gap = max(runner_up_distance - best_distance, 0.0)
             if gap < AMBIGUITY_RATIO * best_distance:
                 confidence *= 0.5
-                needs_reclass = True
 
-        if confidence < 0.5:
-            needs_reclass = True
+        # needs_reclassification (see TypeAssignment): first-pass placement is
+        # provisional, so it always flags True ("needs reclassifying") and joins
+        # the #504 correction queue. False ("nowhere better right now") and None
+        # ("a cycle / something unusual was hit -- flag for resolution") are only
+        # ever written by #504, never on first pass.
+        needs_reclass: Optional[bool] = True
 
         return TypeAssignment(
             type_uuid=best_uuid,
