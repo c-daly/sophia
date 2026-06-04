@@ -34,7 +34,9 @@ class TestTypeClassifier:
         assert result.type_uuid == "type_location"
         assert result.type_name == "location"
         assert result.confidence > 0.8
-        assert result.needs_reclassification is False
+        # First-pass placement is provisional, so it flags True ("needs
+        # reclassifying") even when confident; #504 may later settle it to False.
+        assert result.needs_reclassification is True
 
     def test_classify_uses_type_def_clean_name_not_uuid(self):
         """A minted type's hex-suffixed uuid must not leak into the name; the
@@ -67,7 +69,12 @@ class TestTypeClassifier:
         assert result.type_name == "object"
 
     def test_classify_low_confidence_ambiguous(self):
-        """Between two centroids => low confidence, flagged."""
+        """Between two centroids => low confidence, still flags True on first pass.
+
+        Ternary semantics: first-pass placement is provisional, so it always
+        flags True ("needs reclassifying"). None ("hit a cycle / problem to fix")
+        and False ("nowhere better") are written only by #504, never first-pass.
+        """
         mock_milvus = MagicMock()
         mock_milvus.find_nearest_types.return_value = [
             {"uuid": "type_location", "score": 0.45},

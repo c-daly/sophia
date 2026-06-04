@@ -379,9 +379,13 @@ class ProposalProcessor:
                         }
                         if classification:
                             node_props["type_confidence"] = classification.confidence
-                            node_props["needs_reclassification"] = (
-                                classification.needs_reclassification
-                            )
+                            # Ternary flag: only persist an explicit True/False.
+                            # None ("who knows") is left unset -> absent property
+                            # reads as null, the honest uncertain default.
+                            if classification.needs_reclassification is not None:
+                                node_props["needs_reclassification"] = (
+                                    classification.needs_reclassification
+                                )
 
                         # Preserve Hermes' initial NER type pick as provenance / a
                         # weak prior for emergence (#505); the authoritative `type`
@@ -393,7 +397,18 @@ class ProposalProcessor:
                         # replaces the old instance->type IS_A edge (redundant
                         # bookkeeping over `type_uuid` that only polluted the edge
                         # graph); emergence loads members by this property (#505).
-                        type_def_uuid = f"type_{node_type}"
+                        #
+                        # Use the AUTHORITATIVE uuid from classification: emergent
+                        # types carry a hex suffix (`type_organism_a1b2c3`), so
+                        # rebuilding it from the clean name would stamp a ghost
+                        # `type_organism`, orphaning the node from its real type-def
+                        # and breaking the membership the rollup loads by. Only the
+                        # no-embedding fallback (a base type) builds it from name.
+                        type_def_uuid = (
+                            classification.type_uuid
+                            if classification
+                            else f"type_{node_type}"
+                        )
                         node_props["type_uuid"] = type_def_uuid
 
                         node_uuid = self._hcg.add_node(

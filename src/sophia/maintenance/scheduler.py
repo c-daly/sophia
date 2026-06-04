@@ -178,6 +178,8 @@ class MaintenanceScheduler:
         tasks = [asyncio.create_task(self._dispatch_loop())]
         if self._config.periodic_enabled:
             tasks.append(asyncio.create_task(self._periodic_loop()))
+        if self._config.rollup_enabled:
+            tasks.append(asyncio.create_task(self._rollup_loop()))
 
         await asyncio.gather(*tasks)
 
@@ -266,6 +268,32 @@ class MaintenanceScheduler:
             except Exception:
                 if self._running:
                     logger.exception("Error in periodic loop")
+                    await asyncio.sleep(1)
+
+    async def _rollup_loop(self) -> None:
+        """Periodically troll the type layer and enqueue a type_rollup pass (#160).
+
+        Decoupled from the per-type emergence cadence: the rollup is idempotent,
+        so a plain timer is enough -- if there are new types to organise it does,
+        otherwise it is a cheap no-op. Unlike _periodic_loop it sleeps BEFORE the
+        first pass by design: there is nothing to roll up until ingestion and
+        emergence have populated the type layer, so an immediate fire would be a
+        guaranteed no-op (greptile #161).
+        """
+        interval = self._config.rollup_interval_seconds
+        while self._running:
+            await asyncio.sleep(interval)
+            if not self._running:
+                break
+            try:
+                if "type_rollup" in self._handlers:
+                    logger.info("Type-rollup scan triggered")
+                    self._queue.enqueue(
+                        job_type="type_rollup", priority="low", params={}
+                    )
+            except Exception:
+                if self._running:
+                    logger.exception("Error in rollup loop")
                     await asyncio.sleep(1)
 
     async def _dispatch_job(self, job: MaintenanceJob) -> None:

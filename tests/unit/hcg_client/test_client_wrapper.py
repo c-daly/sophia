@@ -446,3 +446,31 @@ def test_get_subgraph_fetches_nodes_and_edges(
     assert len(calls) == 2
     assert len(result["nodes"]) == 1
     assert result["nodes"][0]["uuid"] == "a"
+
+
+def test_delete_edges_between_matches_triple_and_returns_count(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """delete_edges_between removes edges by (source, target, relation) -- the
+    fallback used when a stale edge has no id -- and returns the count removed."""
+    execute = MagicMock(return_value=[{"deleted": 2}])
+    monkeypatch.setattr(client, "_execute_query", execute)
+
+    removed = client.delete_edges_between("src-1", "tgt-1", "IS_A")
+
+    assert removed == 2
+    execute.assert_called_once()
+    query, params = execute.call_args[0][0], execute.call_args[0][1]
+    assert "edge.source = $source" in query
+    assert "edge.target = $target" in query
+    assert "edge.relation = $relation" in query
+    assert "DETACH DELETE edge" in query
+    assert params == {"source": "src-1", "target": "tgt-1", "relation": "IS_A"}
+
+
+def test_delete_edges_between_returns_zero_when_no_match(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """No matching edge -> zero removed (empty result is handled)."""
+    monkeypatch.setattr(client, "_execute_query", MagicMock(return_value=[]))
+    assert client.delete_edges_between("src", "tgt", "IS_A") == 0
