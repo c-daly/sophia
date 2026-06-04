@@ -309,7 +309,14 @@ class TypeRollupHandler:
             if name is None or name.confidence < self._config.hermes_confidence_floor:
                 logger.info("type_rollup: skip super-type (no/low-confidence name)")
                 return
-            super_uuid = self._match_existing_type(node.centroid, parent_type_uuid)
+            # A cluster member must never be selected as the super-type of its
+            # own peers (greptile #161): that yields peer-as-parent IS_A edges
+            # and cascaded ancestor chains. Exclude the members from BOTH the
+            # centroid match and the name reconcile below.
+            member_uuids = {m.uuid for m in node.members}
+            super_uuid = self._match_existing_type(
+                node.centroid, parent_type_uuid, exclude=member_uuids
+            )
             if super_uuid is None:
                 # Name-based reconcile before minting: never create a second
                 # type-def with a name that already exists (the duplicate
@@ -317,7 +324,6 @@ class TypeRollupHandler:
                 # Hermes named identically; an exact name is a strong reconcile
                 # signal. Skip if it is the parent or a member of this very
                 # cluster (reusing those would just re-introduce a cycle).
-                member_uuids = {m.uuid for m in node.members}
                 by_name = self._uuid_by_name.get(name.label)
                 if (
                     by_name
@@ -546,35 +552,43 @@ class TypeRollupHandler:
         return None, None
 
     def _match_existing_type(
-        self, centroid: list[float], parent_type_uuid: str
+        self,
+        centroid: list[float],
+        parent_type_uuid: str,
+        exclude: frozenset[str] | set[str] = frozenset(),
     ) -> str | None:
         """Nearest existing type within the match threshold (idempotency anchor),
-        excluding the parent. Mirrors EmergenceHandler._match_existing_type."""
+        excluding the parent AND the cluster's own members. A member must never be
+        selected as the super-type of its peers: a cluster centroid is the mean of
+        its members, so its nearest type is often a member -- reconciling to it
+        would persist a peer-as-parent IS_A edge + a wrong ancestor cascade
+        (greptile #161). We therefore scan beyond the top hit so a real super-type
+        past the excluded members can still match."""
         if not centroid:
             return None
         try:
-            nearest = self._milvus.find_nearest_types(centroid, top_k=1)
+            nearest = self._milvus.find_nearest_types(centroid, top_k=10)
         except Exception:
             logger.exception("type_rollup: find_nearest_types failed")
             return None
-        if not nearest:
-            return None
-        cand = nearest[0].get("uuid")
-        if not cand or cand == parent_type_uuid:
-            return None
-        try:
-            row = self._milvus.get_embedding(node_type="TypeCentroid", uuid=cand)
-        except Exception:
-            logger.exception("type_rollup: get_embedding failed for %s", cand)
-            return None
-        if not row or not row.get("embedding"):
-            return None
-        try:
-            if _cosine(centroid, row["embedding"]) < self._config.type_match_threshold:
-                return None
-        except ValueError:
-            return None
-        return str(cand)
+        for hit in nearest or []:
+            cand = hit.get("uuid")
+            if not cand or cand == parent_type_uuid or cand in exclude:
+                continue
+            try:
+                row = self._milvus.get_embedding(node_type="TypeCentroid", uuid=cand)
+            except Exception:
+                logger.exception("type_rollup: get_embedding failed for %s", cand)
+                continue
+            emb = (row or {}).get("embedding")
+            if not emb:
+                continue
+            try:
+                if _cosine(centroid, emb) >= self._config.type_match_threshold:
+                    return str(cand)
+            except ValueError:
+                continue
+        return None
 
 
 def build_type_rollup_handler(

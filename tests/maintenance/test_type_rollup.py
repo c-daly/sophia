@@ -607,3 +607,105 @@ def test_reused_super_is_reparented_to_intended_parent(monkeypatch):
         "mathematics",
         "geometry",
     ]
+
+
+def test_centroid_match_never_selects_a_cluster_member_as_its_own_super(monkeypatch):
+    """A cluster centroid is the mean of its members, so its nearest existing
+    type is frequently one of those members. Reusing a member as the cluster's
+    super-type persists a peer-as-parent IS_A edge (member-of-X IS_A
+    sibling-member-of-X) and a wrong ancestor cascade. The member-exclusion in
+    `_match_existing_type` must skip such hits and mint a fresh super instead
+    (greptile #161)."""
+    import sophia.maintenance.type_rollup_handler as tr
+
+    tds = [
+        _td("type_calculus_aa", "calculus", ["root", "node", "entity"]),
+        _td("type_algebra_bb", "algebra", ["root", "node", "entity"]),
+    ]
+    hcg = FakeHCG(tds)
+    milvus = FakeMilvus({"type_calculus_aa": [1.0, 0.0], "type_algebra_bb": [0.9, 0.1]})
+    # The cluster centroid [0.95, 0.05] is nearest to its OWN member
+    # type_calculus_aa (cosine ~0.999, well above the 0.9 match threshold).
+    # Without exclusion the handler would reuse that member as the super-type.
+    milvus.find_nearest_types = lambda q, top_k=1: [
+        {"uuid": "type_calculus_aa", "score": 0.0}
+    ]
+    leaf = HierarchyNode(
+        members=[
+            Member(
+                "type_calculus_aa",
+                "calculus",
+                [1.0, 0.0],
+                Counter(),
+                "type_definition",
+                None,
+                [],
+                "m",
+            ),
+            Member(
+                "type_algebra_bb",
+                "algebra",
+                [0.9, 0.1],
+                Counter(),
+                "type_definition",
+                None,
+                [],
+                "m",
+            ),
+        ],
+        centroid=[0.95, 0.05],
+        children=[
+            HierarchyNode(
+                members=[
+                    Member(
+                        "type_calculus_aa",
+                        "calculus",
+                        [1.0, 0.0],
+                        Counter(),
+                        "type_definition",
+                        None,
+                        [],
+                        "m",
+                    )
+                ],
+                centroid=[1.0, 0.0],
+            ),
+            HierarchyNode(
+                members=[
+                    Member(
+                        "type_algebra_bb",
+                        "algebra",
+                        [0.9, 0.1],
+                        Counter(),
+                        "type_definition",
+                        None,
+                        [],
+                        "m",
+                    )
+                ],
+                centroid=[0.9, 0.1],
+            ),
+        ],
+    )
+    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    mint_calls = []
+    _handler(hcg, milvus, mint_calls=mint_calls).run()
+
+    # A fresh super-type was minted (the member was NOT reused as the parent).
+    assert mint_calls == [("mathematics", "type_entity", False)]
+    super_uuid = "type_mathematics_super01"
+    # No peer-as-parent edge: a member must never become its sibling's parent.
+    assert not any(
+        e["source"] == "type_algebra_bb"
+        and e["target"] == "type_calculus_aa"
+        and e["relation"] == "IS_A"
+        for e in hcg.edges
+    )
+    # Both leaves sit under the freshly minted super-type instead.
+    for leaf_uuid in ("type_calculus_aa", "type_algebra_bb"):
+        assert any(
+            e["source"] == leaf_uuid
+            and e["target"] == super_uuid
+            and e["relation"] == "IS_A"
+            for e in hcg.edges
+        )
