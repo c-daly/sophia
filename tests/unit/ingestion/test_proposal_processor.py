@@ -50,6 +50,64 @@ class TestProposalProcessor:
         mock_milvus.upsert_embedding.assert_not_called()
         mock_milvus.batch_upsert_embeddings.assert_called()
 
+    def test_emergent_hex_type_stamps_authoritative_type_uuid(self):
+        """A node classified to a hex-suffixed emergent type is stamped with that
+        exact type_uuid (and the type-def is registered under it) -- not a ghost
+        uuid rebuilt from the clean name, which would orphan it from its type-def
+        and break the membership the rollup loads by (greptile #161)."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        HEX = "type_organism_a1b2c3"
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        # the classifier resolves the clean name via get_node (post-af0ab36)
+        mock_hcg.get_node.return_value = {"uuid": HEX, "name": "organism"}
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = [{"uuid": HEX, "score": 0.1}]
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "Rex",
+                        "type": "ANIMAL",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "emb-1",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "document_embedding": {
+                    "embedding": [0.5] * 384,
+                    "embedding_id": "doc-1",
+                    "dimension": 384,
+                    "model": "all-MiniLM-L6-v2",
+                },
+                "raw_text": "Rex",
+                "source_service": "hermes",
+                "confidence": 0.7,
+                "metadata": {},
+            }
+        )
+
+        calls = mock_hcg.add_node.call_args_list
+        entity_calls = [
+            c for c in calls if c.kwargs.get("node_type") != "type_definition"
+        ]
+        td_calls = [c for c in calls if c.kwargs.get("node_type") == "type_definition"]
+        assert entity_calls, "no entity node was created"
+        assert entity_calls[0].kwargs["properties"]["type_uuid"] == HEX, (
+            "node membership must point at the authoritative hex type_uuid, "
+            f"got {entity_calls[0].kwargs['properties'].get('type_uuid')!r}"
+        )
+        assert (
+            td_calls and td_calls[0].kwargs["uuid"] == HEX
+        ), "type-def must be registered under the authoritative hex uuid (no ghost)"
+
     def test_returns_relevant_context(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor
 
