@@ -18,8 +18,10 @@ class FeedbackConfig(BaseSettings):
         description="Redis configuration",
     )
     hermes_url: str = Field(
-        default="http://localhost:18000",
-        description="Hermes base URL",
+        default="http://localhost:17000",
+        description="Hermes base URL (Hermes listens on 17000; was 18000 — "
+        "wrong port silently broke maintenance naming via Connection refused). "
+        "Override with SOPHIA_FEEDBACK_HERMES_URL.",
     )
     worker_timeout: float = Field(
         default=10.0,
