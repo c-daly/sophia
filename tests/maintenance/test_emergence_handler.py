@@ -476,3 +476,92 @@ def test_handler_dim_mismatch_declines_match_and_mints_fresh(monkeypatch):
 
     # Dim mismatch -> match declined -> minted fresh (cluster NOT skipped).
     assert minted == ["object"]
+
+
+def test_handler_omits_hermes_flagged_outliers(monkeypatch):
+    """Members Hermes flags as outliers (#504) are left out of the minted type;
+    a cluster with no flags is minted whole."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    def fake_hierarchy(members, *, min_cluster_size, variance_threshold):
+        phys = [m for m in members if m.uuid.startswith("p")]
+        con = [m for m in members if m.uuid.startswith("c")]
+        return [
+            HierarchyNode(members=phys, centroid=[0.0, 0.0]),
+            HierarchyNode(members=con, centroid=[9.0, 9.0]),
+        ]
+
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", fake_hierarchy)
+
+    def fake_name(cluster, candidates, hermes_url, token):
+        if cluster.members[0].uuid.startswith("p"):
+            # p0 is an outlier that doesn't fit the object category.
+            return NameResult(
+                label="object", description="", confidence=0.9, removed=["p0"]
+            )
+        return NameResult(label="concept", description="", confidence=0.9)
+
+    minted_members: dict[str, list[str]] = {}
+
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
+        minted_members[name.label] = [m.uuid for m in cluster.members]
+        return f"type_{name.label}"
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=_NoMatchMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=fake_mint,
+        candidates_fn=lambda: ["object", "location", "concept"],
+    )
+    handler.run(type_uuid="type_entity")
+
+    # The flagged outlier p0 is excluded; the coherent majority still mints.
+    assert "p0" not in minted_members["object"]
+    assert set(minted_members["object"]) == {"p1", "p2", "p3"}
+    # The unflagged concept cluster is minted whole.
+    assert set(minted_members["concept"]) == {"c0", "c1", "c2", "c3"}
+
+
+def test_handler_skips_when_all_members_flagged(monkeypatch):
+    """If Hermes flags every member as an outlier, the cluster mints nothing."""
+    from sophia.maintenance import emergence_handler as eh
+    from sophia.maintenance.emergence_clustering import HierarchyNode
+
+    def fake_hierarchy(members, *, min_cluster_size, variance_threshold):
+        phys = [m for m in members if m.uuid.startswith("p")]
+        return [HierarchyNode(members=phys, centroid=[0.0, 0.0])]
+
+    monkeypatch.setattr(eh, "find_emergent_hierarchy", fake_hierarchy)
+
+    minted = []
+
+    def fake_name(cluster, candidates, hermes_url, token):
+        return NameResult(
+            label="object",
+            description="",
+            confidence=0.9,
+            removed=[m.uuid for m in cluster.members],
+        )
+
+    handler = EmergenceHandler(
+        config=MaintenanceConfig(),
+        hcg=object(),
+        milvus=_NoMatchMilvus(),
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        load_members=lambda u: _members(),
+        name_fn=fake_name,
+        mint_fn=lambda *a, **k: minted.append(1),
+        candidates_fn=lambda: [],
+    )
+    handler.run(type_uuid="type_entity")
+
+    assert minted == []

@@ -242,6 +242,30 @@ class EmergenceHandler:
                 logger.info("emergence: skip cluster (no/low-confidence name)")
                 return
 
+            # Hermes flags members that don't fit the named category (#504):
+            # outliers -- a part of another member, or a different kind -- that
+            # would force a looser name. Leave them in the base type rather than
+            # mint them in. Naming-time judgment handles self-similar part-types
+            # (a component within a component) that the structural PART_OF evictor
+            # cannot distinguish.
+            members = node.members
+            if name.removed:
+                removed_set = set(name.removed)
+                members = [m for m in node.members if m.uuid not in removed_set]
+                if not members:
+                    logger.info(
+                        "emergence: all %d members flagged as outliers; skipping",
+                        len(node.members),
+                    )
+                    return
+                if len(members) < len(node.members):
+                    logger.info(
+                        "emergence: omitting %d Hermes-flagged outlier(s) from %r",
+                        len(node.members) - len(members),
+                        name.label,
+                    )
+                    cluster = EmergentCluster(members=members)
+
             is_leaf = not node.children
             existing = self._match_existing_type(node.centroid, parent_type_uuid)
             if existing is not None:
@@ -256,10 +280,10 @@ class EmergenceHandler:
                 )
                 minted_name = existing_node.get("name") or _type_name(type_uuid)
                 if is_leaf:
-                    self._attach_members(node.members, type_uuid, existing_node)
+                    self._attach_members(members, type_uuid, existing_node)
                 logger.info(
                     "emergence: reconciled %d members into existing type %s",
-                    len(node.members),
+                    len(members),
                     type_uuid,
                 )
             else:

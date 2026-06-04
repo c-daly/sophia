@@ -58,6 +58,25 @@ def test_name_cluster_posts_and_parses(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer t"
     assert captured["json"]["candidates"] == ["object", "concept"]
     assert captured["json"]["members"][0]["hermes_type_hint"] == "concept"
+    # The member's uuid travels as `id` so Hermes can flag it back by id (#504).
+    assert captured["json"]["members"][0]["id"] == "u1"
+    # No outliers flagged -> empty removed list, not an error.
+    assert result.removed == []
+
+
+def test_name_cluster_parses_removed_outliers(monkeypatch):
+    """Member ids Hermes flags as outliers come back on NameResult.removed (#504)."""
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp({"label": "tree", "confidence": 0.9, "removed": ["u7", "u9"]})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+
+    result = hn.name_cluster(
+        _cluster(), candidates=[], hermes_url="http://h", token="t"
+    )
+    assert result is not None
+    assert result.removed == ["u7", "u9"]
 
 
 def test_name_cluster_returns_none_on_error(monkeypatch):
