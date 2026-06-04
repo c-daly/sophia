@@ -38,8 +38,10 @@ class EmergentCluster:
 
 @dataclass
 class NameResult:
-    """Hermes' answer to 'what binds these together?' -- just a label."""
+    """Hermes' answer to 'what binds these together?' -- a label plus the
+    member uuids that don't fit it (outliers to leave in the base type, #504)."""
 
     label: str
     description: str
     confidence: float
+    removed: list[str] = field(default_factory=list)

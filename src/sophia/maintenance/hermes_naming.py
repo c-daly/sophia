@@ -47,6 +47,7 @@ def name_cluster(
     payload = {
         "members": [
             {
+                "id": m.uuid,
                 "name": m.name,
                 "type": m.current_type,
                 "hermes_type_hint": m.hermes_type_hint,
@@ -66,10 +67,12 @@ def name_cluster(
         )
         resp.raise_for_status()
         data = resp.json()
+        removed = data.get("removed") or []
         return NameResult(
             label=data["label"],
             description=data.get("description", ""),
             confidence=float(data.get("confidence", 0.0)),
+            removed=[str(r) for r in removed if r],
         )
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         logger.warning("name_cluster failed: %s", exc)
