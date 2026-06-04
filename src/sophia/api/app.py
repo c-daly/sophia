@@ -589,9 +589,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     token=get_env_value("SOPHIA_API_TOKEN") or "",
                 )
 
+                from sophia.maintenance.type_correction_handler import (
+                    build_type_correction_handler,
+                )
+
+                # Deterministic structural correction (#504): evict a member that
+                # is a PART/PRODUCT of a same-type peer. Embedding-free, so it
+                # needs no Milvus/Hermes. Runs before type_rollup each cycle.
+                _correction_run = build_type_correction_handler(
+                    config=_maintenance_config,
+                    hcg=_hcg_client,
+                    event_bus=_event_bus,
+                )
+
                 _handlers = {
                     "type_emergence": _handle_type_emergence,
                     "relationship_discovery": _handle_relationship_discovery,
+                    "type_correction": _correction_run,
                     "type_rollup": _rollup_run,
                 }
 

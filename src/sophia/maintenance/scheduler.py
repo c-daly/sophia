@@ -286,6 +286,13 @@ class MaintenanceScheduler:
             if not self._running:
                 break
             try:
+                # Structural type correction runs first so it evicts mis-clustered
+                # part/product members before the rollup organises the type layer.
+                if "type_correction" in self._handlers:
+                    logger.info("Type-correction scan triggered")
+                    self._queue.enqueue(
+                        job_type="type_correction", priority="low", params={}
+                    )
                 if "type_rollup" in self._handlers:
                     logger.info("Type-rollup scan triggered")
                     self._queue.enqueue(
