@@ -180,12 +180,23 @@ def _axis_namer(labels_by_axis: dict[int, str], removed: list[str] | None = None
     no-op anchors rather than namer noise.
     """
 
+    unexpected_axes: list[int] = []
+
     def name_fn(cluster, candidates, hermes_url, token):
-        label = labels_by_axis[_dominant_axis(cluster.embeddings)]
+        axis = _dominant_axis(cluster.embeddings)
+        label = labels_by_axis.get(axis)
+        if label is None:
+            # A KeyError here would be swallowed by production's exception
+            # handling and surface only as a mysteriously missing type-def.
+            # Record the surprise and surface it through the post-run assert
+            # (name_fn.unexpected_axes) OUTSIDE the swallower (PR #174).
+            unexpected_axes.append(axis)
+            return NameResult(label="", description="", confidence=0.0, removed=[])
         in_cluster = {m.uuid for m in cluster.members}
         rm = [u for u in (removed or []) if u in in_cluster]
         return NameResult(label=label, description="", confidence=0.9, removed=rm)
 
+    name_fn.unexpected_axes = unexpected_axes
     return name_fn
 
 
@@ -426,19 +437,16 @@ def test_run_twice_zero_churn(hcg, entity_root, ns):
             )
             flat_types.append(uuid)
 
-    emergence = _emergence_handler(
-        hcg, milvus, _axis_namer({4: f"{em_ns} widget", 5: f"{em_ns} gadget"})
-    )
-    rollup = _rollup_handler(
-        hcg,
-        milvus,
-        _axis_namer({0: f"{ro_ns} machines", 1: f"{ro_ns} creatures"}),
-        namespace=ro_ns,
-    )
+    em_namer = _axis_namer({4: f"{em_ns} widget", 5: f"{em_ns} gadget"})
+    ro_namer = _axis_namer({0: f"{ro_ns} machines", 1: f"{ro_ns} creatures"})
+    emergence = _emergence_handler(hcg, milvus, em_namer)
+    rollup = _rollup_handler(hcg, milvus, ro_namer, namespace=ro_ns)
 
     def typing_pass() -> None:
         emergence.run(seed_uuid)
         rollup.run()
+        assert not em_namer.unexpected_axes, em_namer.unexpected_axes
+        assert not ro_namer.unexpected_axes, ro_namer.unexpected_axes
 
     typing_pass()
     types_first = _ns_type_defs(hcg, ns)
@@ -560,14 +568,16 @@ def test_same_norm_dedup_single_mint(hcg, ns):
             hcg, milvus, ns, f"g{i}", seed_uuid, _vec(5, jitter=0.01 * (i - 1))
         )
 
-    handler = _emergence_handler(
-        hcg, milvus, _axis_namer({4: f"{ns} widget", 5: f"{ns} gadget"})
-    )
+    namer = _axis_namer({4: f"{ns} widget", 5: f"{ns} gadget"})
+    handler = _emergence_handler(hcg, milvus, namer)
     handler.run(seed_uuid)
 
     widgets = _types_named(hcg, f"{ns} widget")
     assert len(widgets) == 1, "first pass mints the widget type exactly once"
     widget_uuid = widgets[0]
+    gadgets = _types_named(hcg, f"{ns} gadget")
+    assert len(gadgets) == 1, "first pass mints the gadget type exactly once"
+    gadget_uuid = gadgets[0]
     types_after_first = _ns_type_defs(hcg, ns)
 
     # Second, DISTINCT cluster: fresh members, same canonical name, same
@@ -578,11 +588,14 @@ def test_same_norm_dedup_single_mint(hcg, ns):
         )
         for i in range(3)
     ]
-    for i in range(3):
+    fresh_g = [
         _seed_member(
             hcg, milvus, ns, f"g2{i}", seed_uuid, _vec(5, jitter=0.008 * (i - 1))
         )
+        for i in range(3)
+    ]
     handler.run(seed_uuid)
+    assert not namer.unexpected_axes, namer.unexpected_axes
 
     assert _types_named(hcg, f"{ns} widget") == [widget_uuid], (
         "same-canonical-name cluster must reuse the published type-def, "
@@ -595,6 +608,13 @@ def test_same_norm_dedup_single_mint(hcg, ns):
     assert (
         set(fresh) <= member_uuids
     ), "reused type must absorb the second cluster via the retype write"
+    gadget_members = {
+        n["uuid"] for n in (hcg.get_nodes_by_type_uuid(gadget_uuid) or [])
+    }
+    assert set(fresh_g) <= gadget_members, (
+        "gadget-side absorption must hold too: the second gadget cluster "
+        "reuses and is retyped onto the published gadget type (PR #174)"
+    )
 
 
 @pytest.mark.xfail(
@@ -635,12 +655,10 @@ def test_evicted_member_not_reclustered(hcg, ns):
         )
     evicted = widget_members[-1]
 
-    handler = _emergence_handler(
-        hcg,
-        milvus,
-        _axis_namer({4: f"{ns} widget", 5: f"{ns} gadget"}, removed=[evicted]),
-    )
+    ev_namer = _axis_namer({4: f"{ns} widget", 5: f"{ns} gadget"}, removed=[evicted])
+    handler = _emergence_handler(hcg, milvus, ev_namer)
     handler.run(seed_uuid)
+    assert not ev_namer.unexpected_axes, ev_namer.unexpected_axes
 
     # Sanity (holds today): the cluster minted without the evictee.
     widgets = _types_named(hcg, f"{ns} widget")
