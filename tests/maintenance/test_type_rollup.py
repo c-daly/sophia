@@ -7,14 +7,17 @@ from collections import Counter
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import HierarchyNode
 from sophia.maintenance.emergence_types import Member, NameResult
-from sophia.maintenance.type_rollup_handler import TypeRollupHandler
+from sophia.maintenance.type_rollup_handler import (
+    TypeRollupHandler,
+    _is_rollup_candidate,
+)
 
 
 class FakeHCG:
     """In-memory type-def graph: nodes + reified IS_A edges, recording writes."""
 
     def __init__(self, type_defs, members=None, is_a=None, other_edges=None):
-        # type_defs: list of {uuid,name,properties{ancestors,is_type_definition}}
+        # type_defs: list of {uuid,name,properties{type,ancestors}}
         self.nodes = {td["uuid"]: td for td in type_defs}
         for m in members or []:  # entity members carry a type_uuid
             self.nodes[m["uuid"]] = m
@@ -24,10 +27,12 @@ class FakeHCG:
         self.writes = []  # (op, *args)
 
     def get_all_type_definitions(self):
+        # Mirrors the real client: structural match on the node type
+        # (MATCH (t:Node {type: "type_definition"})), never a flag (#171).
         return [
             n
             for n in self.nodes.values()
-            if (n.get("properties") or {}).get("is_type_definition")
+            if (n.get("properties") or {}).get("type") == "type_definition"
         ]
 
     def get_node(self, uuid):
@@ -105,7 +110,7 @@ def _td(uuid, name, ancestors):
     return {
         "uuid": uuid,
         "name": name,
-        "properties": {"is_type_definition": True, "ancestors": ancestors},
+        "properties": {"type": "type_definition", "ancestors": ancestors},
     }
 
 
@@ -134,7 +139,7 @@ def _handler(hcg, milvus, mint_calls=None, name_label="mathematics"):
             "uuid": uuid,
             "name": name.label,
             "properties": {
-                "is_type_definition": True,
+                "type": "type_definition",
                 "ancestors": list(parent_ancestors) + [parent_name],
             },
         }
@@ -154,6 +159,140 @@ def _handler(hcg, milvus, mint_calls=None, name_label="mathematics"):
         name_fn=name_fn,
         mint_fn=mint_fn,
     )
+
+
+# ------------------------------------------------- structural detection (#171)
+# The foundry is structure-not-flags: add_node/the seeder never write an
+# `is_type_definition` flag, so the predicate keys on the node `type` (set to
+# "type_definition" by BOTH the seeder and type_minting) + the `type_` uuid
+# prefix it already required.
+
+
+def test_candidate_seeded_root_shape_detected():
+    """A seeded domain root -- node type only, NO flag, NO ancestors -- is a
+    type-def structurally (the #171 bug: it vanished under the flag filter)."""
+    td = {
+        "uuid": "type_object",
+        "name": "object",
+        "properties": {"type": "type_definition"},
+    }
+    assert _is_rollup_candidate(td)
+
+
+def test_candidate_minted_type_shape_detected():
+    """A minted type-def (node type + ancestors + name_history, no flag)."""
+    td = {
+        "uuid": "type_dog_ab12cd34",
+        "name": "dog",
+        "properties": {
+            "type": "type_definition",
+            "ancestors": ["root", "node", "entity"],
+            "name_history": [{"name": "dog", "reason": "emergence"}],
+        },
+    }
+    assert _is_rollup_candidate(td)
+
+
+def test_candidate_requires_nested_properties_type():
+    """The ONE canonical record shape is the full node map nested under
+    `properties` (what get_all_type_definitions returns). A top-level `type`
+    is never consulted -- neither to admit a flattened record nor to shadow
+    the nested value (PR #173 review)."""
+    flattened = {
+        "uuid": "type_location",
+        "name": "location",
+        "type": "type_definition",
+        "properties": {},
+    }
+    assert not _is_rollup_candidate(flattened)
+    shadowed = {
+        "uuid": "type_location",
+        "name": "location",
+        "type": "Node",
+        "properties": {"type": "type_definition"},
+    }
+    assert _is_rollup_candidate(shadowed)
+
+
+def test_candidate_rejects_non_type_definition_nodes():
+    """Instance/entity nodes are not type-defs, whatever their uuid shape."""
+    # type_ uuid prefix but a non-type node type: structure says no.
+    odd = {"uuid": "type_oddball", "name": "oddball", "properties": {"type": "entity"}}
+    assert not _is_rollup_candidate(odd)
+    # plain instance: uuid4, domain type.
+    inst = {
+        "uuid": "9be07f63-2f6a-4f8e-9c1d-0a1b2c3d4e5f",
+        "name": "rex",
+        "properties": {"type": "dog"},
+    }
+    assert not _is_rollup_candidate(inst)
+
+
+def test_candidate_rejects_legacy_flag_without_structure():
+    """The legacy flag alone no longer qualifies a record (structure, not
+    flags; dev DBs are wiped/reseeded, so no migration path is needed)."""
+    td = {
+        "uuid": "type_legacy",
+        "name": "legacy",
+        "properties": {"is_type_definition": True},
+    }
+    assert not _is_rollup_candidate(td)
+
+
+def test_candidate_protected_and_reserved_exclusions_hold():
+    """Seeded structural roots and reserved_ types stay excluded."""
+    for name in ("root", "node", "entity", "concept", "cognition", "process"):
+        td = {
+            "uuid": f"type_{name}",
+            "name": name,
+            "properties": {"type": "type_definition"},
+        }
+        assert not _is_rollup_candidate(td), name
+    reserved = {
+        "uuid": "type_reserved_agent",
+        "name": "reserved_agent",
+        "properties": {"type": "type_definition"},
+    }
+    assert not _is_rollup_candidate(reserved)
+
+
+def test_candidate_edge_type_defs_stay_excluded():
+    """Edge-type defs (edge_type in ancestors) AND the seeded edge-type root
+    itself (name=edge_type, no ancestors) are not entity types."""
+    minted = {
+        "uuid": "type_edge_blocks",
+        "name": "BLOCKS",
+        "properties": {
+            "type": "type_definition",
+            "ancestors": ["root", "node", "edge_type"],
+        },
+    }
+    assert not _is_rollup_candidate(minted)
+    root = {
+        "uuid": "type_edge_type",
+        "name": "edge_type",
+        "properties": {"type": "type_definition"},
+    }
+    assert not _is_rollup_candidate(root)
+
+
+def test_seeded_root_flows_through_load_type_layer():
+    """End-to-end through the fake client: a seeded-shaped root (no flag, no
+    ancestors) is part of the loaded type layer alongside minted types."""
+    seeded = {
+        "uuid": "type_object",
+        "name": "object",
+        "properties": {"type": "type_definition"},
+    }
+    minted = _td("type_dog_aa", "dog", ["root", "node", "entity"])
+    hcg = FakeHCG([seeded, minted])
+    milvus = FakeMilvus({"type_object": [1.0, 0.0], "type_dog_aa": [0.0, 1.0]})
+    handler = _handler(hcg, milvus)
+    rows = handler._load_type_layer()
+    assert {r["uuid"] for r in rows} == {"type_object", "type_dog_aa"}
+    # the seeded root defaults to the canonical [root, node] chain
+    seeded_row = next(r for r in rows if r["uuid"] == "type_object")
+    assert seeded_row["ancestors"] == ["root", "node"]
 
 
 def test_tier1_lifts_explicit_subsumption(monkeypatch):
@@ -578,7 +717,7 @@ def test_reused_super_is_reparented_to_intended_parent(monkeypatch):
             "uuid": uuid,
             "name": name.label,
             "properties": {
-                "is_type_definition": True,
+                "type": "type_definition",
                 "ancestors": list(parent_ancestors) + [parent_name],
             },
         }
@@ -825,7 +964,7 @@ def test_top_level_super_grafts_under_realm_root(monkeypatch):
             "uuid": uuid,
             "name": name.label,
             "properties": {
-                "is_type_definition": True,
+                "type": "type_definition",
                 "ancestors": list(parent_ancestors) + [parent_name],
             },
         }
@@ -1139,7 +1278,7 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
             "uuid": uuid,
             "name": name.label,
             "properties": {
-                "is_type_definition": True,
+                "type": "type_definition",
                 "ancestors": list(parent_ancestors) + [parent_name],
             },
         }

@@ -104,7 +104,8 @@ def mint_type(
         node_type="type_definition",
         uuid=type_uuid,
         properties={
-            "is_type_definition": True,
+            # No `is_type_definition` flag (#171): the type layer is detected
+            # structurally via node_type="type_definition" + the type_ uuid.
             "ancestors": _anc + [_pname],
             "name_history": name_history,
         },
