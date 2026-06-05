@@ -45,6 +45,13 @@ _DEFAULT_MODEL = "all-MiniLM-L6-v2"
 # roots. `cognition` is intentionally excluded: it is populated by metacognitive
 # schema induction, not by domain type rollup.
 _REALM_ROOTS = ("concept", "process")
+# Seeded roots a super-type MAY be grafted under as the *fallback* when no closer
+# domain type covers the cluster (siblings of `entity` under `node`). `cognition`
+# is excluded -- it is populated by metacognitive schema induction, not domain
+# rollup -- and the pure structural roots `root`/`node` are never domain parents.
+# A super normally roots under the closest covering domain type Hermes names; a
+# realm root is only the top-of-chain fallback.
+_GRAFTABLE_REALMS = frozenset({"entity", "concept", "process"})
 # Seeded structural roots that must NEVER be minted as a super, matched/reused as
 # a super, or reparented -- they are the fixed top of the ontology. Guards the
 # rollup against corrupting them (review blocker + duplicate-root path).
@@ -354,30 +361,36 @@ class TypeRollupHandler:
                         candidates,
                     )
                 return
-            # Root a TOP-LEVEL super-type under the realm Hermes named (concept /
-            # process) instead of flat under `entity` -- this is how the entity
-            # shelf reaches the other roots. Top level only; deeper super-types
-            # keep nesting under their tree parent. Guard the rebind: never graft
-            # under one of the cluster's own members or under the coined label
-            # itself (mint_fn has no cycle guard). Degrades to the default parent
-            # when the suggestion does not resolve.
+            # Root a TOP-LEVEL super-type under the CLOSEST covering type Hermes
+            # named -- a realm root (concept / process) OR a deeper existing
+            # domain type -- instead of flat under `entity`. "Create the group as
+            # close as you can to the cluster name": realm roots are the fallback,
+            # not the only option. Top level only; deeper super-types keep nesting
+            # under their tree parent. Guard the rebind (mint_fn has no cycle
+            # guard): never graft under one of the cluster's own members, the
+            # coined label itself, or a type that IS_A-descends from a member (its
+            # ancestor chain contains a member name). Degrades to the default
+            # `entity` parent when nothing valid resolves.
             if (
                 parent_type_uuid == f"type_{_BASE_TYPE}"
                 and name.parent
                 and name.parent.strip().lower() != name.label.strip().lower()
             ):
                 rooted = self._resolve_parent(name.parent)
-                if (
-                    rooted is not None
-                    and rooted[0] not in member_uuids
-                    and rooted[0] != self._uuid_by_name.get(clean_label)
-                ):
-                    parent_type_uuid, parent_ancestors, parent_name = rooted
-                    logger.info(
-                        "type_rollup: rooting super-type %r under realm %r",
-                        name.label,
-                        parent_name,
-                    )
+                if rooted is not None:
+                    member_names = {m.name.strip().lower() for m in node.members}
+                    parent_ancestry = {a.strip().lower() for a in rooted[1]}
+                    if (
+                        rooted[0] not in member_uuids
+                        and rooted[0] != self._uuid_by_name.get(clean_label)
+                        and not (member_names & parent_ancestry)
+                    ):
+                        parent_type_uuid, parent_ancestors, parent_name = rooted
+                        logger.info(
+                            "type_rollup: rooting super-type %r under %r",
+                            name.label,
+                            parent_name,
+                        )
             super_uuid = self._match_existing_type(
                 node.centroid, parent_type_uuid, exclude=member_uuids
             )
@@ -630,28 +643,38 @@ class TypeRollupHandler:
         return None, None
 
     def _resolve_parent(self, parent_name: str) -> tuple[str, list[str], str] | None:
-        """Resolve a Hermes-suggested realm parent *name* (concept / process) to
-        ``(type_uuid, ancestors, clean_name)`` for rooting a top-level
-        super-type. Resolves to the realm root's canonical ``type_<name>`` uuid.
-        Returns None when nothing resolves, so an invalid suggestion degrades to
-        the default `entity` parent rather than a dangling root."""
+        """Resolve a Hermes-named graft parent to ``(type_uuid, ancestors, name)``.
+        The parent is the CLOSEST covering type Hermes named -- a realm root OR a
+        deeper existing domain type-def -- so a super-type roots as near the
+        cluster as possible ("create the group as close as you can to the cluster
+        name") instead of flat under `entity`. Realm roots are the top-of-chain
+        fallback, not the only allowed parents.
+
+        Returns None for an unresolvable name or a forbidden target, so the caller
+        degrades to the default `entity` parent. Forbidden: `cognition` (reserved
+        for metacognitive schema induction) and the pure structural roots
+        `root`/`node`. The caller adds the cycle guards (member / self / IS_A
+        descendant)."""
         target = (parent_name or "").strip().lower()
         if not target:
             return None
-        # Closed-world: only the realm roots (concept / process) are valid graft
-        # parents for a top-level super. Reject anything else -- `cognition` is
-        # reserved for metacognitive schema induction, and an arbitrary domain
-        # type must never become a graft target (review: wrong-realm / cycle).
-        if target not in _REALM_ROOTS:
-            return None
-        # Resolve to the realm root's CANONICAL uuid directly, never via
-        # _uuid_by_name. That map is keyed by lowercased name, so a case-variant
-        # domain type-def (display name "Concept") could own the "concept" key
-        # and be returned here as a foreign graft parent. The seeded root is
-        # always `type_<name>` and is filtered out of the rollup candidates, so
-        # consulting the map could only ever mis-resolve to a shadow (adversarial
-        # review of gemini@648: validate the resolved uuid, not just the name).
-        uuid = f"type_{target}"
+        if target in _PROTECTED_ROOT_NAMES:
+            # A seeded root: only the graftable realms (entity / concept /
+            # process) are valid; `cognition` and the structural roots are not.
+            # Resolve to the CANONICAL `type_<name>` uuid so a case-variant domain
+            # type-def cannot shadow the realm key (the run map is lowercased).
+            if target not in _GRAFTABLE_REALMS:
+                return None
+            uuid = f"type_{target}"
+        else:
+            # A deeper domain type Hermes named as the closest cover. Resolve it
+            # via the run's name->uuid map, which holds only entity-side rollup
+            # candidates (reserved/edge/protected types are excluded), so a hit
+            # is by construction a valid domain graft target.
+            resolved = self._uuid_by_name.get(target)
+            if not resolved:
+                return None
+            uuid = resolved
         try:
             node = self._hcg.get_node(uuid)
         except Exception:
