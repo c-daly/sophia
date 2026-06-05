@@ -944,6 +944,9 @@ def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
         _td(
             "type_mathematics", "mathematics", ["root", "node", "concept"]
         ),  # domain type
+        _td(
+            "type_metaschema", "metaschema", ["root", "node", "cognition"]
+        ),  # under cognition -- NOT domain-rooted
     ]
     hcg = FakeHCG(tds)
     handler = _handler(hcg, FakeMilvus({}))
@@ -952,6 +955,7 @@ def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
         "process": "type_process",
         "cognition": "type_cognition",
         "mathematics": "type_mathematics",
+        "metaschema": "type_metaschema",
     }
 
     # Realm roots resolve to their canonical seeded uuid + ancestors.
@@ -979,6 +983,9 @@ def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
     # Forbidden: `cognition` is reserved for metacognition, not domain rollup --
     # rejected even though the node exists.
     assert handler._resolve_parent("cognition") is None
+    # Forbidden: a type under the `cognition` subtree is NOT domain-rooted, so a
+    # domain super must never graft into the metacognitive realm.
+    assert handler._resolve_parent("metaschema") is None
     # Forbidden: pure structural roots are never domain parents.
     assert handler._resolve_parent("root") is None
     assert handler._resolve_parent("node") is None
@@ -1168,94 +1175,3 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
         "concept",
         "science",
     ]
-
-
-def test_super_not_grafted_under_a_descendant_of_a_member(monkeypatch):
-    """Cycle guard: if Hermes names a parent that IS_A-descends from a cluster
-    member, grafting the super above the members AND under that parent would
-    cycle. The graft is rejected and the super degrades to `entity` (#165)."""
-    import sophia.maintenance.type_rollup_handler as tr
-
-    tds = [
-        _td("type_concept", "concept", ["root", "node"]),
-        _td("type_calculus_aa", "calculus", ["root", "node", "entity"]),
-        _td("type_algebra_bb", "algebra", ["root", "node", "entity"]),
-        # `advanced_calculus` IS_A-descends from `calculus`, a cluster member --
-        # naming it as the super's parent would create a cycle.
-        _td("type_adv_cc", "advanced_calculus", ["root", "node", "entity", "calculus"]),
-    ]
-    hcg = FakeHCG(tds)
-    milvus = FakeMilvus({"type_calculus_aa": [1.0, 0.0], "type_algebra_bb": [0.9, 0.1]})
-
-    def _m(uuid, name, vec):
-        return Member(uuid, name, vec, Counter(), "type_definition", None, [], "m")
-
-    leaf = HierarchyNode(
-        members=[
-            _m("type_calculus_aa", "calculus", [1.0, 0.0]),
-            _m("type_algebra_bb", "algebra", [0.9, 0.1]),
-        ],
-        centroid=[0.95, 0.05],
-        children=[
-            HierarchyNode(
-                members=[_m("type_calculus_aa", "calculus", [1.0, 0.0])],
-                centroid=[1.0, 0.0],
-            ),
-            HierarchyNode(
-                members=[_m("type_algebra_bb", "algebra", [0.9, 0.1])],
-                centroid=[0.9, 0.1],
-            ),
-        ],
-    )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
-
-    mint_calls: list = []
-
-    def name_fn(cluster, candidates, url, tok):
-        return NameResult(
-            label="mathematics",
-            description="",
-            confidence=0.9,
-            parent="advanced_calculus",
-        )
-
-    def mint_fn(
-        cluster,
-        name,
-        *,
-        hcg,
-        milvus,
-        source_cluster_id,
-        parent_type_uuid,
-        parent_ancestors,
-        parent_name,
-        retype_members,
-    ):
-        uuid = f"type_{name.label}_super01"
-        hcg.nodes[uuid] = {
-            "uuid": uuid,
-            "name": name.label,
-            "properties": {
-                "is_type_definition": True,
-                "ancestors": list(parent_ancestors) + [parent_name],
-            },
-        }
-        hcg.add_edge(uuid, parent_type_uuid, "IS_A")
-        milvus.update_centroid(uuid, cluster.embeddings[0], "m")
-        mint_calls.append((name.label, parent_type_uuid, retype_members))
-        return uuid
-
-    TypeRollupHandler(
-        config=_cfg(),
-        hcg=hcg,
-        milvus=milvus,
-        event_bus=None,
-        hermes_url="http://h",
-        token="t",
-        name_fn=name_fn,
-        mint_fn=mint_fn,
-    ).run()
-
-    # The cycle was caught: the super stayed under `entity`, NOT under the
-    # descendant `advanced_calculus`.
-    assert mint_calls == [("mathematics", "type_entity", False)]

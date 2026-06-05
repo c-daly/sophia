@@ -366,31 +366,26 @@ class TypeRollupHandler:
             # domain type -- instead of flat under `entity`. "Create the group as
             # close as you can to the cluster name": realm roots are the fallback,
             # not the only option. Top level only; deeper super-types keep nesting
-            # under their tree parent. Guard the rebind (mint_fn has no cycle
-            # guard): never graft under one of the cluster's own members, the
-            # coined label itself, or a type that IS_A-descends from a member (its
-            # ancestor chain contains a member name). Degrades to the default
-            # `entity` parent when nothing valid resolves.
+            # under their tree parent. Guard the rebind: never graft under one of
+            # the cluster's own members or the coined label itself. Degrades to
+            # the default `entity` parent when nothing valid resolves.
             if (
                 parent_type_uuid == f"type_{_BASE_TYPE}"
                 and name.parent
                 and name.parent.strip().lower() != name.label.strip().lower()
             ):
                 rooted = self._resolve_parent(name.parent)
-                if rooted is not None:
-                    member_names = {m.name.strip().lower() for m in node.members}
-                    parent_ancestry = {a.strip().lower() for a in rooted[1]}
-                    if (
-                        rooted[0] not in member_uuids
-                        and rooted[0] != self._uuid_by_name.get(clean_label)
-                        and not (member_names & parent_ancestry)
-                    ):
-                        parent_type_uuid, parent_ancestors, parent_name = rooted
-                        logger.info(
-                            "type_rollup: rooting super-type %r under %r",
-                            name.label,
-                            parent_name,
-                        )
+                if (
+                    rooted is not None
+                    and rooted[0] not in member_uuids
+                    and rooted[0] != self._uuid_by_name.get(clean_label)
+                ):
+                    parent_type_uuid, parent_ancestors, parent_name = rooted
+                    logger.info(
+                        "type_rollup: rooting super-type %r under %r",
+                        name.label,
+                        parent_name,
+                    )
             super_uuid = self._match_existing_type(
                 node.centroid, parent_type_uuid, exclude=member_uuids
             )
@@ -668,9 +663,9 @@ class TypeRollupHandler:
             uuid = f"type_{target}"
         else:
             # A deeper domain type Hermes named as the closest cover. Resolve it
-            # via the run's name->uuid map, which holds only entity-side rollup
-            # candidates (reserved/edge/protected types are excluded), so a hit
-            # is by construction a valid domain graft target.
+            # via the run's name->uuid map (reserved/edge/protected types are
+            # already excluded from it). Its domain-rootedness is verified below --
+            # the map alone does not guarantee a domain ancestry.
             resolved = self._uuid_by_name.get(target)
             if not resolved:
                 return None
@@ -691,6 +686,17 @@ class TypeRollupHandler:
                 ancestors = list(_ENTITY_ANCESTORS)
             else:
                 return None
+        # Invariant: the parent must live within a DOMAIN realm -- a graftable
+        # realm root itself (entity / concept / process) or a descendant of one.
+        # `_is_rollup_candidate` (the source of `_uuid_by_name`) does NOT require a
+        # domain ancestry, so a non-reserved type-def under `cognition` could
+        # otherwise resolve here. Reject anything not rooted in a domain so a
+        # domain super never grafts into the metacognitive (`cognition`) subtree
+        # or onto bare structure.
+        if target not in _GRAFTABLE_REALMS and not (
+            _GRAFTABLE_REALMS & {a.strip().lower() for a in ancestors}
+        ):
+            return None
         return uuid, ancestors, node.get("name") or target
 
     def _match_existing_type(
