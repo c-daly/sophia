@@ -632,8 +632,7 @@ class TypeRollupHandler:
     def _resolve_parent(self, parent_name: str) -> tuple[str, list[str], str] | None:
         """Resolve a Hermes-suggested realm parent *name* (concept / process) to
         ``(type_uuid, ancestors, clean_name)`` for rooting a top-level
-        super-type. Minted types live in the per-run name->uuid map; the seeded
-        realm roots do not, so fall back to their canonical ``type_<name>`` uuid.
+        super-type. Resolves to the realm root's canonical ``type_<name>`` uuid.
         Returns None when nothing resolves, so an invalid suggestion degrades to
         the default `entity` parent rather than a dangling root."""
         target = (parent_name or "").strip().lower()
@@ -645,7 +644,14 @@ class TypeRollupHandler:
         # type must never become a graft target (review: wrong-realm / cycle).
         if target not in _REALM_ROOTS:
             return None
-        uuid = self._uuid_by_name.get(target) or f"type_{target}"
+        # Resolve to the realm root's CANONICAL uuid directly, never via
+        # _uuid_by_name. That map is keyed by lowercased name, so a case-variant
+        # domain type-def (display name "Concept") could own the "concept" key
+        # and be returned here as a foreign graft parent. The seeded root is
+        # always `type_<name>` and is filtered out of the rollup candidates, so
+        # consulting the map could only ever mis-resolve to a shadow (adversarial
+        # review of gemini@648: validate the resolved uuid, not just the name).
+        uuid = f"type_{target}"
         try:
             node = self._hcg.get_node(uuid)
         except Exception:

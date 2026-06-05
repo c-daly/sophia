@@ -1026,3 +1026,27 @@ def test_name_reconcile_is_case_insensitive(monkeypatch):
             and e["relation"] == "IS_A"
             for e in hcg.edges
         )
+
+
+def test_resolve_parent_ignores_shadowing_domain_type():
+    """A realm root must resolve to its canonical seeded uuid even when a
+    case-variant domain type-def ("Concept") shadows the lowercased realm key in
+    the name->uuid map. `_resolve_parent` must return the seeded `type_concept`
+    root, never the foreign domain uuid -- otherwise a top-level super-type would
+    be grafted under an arbitrary domain type (adversarial review of #165
+    gemini@648: validate the resolved uuid, not just the suggested name)."""
+    tds = [
+        _td("type_concept", "concept", ["root", "node"]),  # canonical seeded root
+        _td("type_process", "process", ["root", "node"]),  # canonical seeded root
+        # A capitalized domain type-def that the case-sensitive candidate filter
+        # admits; run() then keys it under the lowercased "concept" slot.
+        _td("type_concept_shadow01", "Concept", ["root", "node", "entity"]),
+    ]
+    hcg = FakeHCG(tds)
+    handler = _handler(hcg, FakeMilvus({}))
+    handler._uuid_by_name = {
+        "concept": "type_concept_shadow01",  # shadow owns the realm key
+        "process": "type_process",
+    }
+    assert handler._resolve_parent("concept")[0] == "type_concept"
+    assert handler._resolve_parent("process")[0] == "type_process"
