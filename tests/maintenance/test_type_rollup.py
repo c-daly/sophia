@@ -971,3 +971,58 @@ def test_resolve_parent_only_accepts_realm_roots():
     # Empty / missing suggestions degrade to the default parent.
     assert handler._resolve_parent("") is None
     assert handler._resolve_parent(None) is None
+
+
+def test_name_reconcile_is_case_insensitive(monkeypatch):
+    """`_uuid_by_name` is keyed case-insensitively: a stored type-def named with
+    different casing ("Mathematics") must still be reused when Hermes coins the
+    lowercase label ("mathematics"), instead of minting a case-variant duplicate
+    (review #165 gemini@365: case-insensitive lookup on the name->uuid map)."""
+    import sophia.maintenance.type_rollup_handler as tr
+
+    tds = [
+        _td("type_mathematics_existing", "Mathematics", ["root", "node", "entity"]),
+        _td("type_calculus_aa", "calculus", ["root", "node", "entity"]),
+        _td("type_algebra_bb", "algebra", ["root", "node", "entity"]),
+    ]
+    hcg = FakeHCG(tds)
+    milvus = FakeMilvus(
+        {
+            "type_mathematics_existing": [0.5, 0.5],
+            "type_calculus_aa": [1.0, 0.0],
+            "type_algebra_bb": [0.9, 0.1],
+        }
+    )
+
+    def _m(uuid, name, vec):
+        return Member(uuid, name, vec, Counter(), "type_definition", None, [], "m")
+
+    leaf = HierarchyNode(
+        members=[
+            _m("type_calculus_aa", "calculus", [1.0, 0.0]),
+            _m("type_algebra_bb", "algebra", [0.9, 0.1]),
+        ],
+        centroid=[0.95, 0.05],
+        children=[
+            HierarchyNode(
+                members=[_m("type_calculus_aa", "calculus", [1.0, 0.0])],
+                centroid=[1.0, 0.0],
+            ),
+            HierarchyNode(
+                members=[_m("type_algebra_bb", "algebra", [0.9, 0.1])],
+                centroid=[0.9, 0.1],
+            ),
+        ],
+    )
+    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    mint_calls: list = []
+    # Hermes coins lowercase 'mathematics'; the stored 'Mathematics' is reused.
+    _handler(hcg, milvus, mint_calls=mint_calls, name_label="mathematics").run()
+    assert mint_calls == []  # no case-variant duplicate minted
+    for leaf_uuid in ("type_calculus_aa", "type_algebra_bb"):
+        assert any(
+            e["source"] == leaf_uuid
+            and e["target"] == "type_mathematics_existing"
+            and e["relation"] == "IS_A"
+            for e in hcg.edges
+        )

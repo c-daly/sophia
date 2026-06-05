@@ -117,7 +117,11 @@ class TypeRollupHandler:
         self._build_is_a_adjacency()
         self._name_of = {r["uuid"]: r["name"] for r in rows}
         # name -> uuid, for name-based reconcile (no duplicate-named type-defs).
-        self._uuid_by_name = {r["name"]: r["uuid"] for r in rows}
+        # Keyed case-insensitively (lowercased): Hermes labels are normalized to
+        # lower case, so a stored type-def with legacy/mixed casing must still
+        # match a coined label and never bypass the reuse / protected-root guards
+        # (review #165: case-insensitive lookup on the name->uuid map).
+        self._uuid_by_name = {r["name"].strip().lower(): r["uuid"] for r in rows}
 
         # Include the realm roots so Hermes can name one as a super-type's
         # parent: the rollup is the single authority that roots types under
@@ -391,7 +395,7 @@ class TypeRollupHandler:
                 # Hermes named identically; an exact name is a strong reconcile
                 # signal. Skip if it is the parent or a member of this very
                 # cluster (reusing those would just re-introduce a cycle).
-                by_name = self._uuid_by_name.get(name.label)
+                by_name = self._uuid_by_name.get(clean_label)
                 if (
                     by_name
                     and by_name != parent_type_uuid
@@ -421,7 +425,8 @@ class TypeRollupHandler:
                     candidates.append(name.label)
                 super_name = name.label
                 self._name_of[super_uuid] = super_name
-                self._uuid_by_name[super_name] = super_uuid
+                # Preserve the case-insensitive invariant of the name->uuid map.
+                self._uuid_by_name[super_name.strip().lower()] = super_uuid
                 if self._event_bus is not None:
                     try:
                         self._event_bus.publish(
