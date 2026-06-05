@@ -69,7 +69,7 @@ _BIG = 100_000
 
 
 def _is_rollup_candidate(td: dict) -> bool:
-    """A minted, non-reserved entity-side type-def eligible for rollup."""
+    """A non-reserved entity-side type-def (seeded or minted) eligible for rollup."""
     name = (td.get("name") or "").strip()
     uuid = td.get("uuid") or ""
     if not name or not uuid.startswith("type_"):
@@ -78,11 +78,19 @@ def _is_rollup_candidate(td: dict) -> bool:
         return False
     props = td.get("properties") or {}
     anc = props.get("ancestors")
-    if (
-        isinstance(anc, list) and "edge_type" in anc
-    ):  # edge-type-defs are not entity types
+    # Edge-type-defs are not entity types: minted ones carry `edge_type` in
+    # their ancestors; the seeded edge-type ROOT (`type_edge_type`) carries no
+    # ancestors at all, so it is excluded by name.
+    if name == "edge_type" or (isinstance(anc, list) and "edge_type" in anc):
         return False
-    return bool(props.get("is_type_definition"))
+    # Structural type-layer detection (#171). The foundry is structure-not-
+    # flags: add_node/the seeder never write an `is_type_definition` flag, so
+    # filtering on it dropped every seeded root. The node `type` is set to
+    # "type_definition" by BOTH the seeder and type_minting; the real client
+    # nests the full node map under `properties`, but tolerate a flattened
+    # record with a top-level `type` as well.
+    node_type = td.get("type") or props.get("type")
+    return node_type == "type_definition"
 
 
 class TypeRollupHandler:
