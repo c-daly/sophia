@@ -928,3 +928,46 @@ def test_centroid_match_never_reparents_a_seeded_realm_root(monkeypatch):
     assert hcg.nodes["type_concept"]["properties"]["ancestors"] == ["root", "node"]
     # A fresh super was minted under entity instead.
     assert mint_calls == [("mathematics", "type_entity", False)]
+
+
+def test_resolve_parent_only_accepts_realm_roots():
+    """Closed-world graft target: `_resolve_parent` resolves the two realm roots
+    (concept / process) and rejects everything else -- a reserved root like
+    `cognition` and any arbitrary domain type both degrade to None so the caller
+    falls back to the default `entity` parent instead of grafting into the wrong
+    realm or minting a cycle (review #165: gemini@633 / greptile P1@650)."""
+    tds = [
+        _td("type_concept", "concept", ["root", "node"]),  # seeded realm root
+        _td("type_process", "process", ["root", "node"]),  # seeded realm root
+        _td("type_cognition", "cognition", ["root", "node"]),  # reserved, NOT a root
+        _td("type_mathematics", "mathematics", ["root", "node", "entity", "concept"]),
+    ]
+    hcg = FakeHCG(tds)
+    handler = _handler(hcg, FakeMilvus({}))
+
+    # The two realm roots resolve to (uuid, ancestors, clean_name).
+    assert handler._resolve_parent("concept") == (
+        "type_concept",
+        ["root", "node"],
+        "concept",
+    )
+    assert handler._resolve_parent("process") == (
+        "type_process",
+        ["root", "node"],
+        "process",
+    )
+    # Case / whitespace from an LLM label must not bypass the closed-world check.
+    assert handler._resolve_parent("  Concept ") == (
+        "type_concept",
+        ["root", "node"],
+        "concept",
+    )
+
+    # `cognition` exists as a seeded node but is reserved for metacognition -- it
+    # is NOT a valid graft target, so it must be rejected closed.
+    assert handler._resolve_parent("cognition") is None
+    # An arbitrary domain type must never become a graft parent.
+    assert handler._resolve_parent("mathematics") is None
+    # Empty / missing suggestions degrade to the default parent.
+    assert handler._resolve_parent("") is None
+    assert handler._resolve_parent(None) is None

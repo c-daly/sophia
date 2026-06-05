@@ -328,11 +328,15 @@ class TypeRollupHandler:
             # and cascaded ancestor chains. Exclude the members from BOTH the
             # centroid match and the name reconcile below.
             member_uuids = {m.uuid for m in node.members}
+            # Hermes labels come from an LLM; normalize before any name/uuid
+            # comparison so a capitalized label (e.g. "Concept") cannot bypass the
+            # protected-root / self-graft guards below (review).
+            clean_label = name.label.strip().lower()
             # Never use a seeded structural root as a super-type *name*: minting
             # would duplicate the root, and reusing it would reparent it. If
             # Hermes labelled the cluster after a root, skip this super level and
             # attach the children directly under the current parent.
-            if f"type_{name.label}" in _PROTECTED_ROOT_UUIDS:
+            if f"type_{clean_label}" in _PROTECTED_ROOT_UUIDS:
                 logger.info(
                     "type_rollup: cluster named after root %r -- skipping super level",
                     name.label,
@@ -362,7 +366,7 @@ class TypeRollupHandler:
                 if (
                     rooted is not None
                     and rooted[0] not in member_uuids
-                    and rooted[0] != self._uuid_by_name.get(name.label)
+                    and rooted[0] != self._uuid_by_name.get(clean_label)
                 ):
                     parent_type_uuid, parent_ancestors, parent_name = rooted
                     logger.info(
@@ -629,6 +633,12 @@ class TypeRollupHandler:
         the default `entity` parent rather than a dangling root."""
         target = (parent_name or "").strip().lower()
         if not target:
+            return None
+        # Closed-world: only the realm roots (concept / process) are valid graft
+        # parents for a top-level super. Reject anything else -- `cognition` is
+        # reserved for metacognitive schema induction, and an arbitrary domain
+        # type must never become a graft target (review: wrong-realm / cycle).
+        if target not in _REALM_ROOTS:
             return None
         uuid = self._uuid_by_name.get(target) or f"type_{target}"
         try:
