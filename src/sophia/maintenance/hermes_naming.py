@@ -68,11 +68,17 @@ def name_cluster(
         resp.raise_for_status()
         data = resp.json()
         removed = data.get("removed") or []
+        parent = data.get("parent")
         return NameResult(
             label=data["label"],
             description=data.get("description", ""),
             confidence=float(data.get("confidence", 0.0)),
             removed=[str(r) for r in removed if r],
+            parent=(
+                str(parent).strip()
+                if isinstance(parent, str) and parent.strip()
+                else None
+            ),
         )
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         logger.warning("name_cluster failed: %s", exc)
