@@ -86,11 +86,11 @@ def _is_rollup_candidate(td: dict) -> bool:
     # Structural type-layer detection (#171). The foundry is structure-not-
     # flags: add_node/the seeder never write an `is_type_definition` flag, so
     # filtering on it dropped every seeded root. The node `type` is set to
-    # "type_definition" by BOTH the seeder and type_minting; the real client
-    # nests the full node map under `properties`, but tolerate a flattened
-    # record with a top-level `type` as well.
-    node_type = td.get("type") or props.get("type")
-    return node_type == "type_definition"
+    # "type_definition" by BOTH the seeder and type_minting, and every record
+    # reaching this predicate comes through get_all_type_definitions(), which
+    # returns the full node map nested under `properties` -- that is the ONE
+    # canonical shape, so no flattened-record tolerance (PR #173 review).
+    return props.get("type") == "type_definition"
 
 
 class TypeRollupHandler:

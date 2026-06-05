@@ -193,16 +193,25 @@ def test_candidate_minted_type_shape_detected():
     assert _is_rollup_candidate(td)
 
 
-def test_candidate_tolerates_top_level_type_key():
-    """A flattened record carrying `type` at the top level (not nested under
-    properties, as the real client returns it) is also detected."""
-    td = {
+def test_candidate_requires_nested_properties_type():
+    """The ONE canonical record shape is the full node map nested under
+    `properties` (what get_all_type_definitions returns). A top-level `type`
+    is never consulted -- neither to admit a flattened record nor to shadow
+    the nested value (PR #173 review)."""
+    flattened = {
         "uuid": "type_location",
         "name": "location",
         "type": "type_definition",
         "properties": {},
     }
-    assert _is_rollup_candidate(td)
+    assert not _is_rollup_candidate(flattened)
+    shadowed = {
+        "uuid": "type_location",
+        "name": "location",
+        "type": "Node",
+        "properties": {"type": "type_definition"},
+    }
+    assert _is_rollup_candidate(shadowed)
 
 
 def test_candidate_rejects_non_type_definition_nodes():
