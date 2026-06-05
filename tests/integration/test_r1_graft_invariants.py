@@ -617,20 +617,6 @@ def test_same_norm_dedup_single_mint(hcg, ns):
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "SPEC section 5.13 (residual durability) is UNIMPLEMENTED in "
-        "production: the eviction path (emergence_handler.py, the "
-        "Hermes-flagged outlier filter around lines 252-254) drops removed "
-        "members from the cluster but never retypes them off the source "
-        "type, so the next type_uuid pull re-includes them. This xfail IS "
-        "the promotion gate: remove the marker once residuals are durably "
-        "parked (retype to type_entity or an excluded unsorted sentinel; "
-        "sophia#175). strict=True so an unexpected XPASS fails the suite "
-        "loudly, forcing the marker off the moment production catches up."
-    ),
-    strict=True,
-)
 def test_evicted_member_not_reclustered(hcg, ns):
     """SPEC 5.13: an evicted member must not re-enter the next cluster pull.
 
