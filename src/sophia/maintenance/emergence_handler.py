@@ -268,10 +268,19 @@ class EmergenceHandler:
                 removed_set = set(name.removed)
                 members = [m for m in node.members if m.uuid not in removed_set]
                 if not members:
+                    # Total rejection still parks (SPEC 5.13): at temperature
+                    # 0 the namer's verdict is deterministic, so leaving the
+                    # members on the seed re-clusters and re-rejects them on
+                    # EVERY pass -- an unbounded churn loop with repeated LLM
+                    # spend. The sentinel is a durable, recoverable home, not
+                    # destruction (PR #176 review).
                     logger.info(
-                        "emergence: all %d members flagged as outliers; skipping",
+                        "emergence: all %d members flagged as outliers; "
+                        "parking to %s",
                         len(node.members),
+                        _UNSORTED_TYPE_UUID,
                     )
+                    self._park_residuals(list(node.members), name.label)
                     return
                 if len(members) < len(node.members):
                     logger.info(

@@ -529,8 +529,11 @@ def test_handler_omits_hermes_flagged_outliers(monkeypatch):
     assert set(minted_members["concept"]) == {"c0", "c1", "c2", "c3"}
 
 
-def test_handler_skips_when_all_members_flagged(monkeypatch):
-    """If Hermes flags every member as an outlier, the cluster mints nothing."""
+def test_handler_parks_all_members_when_all_flagged(monkeypatch):
+    """If Hermes flags every member as an outlier, the cluster mints nothing
+    AND every member is parked to the unsorted sentinel -- at temperature 0
+    the rejection is deterministic, so leaving them on the seed would
+    re-cluster and re-reject them on every pass (SPEC 5.13, PR #176)."""
     from sophia.maintenance import emergence_handler as eh
     from sophia.maintenance.emergence_clustering import HierarchyNode
 
@@ -541,6 +544,11 @@ def test_handler_skips_when_all_members_flagged(monkeypatch):
     monkeypatch.setattr(eh, "find_emergent_hierarchy", fake_hierarchy)
 
     minted = []
+    parked: dict[str, dict] = {}
+
+    class _ParkRecordingHCG:
+        def update_node(self, uuid, props):
+            parked[uuid] = props
 
     def fake_name(cluster, candidates, hermes_url, token):
         return NameResult(
@@ -552,7 +560,7 @@ def test_handler_skips_when_all_members_flagged(monkeypatch):
 
     handler = EmergenceHandler(
         config=MaintenanceConfig(),
-        hcg=object(),
+        hcg=_ParkRecordingHCG(),
         milvus=_NoMatchMilvus(),
         event_bus=None,
         hermes_url="http://h",
@@ -565,3 +573,6 @@ def test_handler_skips_when_all_members_flagged(monkeypatch):
     handler.run(type_uuid="type_entity")
 
     assert minted == []
+    flagged = {m.uuid for m in _members() if m.uuid.startswith("p")}
+    assert set(parked) == flagged
+    assert all(p.get("type_uuid") == eh._UNSORTED_TYPE_UUID for p in parked.values())
