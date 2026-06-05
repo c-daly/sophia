@@ -87,11 +87,7 @@ def test_evicted_outlier_parked_and_not_repulled():
 
     def load_members(type_uuid):
         rows = hcg.get_nodes_by_type_uuid(type_uuid)
-        ms = [
-            members_by_uuid[r["uuid"]]
-            for r in rows
-            if r["uuid"] in members_by_uuid
-        ]
+        ms = [members_by_uuid[r["uuid"]] for r in rows if r["uuid"] in members_by_uuid]
         pulls.append({m.uuid for m in ms})
         return ms
 
@@ -111,9 +107,7 @@ def test_evicted_outlier_parked_and_not_repulled():
         type_uuid = f"type_{name.label}"
         if kwargs.get("retype_members", True):
             for m in cluster.members:
-                hcg.update_node(
-                    m.uuid, {"type": name.label, "type_uuid": type_uuid}
-                )
+                hcg.update_node(m.uuid, {"type": name.label, "type_uuid": type_uuid})
         return type_uuid
 
     handler = EmergenceHandler(

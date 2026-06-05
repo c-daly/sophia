@@ -33,6 +33,15 @@ _BASE_TYPE = "entity"
 # two prefixes and its own full ancestors append "entity" (#505).
 _ENTITY_ANCESTORS = ["root", "node"]
 
+# Durable neutral home for evicted/residual members (SPEC 5.13 / R8, #175).
+# A dedicated sentinel rather than `type_entity`: emergence clusters the
+# `entity` junk drawer itself (the `_BASE_TYPE` branches in `run` and
+# `_member_rows`), so parking evictees at `type_entity` would re-include them
+# whenever the junk drawer is the seed. The sentinel has no type-definition
+# node and `run` skips it, so it is never a candidate source.
+_UNSORTED_TYPE = "unsorted"
+_UNSORTED_TYPE_UUID = "type_unsorted"
+
 
 def _cosine(a: list[float], b: list[float]) -> float:
     """Cosine similarity of two equal-length vectors (0.0 if either is zero)."""
@@ -176,6 +185,12 @@ class EmergenceHandler:
         self._candidates_fn = candidates_fn
 
     def run(self, type_uuid: str) -> None:
+        # Parked residuals are not a clustering source (SPEC 5.13): the
+        # sentinel exists precisely so evicted members stop re-entering
+        # candidate pulls.
+        if type_uuid == _UNSORTED_TYPE_UUID:
+            logger.info("emergence: skipping unsorted sentinel (parked residuals)")
+            return
         members = self._load_members(type_uuid)
         # Roll the fine clusters up into a multi-level hierarchy: leaves are the
         # fine clusters, internal nodes are super-types grouping related leaves
@@ -265,6 +280,13 @@ class EmergenceHandler:
                         name.label,
                     )
                     cluster = EmergentCluster(members=members)
+                    # Durably park the evictees off the candidate source
+                    # (SPEC 5.13 / R8, #175): without the retype they keep
+                    # the seed type_uuid and the next pull re-includes them.
+                    self._park_residuals(
+                        [m for m in node.members if m.uuid in removed_set],
+                        name.label,
+                    )
 
             is_leaf = not node.children
             existing = self._match_existing_type(node.centroid, parent_type_uuid)
@@ -324,6 +346,27 @@ class EmergenceHandler:
                 )
         except Exception:
             logger.exception("emergence: node failed, skipping")
+
+    def _park_residuals(self, evicted: list[Member], label: str) -> None:
+        """Retype Hermes-flagged outliers onto the `unsorted` sentinel.
+
+        Mirrors the production retype write (type_minting): membership is the
+        authoritative `type_uuid` property, so stamping the sentinel removes
+        the member from the next candidate pull of its seed, while `run`
+        keeps the sentinel itself out of clustering. Per-member isolation:
+        one failed write must not abort the mint of the surviving cluster.
+        """
+        for m in evicted:
+            try:
+                self._hcg.update_node(
+                    m.uuid,
+                    {"type": _UNSORTED_TYPE, "type_uuid": _UNSORTED_TYPE_UUID},
+                )
+                logger.info(
+                    "emergence: parked residual %s (outlier of %r)", m.uuid, label
+                )
+            except Exception:
+                logger.exception("emergence: failed to park residual %s", m.uuid)
 
     def _match_existing_type(
         self, centroid: list[float], parent_type_uuid: str
