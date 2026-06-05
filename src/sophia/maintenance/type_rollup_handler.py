@@ -39,6 +39,19 @@ logger = logging.getLogger(__name__)
 _BASE_TYPE = "entity"
 _ENTITY_ANCESTORS = ["root", "node"]
 _DEFAULT_MODEL = "all-MiniLM-L6-v2"
+# Domain realm roots a TOP-LEVEL super-type may be grafted under (besides the
+# `entity` junk-drawer). Sent as naming candidates so Hermes can name one as a
+# super-type's parent -- this is how the flat `entity` shelf reaches the other
+# roots. `cognition` is intentionally excluded: it is populated by metacognitive
+# schema induction, not by domain type rollup.
+_REALM_ROOTS = ("concept", "process")
+# Seeded structural roots that must NEVER be minted as a super, matched/reused as
+# a super, or reparented -- they are the fixed top of the ontology. Guards the
+# rollup against corrupting them (review blocker + duplicate-root path).
+_PROTECTED_ROOT_NAMES = frozenset(
+    {"root", "node", "entity", "concept", "cognition", "process"}
+)
+_PROTECTED_ROOT_UUIDS = frozenset(f"type_{n}" for n in _PROTECTED_ROOT_NAMES)
 
 # Member-relation labels that imply a type-level relationship.
 _PARENT_REL = {"HAS_PART", "INCLUDES", "COMPOSED_OF"}  # source-type is the PARENT
@@ -54,9 +67,7 @@ def _is_rollup_candidate(td: dict) -> bool:
     uuid = td.get("uuid") or ""
     if not name or not uuid.startswith("type_"):
         return False
-    if name in (_BASE_TYPE, "node", "concept", "cognition") or name.startswith(
-        "reserved_"
-    ):
+    if name in _PROTECTED_ROOT_NAMES or name.startswith("reserved_"):
         return False
     props = td.get("properties") or {}
     anc = props.get("ancestors")
@@ -108,7 +119,10 @@ class TypeRollupHandler:
         # name -> uuid, for name-based reconcile (no duplicate-named type-defs).
         self._uuid_by_name = {r["name"]: r["uuid"] for r in rows}
 
-        candidates = list({r["name"] for r in rows})
+        # Include the realm roots so Hermes can name one as a super-type's
+        # parent: the rollup is the single authority that roots types under
+        # concept/process (emergence stays flat-under-entity).
+        candidates = list({r["name"] for r in rows} | set(_REALM_ROOTS))
         # Tier 1: explicit subsumption + synonyms.
         explicit_children = self._tier1_explicit(rows)
         # Tier 2: cluster only the *flat leaves* -- types still directly under
@@ -314,9 +328,58 @@ class TypeRollupHandler:
             # and cascaded ancestor chains. Exclude the members from BOTH the
             # centroid match and the name reconcile below.
             member_uuids = {m.uuid for m in node.members}
+            # Never use a seeded structural root as a super-type *name*: minting
+            # would duplicate the root, and reusing it would reparent it. If
+            # Hermes labelled the cluster after a root, skip this super level and
+            # attach the children directly under the current parent.
+            if f"type_{name.label}" in _PROTECTED_ROOT_UUIDS:
+                logger.info(
+                    "type_rollup: cluster named after root %r -- skipping super level",
+                    name.label,
+                )
+                for child in node.children:
+                    self._reparent_subtree(
+                        child,
+                        parent_type_uuid,
+                        parent_ancestors,
+                        parent_name,
+                        candidates,
+                    )
+                return
+            # Root a TOP-LEVEL super-type under the realm Hermes named (concept /
+            # process) instead of flat under `entity` -- this is how the entity
+            # shelf reaches the other roots. Top level only; deeper super-types
+            # keep nesting under their tree parent. Guard the rebind: never graft
+            # under one of the cluster's own members or under the coined label
+            # itself (mint_fn has no cycle guard). Degrades to the default parent
+            # when the suggestion does not resolve.
+            if (
+                parent_type_uuid == f"type_{_BASE_TYPE}"
+                and name.parent
+                and name.parent.strip().lower() != name.label.strip().lower()
+            ):
+                rooted = self._resolve_parent(name.parent)
+                if (
+                    rooted is not None
+                    and rooted[0] not in member_uuids
+                    and rooted[0] != self._uuid_by_name.get(name.label)
+                ):
+                    parent_type_uuid, parent_ancestors, parent_name = rooted
+                    logger.info(
+                        "type_rollup: rooting super-type %r under realm %r",
+                        name.label,
+                        parent_name,
+                    )
             super_uuid = self._match_existing_type(
                 node.centroid, parent_type_uuid, exclude=member_uuids
             )
+            # Never reuse a seeded structural root as a domain super-type: a root
+            # is not a cluster member, so exclude=members does not catch it, and
+            # the reuse branch's _reparent_one would then move the root into the
+            # domain tree (no cycle, so the cycle guard cannot stop it). Treat a
+            # realm-root hit as no-match -> mint a fresh super instead (blocker).
+            if super_uuid in _PROTECTED_ROOT_UUIDS:
+                super_uuid = None
             if super_uuid is None:
                 # Name-based reconcile before minting: never create a second
                 # type-def with a name that already exists (the duplicate
@@ -556,6 +619,35 @@ class TypeRollupHandler:
         except Exception:
             logger.exception("type_rollup: query_edges_from failed for %s", child_uuid)
         return None, None
+
+    def _resolve_parent(self, parent_name: str) -> tuple[str, list[str], str] | None:
+        """Resolve a Hermes-suggested realm parent *name* (concept / process) to
+        ``(type_uuid, ancestors, clean_name)`` for rooting a top-level
+        super-type. Minted types live in the per-run name->uuid map; the seeded
+        realm roots do not, so fall back to their canonical ``type_<name>`` uuid.
+        Returns None when nothing resolves, so an invalid suggestion degrades to
+        the default `entity` parent rather than a dangling root."""
+        target = (parent_name or "").strip().lower()
+        if not target:
+            return None
+        uuid = self._uuid_by_name.get(target) or f"type_{target}"
+        try:
+            node = self._hcg.get_node(uuid)
+        except Exception:
+            logger.exception("type_rollup: _resolve_parent(%s) failed", parent_name)
+            return None
+        if not node:
+            return None
+        ancestors = list((node.get("properties") or {}).get("ancestors") or [])
+        if not ancestors:
+            # A seeded realm root's canonical ancestors are [root, node]; for
+            # anything else with no chain, fail closed (degrade to the default
+            # parent) rather than fabricate a truncated chain (review).
+            if uuid in _PROTECTED_ROOT_UUIDS:
+                ancestors = list(_ENTITY_ANCESTORS)
+            else:
+                return None
+        return uuid, ancestors, node.get("name") or target
 
     def _match_existing_type(
         self,

@@ -38,10 +38,14 @@ class EmergentCluster:
 
 @dataclass
 class NameResult:
-    """Hermes' answer to 'what binds these together?' -- a label plus the
-    member uuids that don't fit it (outliers to leave in the base type, #504)."""
+    """Hermes' answer to 'what binds these together?' -- a label, the member
+    uuids that don't fit it (outliers to leave in the base type, #504), and an
+    optional graft ``parent``: when the label is newly coined, the existing type
+    to attach it under so a concept-cluster lands under ``concept`` etc.; None on
+    reuse or when no listed category is a sensible parent."""
 
     label: str
     description: str
     confidence: float
     removed: list[str] = field(default_factory=list)
+    parent: str | None = None

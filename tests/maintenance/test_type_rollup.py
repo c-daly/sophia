@@ -760,3 +760,171 @@ def test_reparent_drops_stale_is_a_even_without_edge_id():
     assert ("delete_edges_between", "type_child_aa", "type_oldparent_xx", "IS_A") in (
         hcg.writes
     )
+
+
+def test_top_level_super_grafts_under_realm_root(monkeypatch):
+    """B (concept/process population): when Hermes names a ``parent`` for a
+    TOP-LEVEL super-type, the rollup roots it under that realm root (here
+    ``concept``) instead of flat under ``entity``, and the realm chain flows
+    down to the leaves. The rollup is the single hierarchy authority (#160)."""
+    import sophia.maintenance.type_rollup_handler as tr
+
+    tds = [
+        _td("type_concept", "concept", ["root", "node"]),  # seeded realm root
+        _td("type_calculus_aa", "calculus", ["root", "node", "entity"]),
+        _td("type_algebra_bb", "algebra", ["root", "node", "entity"]),
+    ]
+    hcg = FakeHCG(tds)
+    milvus = FakeMilvus({"type_calculus_aa": [1.0, 0.0], "type_algebra_bb": [0.9, 0.1]})
+
+    def _m(uuid, name, vec):
+        return Member(uuid, name, vec, Counter(), "type_definition", None, [], "m")
+
+    leaf = HierarchyNode(
+        members=[
+            _m("type_calculus_aa", "calculus", [1.0, 0.0]),
+            _m("type_algebra_bb", "algebra", [0.9, 0.1]),
+        ],
+        centroid=[0.95, 0.05],
+        children=[
+            HierarchyNode(
+                members=[_m("type_calculus_aa", "calculus", [1.0, 0.0])],
+                centroid=[1.0, 0.0],
+            ),
+            HierarchyNode(
+                members=[_m("type_algebra_bb", "algebra", [0.9, 0.1])],
+                centroid=[0.9, 0.1],
+            ),
+        ],
+    )
+    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+
+    mint_calls: list = []
+
+    def name_fn(cluster, candidates, url, tok):
+        # `concept` must be offered as a candidate so Hermes can graft under it.
+        assert "concept" in candidates
+        return NameResult(
+            label="mathematics", description="", confidence=0.9, parent="concept"
+        )
+
+    def mint_fn(
+        cluster,
+        name,
+        *,
+        hcg,
+        milvus,
+        source_cluster_id,
+        parent_type_uuid,
+        parent_ancestors,
+        parent_name,
+        retype_members,
+    ):
+        uuid = f"type_{name.label}_super01"
+        hcg.nodes[uuid] = {
+            "uuid": uuid,
+            "name": name.label,
+            "properties": {
+                "is_type_definition": True,
+                "ancestors": list(parent_ancestors) + [parent_name],
+            },
+        }
+        hcg.add_edge(uuid, parent_type_uuid, "IS_A")
+        milvus.update_centroid(uuid, cluster.embeddings[0], "m")
+        mint_calls.append((name.label, parent_type_uuid, retype_members))
+        return uuid
+
+    TypeRollupHandler(
+        config=_cfg(),
+        hcg=hcg,
+        milvus=milvus,
+        event_bus=None,
+        hermes_url="http://h",
+        token="t",
+        name_fn=name_fn,
+        mint_fn=mint_fn,
+    ).run()
+
+    # The super-type was rooted under `concept`, not `entity`.
+    assert mint_calls == [("mathematics", "type_concept", False)]
+    super_uuid = "type_mathematics_super01"
+    assert any(
+        e["source"] == super_uuid
+        and e["target"] == "type_concept"
+        and e["relation"] == "IS_A"
+        for e in hcg.edges
+    )
+    assert hcg.nodes[super_uuid]["properties"]["ancestors"] == [
+        "root",
+        "node",
+        "concept",
+    ]
+    # The realm chain flows down to the leaves.
+    for leaf_uuid in ("type_calculus_aa", "type_algebra_bb"):
+        assert hcg.nodes[leaf_uuid]["properties"]["ancestors"] == [
+            "root",
+            "node",
+            "concept",
+            "mathematics",
+        ]
+
+
+def test_centroid_match_never_reparents_a_seeded_realm_root(monkeypatch):
+    """Blocker (review): the reuse path must never move a seeded structural root.
+    A domain super-cluster whose centroid is nearest the seeded `concept`
+    centroid must MINT a fresh super, not reuse type_concept (which _reparent_one
+    would then move under the domain tree -- no cycle, so the cycle guard cannot
+    stop it). Realm roots are not cluster members, so exclude=members can't catch
+    this; the _PROTECTED_ROOT_UUIDS guard must."""
+    import sophia.maintenance.type_rollup_handler as tr
+
+    tds = [
+        _td("type_concept", "concept", ["root", "node"]),  # seeded root w/ centroid
+        _td("type_calculus_aa", "calculus", ["root", "node", "entity"]),
+        _td("type_algebra_bb", "algebra", ["root", "node", "entity"]),
+    ]
+    hcg = FakeHCG(tds)
+    milvus = FakeMilvus(
+        {
+            "type_concept": [0.95, 0.05],
+            "type_calculus_aa": [1.0, 0.0],
+            "type_algebra_bb": [0.9, 0.1],
+        }
+    )
+    # The cluster centroid is nearest the seeded concept centroid.
+    milvus.find_nearest_types = lambda q, top_k=1: [
+        {"uuid": "type_concept", "score": 0.0}
+    ]
+
+    def _m(uuid, name, vec):
+        return Member(uuid, name, vec, Counter(), "type_definition", None, [], "m")
+
+    leaf = HierarchyNode(
+        members=[
+            _m("type_calculus_aa", "calculus", [1.0, 0.0]),
+            _m("type_algebra_bb", "algebra", [0.9, 0.1]),
+        ],
+        centroid=[0.95, 0.05],
+        children=[
+            HierarchyNode(
+                members=[_m("type_calculus_aa", "calculus", [1.0, 0.0])],
+                centroid=[1.0, 0.0],
+            ),
+            HierarchyNode(
+                members=[_m("type_algebra_bb", "algebra", [0.9, 0.1])],
+                centroid=[0.9, 0.1],
+            ),
+        ],
+    )
+    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    mint_calls: list = []
+    # name_fn returns a normal label with no parent (no graft rebind interferes).
+    _handler(hcg, milvus, mint_calls=mint_calls, name_label="mathematics").run()
+
+    # The seeded concept root was NOT reused/reparented.
+    assert not any(
+        e["source"] == "type_concept" and e["relation"] == "IS_A" for e in hcg.edges
+    )
+    assert hcg.nodes["type_concept"]["properties"]["ancestors"] == ["root", "node"]
+    # A fresh super was minted under entity instead.
+    assert mint_calls == [("mathematics", "type_entity", False)]
