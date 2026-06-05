@@ -96,7 +96,9 @@ def test_mint_creates_type_node_centroid_and_retypes():
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
     assert len(tdef) == 1
     props = tdef[0]["properties"]
-    assert props["is_type_definition"] is True
+    # Structural typing (#171): node_type="type_definition" + the type_ uuid
+    # prefix carry the type-layer signal; the legacy flag is never written.
+    assert "is_type_definition" not in props
     assert props["ancestors"] == ["root", "node", "entity"]
     assert props["name_history"][0]["name"] == "concept"
     assert props["name_history"][0]["hermes_confidence"] == 0.8
