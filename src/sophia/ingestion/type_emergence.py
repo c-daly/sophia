@@ -28,17 +28,22 @@ def _euclidean_distance_sq(a: list[float], b: list[float]) -> float:
 
 
 def _mean_vector(vectors: list[list[float]]) -> list[float]:
-    """Compute the element-wise mean of a list of vectors."""
-    dim = len(vectors[0])
-    n = len(vectors)
-    return [sum(v[d] for v in vectors) / n for d in range(dim)]
+    """Compute the element-wise mean of a list of vectors (vectorized, #177)."""
+    import numpy as np
+
+    return np.asarray(vectors, dtype=np.float64).mean(axis=0).tolist()
 
 
 def _variance(vectors: list[list[float]], centroid: list[float]) -> float:
-    """Mean squared distance from centroid."""
+    """Mean squared distance from centroid (vectorized, #177)."""
     if not vectors:
         return 0.0
-    return sum(_euclidean_distance_sq(v, centroid) for v in vectors) / len(vectors)
+    import numpy as np
+
+    x = np.asarray(vectors, dtype=np.float64)
+    c = np.asarray(centroid, dtype=np.float64)
+    diff = x - c[None, :]
+    return float(np.einsum("ij,ij->i", diff, diff).mean())
 
 
 def _kmeans_2(

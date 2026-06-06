@@ -25,6 +25,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from sophia.ingestion.type_emergence import _mean_vector, _variance
 from sophia.maintenance.emergence_types import EmergentCluster, Member
 
@@ -39,87 +41,94 @@ def _variance_of(members: list[Member]) -> float:
 
 
 def _euclidean(a: list[float], b: list[float]) -> float:
-    return float(sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5)
+    diff = np.asarray(a, dtype=np.float64) - np.asarray(b, dtype=np.float64)
+    return float(np.sqrt(diff @ diff))
 
 
-def _distance_matrix(vectors: list[list[float]]) -> list[list[float]]:
-    n = len(vectors)
-    d = [[0.0] * n for _ in range(n)]
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = _euclidean(vectors[i], vectors[j])
-            d[i][j] = d[j][i] = dist
-    return d
+def _distance_matrix(vectors: list[list[float]]) -> "np.ndarray":
+    """Pairwise euclidean distances via the Gram trick (vectorized, #177).
+
+    Returns an (n, n) ndarray; indexes exactly like the previous
+    list-of-lists. The naive broadcast (n, n, d) intermediate would need
+    hundreds of GB at production scale, so: ||x-y||^2 = |x|^2+|y|^2-2x.y.
+    """
+    x = np.asarray(vectors, dtype=np.float64)
+    sq = np.einsum("ij,ij->i", x, x)
+    d2 = sq[:, None] + sq[None, :] - 2.0 * (x @ x.T)
+    np.maximum(d2, 0.0, out=d2)  # clamp float negatives on the diagonal
+    return np.sqrt(d2)
 
 
-def _silhouette(dmat: list[list[float]], labels: list[int]) -> float:
-    """Mean silhouette over a precomputed distance matrix; -1 if < 2 clusters."""
-    uniq = sorted(set(labels))
-    if len(uniq) < 2:
+def _silhouette(dmat: "np.ndarray", labels: list[int]) -> float:
+    """Mean silhouette over a precomputed distance matrix; -1 if < 2 clusters.
+
+    Vectorized (#177): per-cluster mean distances come from one D @ onehot
+    product. Semantics preserved exactly, including the singleton rule:
+    silhouette of a lone point is 0, not (b - 0)/b = 1 -- scoring it 1.0
+    would bias k-selection toward partitions full of singletons (which are
+    then dropped by min_cluster_size, yielding "no clusters found"). See
+    #505 review.
+    """
+    lab = np.asarray(labels)
+    uniq = np.unique(lab)
+    if uniq.size < 2:
         return -1.0
-    members_by_label = {c: [i for i, v in enumerate(labels) if v == c] for c in uniq}
-    scores = []
-    for i, li in enumerate(labels):
-        same = [j for j in members_by_label[li] if j != i]
-        if not same:
-            # Singleton cluster: silhouette is defined as 0, not (b - 0)/b = 1.
-            # Scoring a lone point 1.0 would bias k-selection toward partitions
-            # full of singletons (which are then dropped by min_cluster_size,
-            # yielding "no clusters found"). See #505 review.
-            scores.append(0.0)
-            continue
-        a = sum(dmat[i][j] for j in same) / len(same)
-        b = min(
-            sum(dmat[i][j] for j in members_by_label[c]) / len(members_by_label[c])
-            for c in uniq
-            if c != li
-        )
-        scores.append((b - a) / max(a, b) if max(a, b) > 0 else 0.0)
-    return sum(scores) / len(labels)
+    d = np.asarray(dmat, dtype=np.float64)
+    n = lab.size
+    onehot = (lab[:, None] == uniq[None, :]).astype(np.float64)  # (n, k)
+    counts = onehot.sum(axis=0)  # (k,)
+    sums = d @ onehot  # (n, k): total distance from i to each cluster
+    own_idx = np.searchsorted(uniq, lab)
+    own_count = counts[own_idx]
+    own_sum = sums[np.arange(n), own_idx]
+    # a(i): mean distance to OWN cluster, self excluded.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        a = own_sum / np.maximum(own_count - 1.0, 1.0)
+        means = sums / counts[None, :]  # mean distance to each cluster
+    means[np.arange(n), own_idx] = np.inf
+    b = means.min(axis=1)
+    denom = np.maximum(a, b)
+    s = np.where(denom > 0, (b - a) / np.where(denom > 0, denom, 1.0), 0.0)
+    s = np.where(own_count <= 1, 0.0, s)  # singleton rule
+    return float(s.mean())
 
 
 def _agglomerative_partitions(
-    dmat: list[list[float]], k_min: int, k_max: int
+    dmat: "np.ndarray", k_min: int, k_max: int
 ) -> dict[int, list[int]]:
-    """Average-linkage agglomeration; return {k: labels} for k in [k_min, k_max]."""
-    n = len(dmat)
-    members = {i: [i] for i in range(n)}
-    sizes = {i: 1 for i in range(n)}
-    dist = {(i, j): dmat[i][j] for i in range(n) for j in range(i + 1, n)}
+    """Average-linkage agglomeration; return {k: labels} for k in [k_min, k_max].
 
-    def key(a: int, b: int) -> tuple[int, int]:
-        return (a, b) if a < b else (b, a)
-
-    active = set(range(n))
-    next_id = n
+    Vectorized Lance-Williams (#177): the working distance matrix is updated
+    in place; the merge argmin is one masked scan instead of an O(n^2) dict
+    sweep per step. Same linkage formula, same tie behavior (first minimum
+    in row-major order, matching the previous insertion-ordered dict scan).
+    """
+    d = np.asarray(dmat, dtype=np.float64).copy()
+    n = d.shape[0]
+    np.fill_diagonal(d, np.inf)
+    sizes = np.ones(n)
+    cluster_of = np.arange(n)  # row index -> current cluster row
+    alive = np.ones(n, dtype=bool)
     partitions: dict[int, list[int]] = {}
-    while len(active) > 1:
-        best_pair = None
-        best_d = None
-        for (a, b), d in dist.items():
-            if a in active and b in active and (best_d is None or d < best_d):
-                best_d, best_pair = d, (a, b)
-        a, b = best_pair  # type: ignore[misc]
-        new = next_id
-        next_id += 1
-        members[new] = members[a] + members[b]
-        sizes[new] = sizes[a] + sizes[b]
-        for c in active:
-            if c in (a, b):
-                continue
-            dac = dist.get(key(a, c), 0.0)
-            dbc = dist.get(key(b, c), 0.0)
-            dist[key(new, c)] = (sizes[a] * dac + sizes[b] * dbc) / sizes[new]
-        active.discard(a)
-        active.discard(b)
-        active.add(new)
-        k = len(active)
+    for _step in range(n - 1):
+        masked = np.where(alive[:, None] & alive[None, :], d, np.inf)
+        flat = int(np.argmin(masked))
+        a, b = divmod(flat, n)
+        if a > b:
+            a, b = b, a
+        # Lance-Williams average-linkage update onto row/col a.
+        wa, wb = sizes[a], sizes[b]
+        new_row = (wa * d[a] + wb * d[b]) / (wa + wb)
+        d[a, :] = new_row
+        d[:, a] = new_row
+        d[a, a] = np.inf
+        sizes[a] = wa + wb
+        alive[b] = False
+        cluster_of[cluster_of == b] = a
+        k = int(alive.sum())
         if k_min <= k <= k_max:
-            labels = [0] * n
-            for ci, cid in enumerate(active):
-                for m in members[cid]:
-                    labels[m] = ci
-            partitions[k] = labels
+            live = {row: ci for ci, row in enumerate(np.flatnonzero(alive))}
+            partitions[k] = [live[row] for row in cluster_of]
     return partitions
 
 
