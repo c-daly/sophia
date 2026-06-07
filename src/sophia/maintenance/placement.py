@@ -52,6 +52,7 @@ def resolve_parent(
     *,
     uuid_by_name: dict[str, str],
     hcg: Any,
+    realm: str | None = None,
 ) -> str | None:
     """Resolve a Hermes-suggested graft-parent NAME to a real type uuid, or None.
 
@@ -59,6 +60,12 @@ def resolve_parent(
     non-domain-rooted name returns ``None`` -- the caller then mints under the
     realm root. The parent suggestion is validated, never trusted blindly
     (DESIGN sec 6).
+
+    When ``realm`` is given (the draining cluster realm), the reused type must
+    root in that SAME realm; a cross-realm name collision in the flat
+    ``uuid_by_name`` catalog is rejected so entity content never grafts under a
+    same-named concept/process type (DESIGN sec 3). ``realm=None`` (default)
+    skips the check, keeping callers that do not know the realm unchanged.
     """
     target = (parent_name or "").strip().lower()
     if not target:
@@ -90,7 +97,21 @@ def resolve_parent(
     # OR have one in its ancestry, computed by WALKING IS_A edges upward (never
     # by reading a forbidden `ancestors` property). This stops a domain super
     # from grafting into the `cognition` subtree or onto bare structure.
-    if _walk_to_realm(uuid, hcg=hcg) is None:
+    resolved_realm = _walk_to_realm(uuid, hcg=hcg)
+    if resolved_realm is None:
+        return None
+    # Cross-realm guard: the flat name->uuid catalog can collide a same-named
+    # type across realms. When the caller knows the cluster realm, the reused
+    # type must root in that SAME realm -- otherwise grafting crosses realms and
+    # breaks IS_A uniformity (DESIGN sec 3). Reuse the realm already walked above;
+    # never walk twice.
+    if realm is not None and resolved_realm != realm:
+        logger.info(
+            "placement: rejected cross-realm parent %r (realm %s != cluster %s)",
+            target,
+            resolved_realm,
+            realm,
+        )
         return None
     return uuid
 

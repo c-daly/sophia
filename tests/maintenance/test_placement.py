@@ -262,6 +262,58 @@ def test_resolve_parent_never_fabricates_slug():
     assert placement.resolve_parent("vehicle", uuid_by_name={}, hcg=hcg) is None
 
 
+def test_resolve_parent_rejects_cross_realm_name_match():
+    # Flat name->uuid catalog: the SAME name "vehicle" maps to two distinct types
+    # -- one under the entity chain, one under the concept chain. The catalog
+    # points at the concept one; an entity-realm cluster must NOT graft under it,
+    # or entity content would root in concept and break IS_A uniformity (sec 3).
+    nodes, edges, uuid_by_name = _seed_skeleton()
+    nodes = nodes + [_node("u_vehicle_concept", "vehicle")]
+    edges = edges + [
+        {
+            "id": "e_vehicle_concept",
+            "source": "u_vehicle_concept",
+            "target": "u_concept",
+            "relation": "IS_A",
+            "properties": {},
+        }
+    ]
+    uuid_by_name = dict(uuid_by_name)
+    uuid_by_name["vehicle"] = "u_vehicle_concept"  # catalog resolves to concept
+    hcg = FakeHCG(nodes, edges)
+    assert (
+        placement.resolve_parent(
+            "vehicle", uuid_by_name=uuid_by_name, hcg=hcg, realm="entity"
+        )
+        is None
+    )
+
+
+def test_resolve_parent_allows_same_realm_match():
+    # vehicle IS_A entity: an entity-realm cluster may reuse a same-realm type.
+    nodes, edges, uuid_by_name = _seed_skeleton()
+    hcg = FakeHCG(nodes, edges)
+    assert (
+        placement.resolve_parent(
+            "vehicle", uuid_by_name=uuid_by_name, hcg=hcg, realm="entity"
+        )
+        == "u_vehicle"
+    )
+
+
+def test_resolve_parent_no_realm_arg_skips_check():
+    # realm=None (default): existing behavior is unchanged -- an in-domain parent
+    # still resolves and no cross-realm check is applied.
+    nodes, edges, uuid_by_name = _seed_skeleton()
+    hcg = FakeHCG(nodes, edges)
+    assert (
+        placement.resolve_parent(
+            "vehicle", uuid_by_name=uuid_by_name, hcg=hcg, realm=None
+        )
+        == "u_vehicle"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # realm_of                                                                    #
 # --------------------------------------------------------------------------- #
