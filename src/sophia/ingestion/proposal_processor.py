@@ -13,7 +13,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal, Tuple
 
-from sophia.ingestion.type_classifier import TypeClassifier
+from sophia.maintenance import placement
 
 logger = logging.getLogger(__name__)
 
@@ -68,27 +68,39 @@ ALL_MILVUS_COLLECTIONS: Tuple[NodeType, ...] = (
 # Milvus collection types to search for context.
 SEARCHABLE_COLLECTIONS = ("Entity", "Concept", "State", "Process")
 
-# Map proposed node types to the Milvus collection used for dedup/storage.
-_NODE_TYPE_TO_COLLECTION = {
-    # General knowledge types — classifier assigns these
-    "entity": "Entity",
-    "concept": "Concept",
-    "location": "Entity",
-    "object": "Entity",
-    "state": "Entity",
-    "process": "Entity",
-    "agent": "Entity",
-    # Reserved internal types — only Sophia subsystems assign these
-    "reserved_state": "State",
-    "reserved_process": "Process",
-    "reserved_agent": "Process",
-    "reserved_action": "Process",
-    "reserved_goal": "Process",
-    "reserved_plan": "Process",
-    "reserved_simulation": "Process",
-    "reserved_execution": "Process",
-    "reserved_media_sample": "Entity",
+# Naming-driven typing (#505, DESIGN s3/s5): a content node's `node_type` is its
+# REALM (entity/concept/process) -- an infrastructure label for Milvus collection
+# routing, NOT a membership assertion. Membership is the instance->type IS_A edge,
+# parked at the realm root at ingest and refined by drainage.
+#
+# Realm triage collapses the hermes NER ontology type (`ONTOLOGY_TYPES`) to one of
+# the 3 realms, LLM-free (the NER already ran). It is a tunable heuristic over the
+# existing NER output, not a hard truth.
+_ONTOLOGY_TYPE_TO_REALM = {
+    # entity realm
+    "entity": "entity",
+    "location": "entity",
+    "object": "entity",
+    "agent": "entity",
+    "workspace": "entity",
+    "zone": "entity",
+    # process realm
+    "process": "process",
+    "action": "process",
+    # concept realm
+    "concept": "concept",
+    "state": "concept",
+    "data": "concept",
+    "goal": "concept",
+    "plan": "concept",
+    "capability": "concept",
 }
+
+# Single content embedding collection, keyed by uuid: every content node type shares
+# ONE collection (Chris: "one collection is how it's supposed to be"). The realm
+# `node_type` does not select a collection. The separate TypeCentroid and
+# media/visual (CLIP/JEPA) collections are unaffected.
+_CONTENT_COLLECTION = "Entity"
 
 # Keys that must not be overwritten by untrusted proposal properties.
 _RESERVED_EDGE_KEYS = frozenset(
@@ -105,9 +117,22 @@ _RESERVED_EDGE_KEYS = frozenset(
 )
 
 
+def _realm_for(ontology_type: str) -> str:
+    """Collapse a hermes NER ontology type to one of the 3 realms.
+
+    LLM-free triage over the existing NER output (#505, DESIGN s5). An unknown or
+    missing ontology type defaults to the ``entity`` realm.
+    """
+    return _ONTOLOGY_TYPE_TO_REALM.get((ontology_type or "").strip().lower(), "entity")
+
+
 def _collection_for(node_type: str) -> str:
-    """Return the Milvus collection name for a given semantic node type."""
-    return _NODE_TYPE_TO_COLLECTION.get(node_type.lower(), "Entity")
+    """Return the single Milvus content collection for any content node type.
+
+    Content embeds into one collection keyed by uuid; ``node_type`` (the realm) is
+    not a collection selector (#505).
+    """
+    return _CONTENT_COLLECTION
 
 
 def _squared_l2_distance(a: list[float], b: list[float]) -> float:
@@ -132,10 +157,8 @@ class ProposalProcessor:
     ) -> None:
         self._hcg = hcg_client
         self._milvus = milvus_sync
-        self._classifier = TypeClassifier(milvus=milvus_sync, hcg=hcg_client)
         self._event_bus = event_bus
         self._redis = redis_client
-        self._seen_type_uuids: set[str] = set()
 
     def _publish_batch_event(
         self,
@@ -269,8 +292,15 @@ class ProposalProcessor:
                     relevant_context = relevant_context[:10]
 
             # 2. Ingest proposed nodes
-            # Collect centroid updates to flush after the node loop.
-            centroid_updates: dict[str, list[tuple[list[float], str]]] = {}
+            # Resolve the seeded realm roots (entity/concept/process) BY NAME from
+            # the type-definition catalog so each new instance can be parked under
+            # its realm via an IS_A edge (#505). Mirrors the maintenance tier's
+            # name->uuid resolution (emergence_handler); built once per batch.
+            uuid_by_name = {
+                n["name"].strip().lower(): n["uuid"]
+                for n in self._hcg.list_all_nodes(node_type="type_definition")
+                if n.get("name") and n.get("uuid")
+            }
 
             with tracer.start_as_current_span("proposal_processor.ingest_nodes"):
                 for proposed in proposal.get("proposed_nodes", []):
@@ -281,13 +311,12 @@ class ProposalProcessor:
                     embedding = proposed.get("embedding")
                     model = proposed.get("model", "unknown")
 
-                    # Classify using embedding-space centroids (Hermes type hint ignored)
-                    if embedding:
-                        classification = self._classifier.classify(embedding)
-                        node_type = classification.type_name
-                    else:
-                        classification = None
-                        node_type = proposed.get("type", "entity")
+                    # Realm triage (#505, DESIGN s5): collapse the hermes NER
+                    # ontology type to one of the 3 realms, LLM-free (the NER
+                    # already ran). `node_type` is the realm -- an infra label for
+                    # Milvus collection routing, NOT a membership assertion. Fine
+                    # typing happens later in drainage, which reparents the IS_A edge.
+                    node_type = _realm_for(proposed.get("type"))
 
                     collection = _collection_for(node_type)
 
@@ -377,39 +406,10 @@ class ProposalProcessor:
                             "raw_text": proposal.get("raw_text", ""),
                             **proposed.get("properties", {}),
                         }
-                        if classification:
-                            node_props["type_confidence"] = classification.confidence
-                            # Ternary flag: only persist an explicit True/False.
-                            # None ("who knows") is left unset -> absent property
-                            # reads as null, the honest uncertain default.
-                            if classification.needs_reclassification is not None:
-                                node_props["needs_reclassification"] = (
-                                    classification.needs_reclassification
-                                )
-
                         # Preserve Hermes' initial NER type pick as provenance / a
-                        # weak prior for emergence (#505); the authoritative `type`
-                        # is the centroid-classified one above.
+                        # weak prior for emergence (#505). The authoritative type is
+                        # read by walking the instance->type IS_A edge, never stored.
                         node_props["hermes_type_hint"] = proposed.get("type")
-
-                        # Membership is a pure property: stamp the authoritative
-                        # `type_uuid` pointer at the node's type-definition. This
-                        # replaces the old instance->type IS_A edge (redundant
-                        # bookkeeping over `type_uuid` that only polluted the edge
-                        # graph); emergence loads members by this property (#505).
-                        #
-                        # Use the AUTHORITATIVE uuid from classification: emergent
-                        # types carry a hex suffix (`type_organism_a1b2c3`), so
-                        # rebuilding it from the clean name would stamp a ghost
-                        # `type_organism`, orphaning the node from its real type-def
-                        # and breaking the membership the rollup loads by. Only the
-                        # no-embedding fallback (a base type) builds it from name.
-                        type_def_uuid = (
-                            classification.type_uuid
-                            if classification
-                            else f"type_{node_type}"
-                        )
-                        node_props["type_uuid"] = type_def_uuid
 
                         node_uuid = self._hcg.add_node(
                             name=name,
@@ -426,38 +426,28 @@ class ProposalProcessor:
                         logger.error(f"Failed to create node '{name}': {e}")
                         continue
 
-                    # 2c. Ensure the type-definition node exists (MERGE is
-                    # idempotent). The node's membership in this type is the
-                    # `type_uuid` property stamped above -- we deliberately do NOT
-                    # create an instance->type IS_A edge (redundant bookkeeping
-                    # over `type_uuid` that only polluted the edge graph) (#505).
-                    _is_new_type = type_def_uuid not in self._seen_type_uuids
-                    self._seen_type_uuids.add(type_def_uuid)
-                    try:
-                        self._hcg.add_node(
-                            uuid=type_def_uuid,
-                            name=node_type,
-                            node_type="type_definition",
-                            source="sophia",
-                            derivation="observed",
+                    # 2c. Park the new instance under its realm root via a single
+                    # upward IS_A edge -- membership IS the edge now (#505, DESIGN
+                    # s3/s5). The realm root is resolved BY NAME from the type-def
+                    # catalog (never a `type_<name>` slug). Drainage later reparents
+                    # this edge to the fine type. Every membership write goes through
+                    # `placement` (the consolidation invariant), carrying placed_by.
+                    realm_root_uuid = uuid_by_name.get(node_type)
+                    if realm_root_uuid is not None:
+                        placement.attach(
+                            node_uuid,
+                            realm_root_uuid,
+                            hcg=self._hcg,
+                            children_of={},
+                            placed_by="root_fallback",
                         )
-                    except Exception as e:
+                    else:
                         logger.warning(
-                            "Could not ensure type-definition node for '%s': %s",
+                            "ingest: realm %r has no catalog uuid; node %s left "
+                            "unparked",
                             node_type,
-                            e,
+                            node_uuid,
                         )
-
-                    # Track type as new or updated for the batch event.
-                    type_entry = {"uuid": type_def_uuid, "name": node_type}
-                    if _is_new_type and not any(
-                        t["uuid"] == type_def_uuid for t in new_types
-                    ):
-                        new_types.append(type_entry)
-                    elif not _is_new_type and not any(
-                        t["uuid"] == type_def_uuid for t in updated_types
-                    ):
-                        updated_types.append(type_entry)
 
                     # 2d. Collect embedding for batch upsert
                     if embedding:
@@ -467,63 +457,6 @@ class ProposalProcessor:
                                 "embedding": embedding,
                                 "model": model,
                             }
-                        )
-
-                    # 2e. Collect centroid update (deferred to after node loop)
-                    if classification and embedding:
-                        centroid_updates.setdefault(
-                            classification.type_uuid, []
-                        ).append((embedding, model))
-
-            # 2f. Flush deferred centroid updates
-            with tracer.start_as_current_span("proposal_processor.centroid_updates"):
-                for type_uuid, assignments in centroid_updates.items():
-                    try:
-                        type_node = self._hcg.get_node(type_uuid)
-                        props = (
-                            type_node.get("properties", {})
-                            if type_node
-                            and isinstance(type_node.get("properties"), dict)
-                            else {}
-                        )
-                        member_count = props.get("member_count", 0)
-                        current_centroid = props.get("centroid")
-
-                        for embedding_val, model_val in assignments:
-                            if (
-                                isinstance(member_count, int)
-                                and isinstance(current_centroid, list)
-                                and current_centroid
-                            ):
-                                current_centroid = (
-                                    self._classifier.update_centroid_for_assignment(
-                                        type_uuid=type_uuid,
-                                        new_embedding=embedding_val,
-                                        current_centroid=current_centroid,
-                                        member_count=member_count,
-                                        model=model_val,
-                                    )
-                                )
-                                member_count += 1
-                            elif not current_centroid:
-                                self._milvus.update_centroid(
-                                    type_uuid=type_uuid,
-                                    centroid=embedding_val,
-                                    model=model_val,
-                                )
-                                current_centroid = embedding_val
-                                member_count = 1
-
-                        self._hcg.update_node(
-                            type_uuid,
-                            {
-                                "member_count": member_count,
-                                "centroid": current_centroid,
-                            },
-                        )
-                    except Exception as e:
-                        logger.debug(
-                            "Centroid update skipped for type %s: %s", type_uuid, e
                         )
 
             # 3. Ingest proposed edges
