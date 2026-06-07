@@ -207,7 +207,10 @@ def test_get_members_of_type_returns_members(
     mock_read.assert_called_once()
     query, params = mock_read.call_args[0]
     assert "relation: 'IS_A'" in query
-    assert "[:TO]->" in query
+    # uuid-anchored: seek the type by its unique-indexed uuid, then walk the
+    # INCOMING :TO edges to the IS_A edge -- NOT a graph-wide IS_A scan.
+    assert "{uuid: $type_uuid}" in query
+    assert "<-[:TO]-" in query
     assert "[:FROM]->" in query
     assert "$type_uuid" in query
     assert params == {"type_uuid": "type-123"}
