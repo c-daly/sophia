@@ -436,42 +436,6 @@ class HCGClient(LogosHCGClient):
             )
         return results
 
-    def get_nodes_by_type_uuid(self, type_uuid: str) -> list[dict]:
-        """Fetch all content nodes whose ``type_uuid`` property equals *type_uuid*.
-
-        Type membership is a pure node property: a node belongs to a minted
-        type iff its authoritative ``type_uuid`` points at that type-definition.
-        This replaces the prior instance->type ``IS_A`` edge bookkeeping -- the
-        edge was redundant with this property and only polluted the edge graph
-        (#505). Returns node dicts with the standard ``uuid``/``name``/``type``/
-        ``properties`` keys plus a top-level ``type_uuid`` for the membership
-        guard in the emergence handler. Edge nodes are excluded.
-        """
-        query = """
-        MATCH (n:Node {type_uuid: $type_uuid})
-        WHERE n.relation IS NULL
-        RETURN n.uuid as uuid, n.name as name, n.type as type,
-               n.type_uuid as type_uuid, properties(n) as props
-        """
-        records = self._execute_read(query, {"type_uuid": type_uuid})
-
-        results: list[dict] = []
-        for record in records:
-            props = dict(record["props"])
-            for key in ["uuid", "name", "type"]:
-                props.pop(key, None)
-            props = self._decode_properties(props)
-            results.append(
-                {
-                    "uuid": record["uuid"],
-                    "name": record["name"],
-                    "type": record["type"],
-                    "type_uuid": record["type_uuid"],
-                    "properties": props,
-                }
-            )
-        return results
-
     def get_members_of_type(self, type_uuid: str) -> list[dict]:
         """Fetch content nodes that are members of *type_uuid* via an IS_A edge.
 
@@ -481,12 +445,10 @@ class HCGClient(LogosHCGClient):
         its ``:TO`` pointing at ``T``. This single Cypher query joins through
         that edge directly, so there is no uuid round-trip.
 
-        This replaces the ``type_uuid``-property scan in
-        :meth:`get_nodes_by_type_uuid` (kept for now, removed in a later
-        task). Returns node dicts with the same
-        ``uuid``/``name``/``type``/``properties`` shape so callers can swap
-        over; there is no top-level ``type_uuid`` key because membership is
-        the edge now, not a property.
+        Membership is the instance->type ``IS_A`` edge; the former
+        ``type_uuid``-property scan has been removed. Returns node dicts with
+        the standard ``uuid``/``name``/``type``/``properties`` shape; there is
+        no top-level ``type_uuid`` key because membership is the edge now.
 
         Calling this with a REALM-ROOT uuid yields the drainage pool of
         that realm -- the entities parked directly under the realm root.
