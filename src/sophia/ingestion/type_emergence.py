@@ -31,7 +31,7 @@ def _mean_vector(vectors: list[list[float]]) -> list[float]:
     """Compute the element-wise mean of a list of vectors (vectorized, #177)."""
     import numpy as np
 
-    return np.asarray(vectors, dtype=np.float64).mean(axis=0).tolist()
+    return [float(x) for x in np.asarray(vectors, dtype=np.float64).mean(axis=0)]
 
 
 def _variance(vectors: list[list[float]], centroid: list[float]) -> float:

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import cast
 
 import numpy as np
 
@@ -56,7 +57,7 @@ def _distance_matrix(vectors: list[list[float]]) -> "np.ndarray":
     sq = np.einsum("ij,ij->i", x, x)
     d2 = sq[:, None] + sq[None, :] - 2.0 * (x @ x.T)
     np.maximum(d2, 0.0, out=d2)  # clamp float negatives on the diagonal
-    return np.sqrt(d2)
+    return cast("np.ndarray", np.sqrt(d2))
 
 
 def _silhouette(dmat: "np.ndarray", labels: list[int]) -> float:
