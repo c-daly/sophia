@@ -52,13 +52,16 @@ class _RecordingMilvus:
 
 class _FakeHCG:
     """Minimal HCG: a type catalog (list_all_nodes), node lookup, IS_A edges for
-    realm walks, and an update_node recorder for retypes."""
+    realm walks, and the edge ops placement.reparent needs (B2/B3: membership is
+    the instance->type IS_A edge, written via add_edge / delete_edge)."""
 
     def __init__(self, type_defs, nodes=None, edges=None):
         self._type_defs = list(type_defs)
         self._nodes = dict(nodes or {})
         self._edges = dict(edges or {})
         self.updated: list[tuple[str, dict]] = []
+        self.added_edges: list[tuple[str, str, str, dict | None]] = []
+        self.deleted_edges: list = []
 
     def list_all_nodes(self, node_type=None):
         if node_type == "type_definition":
@@ -74,11 +77,36 @@ class _FakeHCG:
     def update_node(self, uuid, props):
         self.updated.append((uuid, props))
 
+    def add_edge(self, source_uuid, target_uuid, relation, properties=None, **kw):
+        self.added_edges.append((source_uuid, target_uuid, relation, properties))
+        if relation == "IS_A":
+            # Keep the single-upward-pointer invariant in the fake adjacency.
+            self._edges[source_uuid] = [
+                {
+                    "relation": "IS_A",
+                    "target": target_uuid,
+                    "id": f"e_{source_uuid}_{target_uuid}",
+                }
+            ]
+        return "edge"
+
+    def delete_edge(self, edge_id):
+        self.deleted_edges.append(edge_id)
+        return True
+
+    def delete_edges_between(self, source, target, relation):
+        self.deleted_edges.append((source, target, relation))
+        return True
+
     def register_type(self, uuid, name, parent_uuid):
         """Mirror a mint: add the type node + its single upward IS_A edge so a
         later realm walk resolves it (used by in-pass dedup)."""
         self._nodes[uuid] = {"uuid": uuid, "name": name}
         self._edges[uuid] = [{"relation": "IS_A", "target": parent_uuid}]
+
+    def membership_edges(self):
+        """The instance->type IS_A edges drawn this pass, as (member, type)."""
+        return [(s, t) for s, t, rel, _ in self.added_edges if rel == "IS_A"]
 
 
 def _handler(hcg, milvus, name_fn, mint_fn, event_bus=None):
@@ -103,6 +131,14 @@ def _entity_pool_hcg(extra_type_defs=(), extra_nodes=None, extra_edges=None):
     return _FakeHCG(type_defs, nodes=nodes, edges=extra_edges or {})
 
 
+def _park(hcg, *uuids, parent="entity_root"):
+    """Park members directly under a realm root (their pre-drainage state) so
+    placement.reparent has a stale realm-root IS_A edge to drop."""
+    for u in uuids:
+        hcg._edges[u] = [{"relation": "IS_A", "target": parent, "id": f"e_{u}"}]
+    return hcg
+
+
 def test_parent_drives_placement_not_centroid(monkeypatch):
     cluster = EmergentCluster(members=[_m("b0"), _m("b1"), _m("b2")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
@@ -112,6 +148,7 @@ def test_parent_drives_placement_not_centroid(monkeypatch):
         extra_nodes={"vehicle_uuid": {"uuid": "vehicle_uuid", "name": "vehicle"}},
         extra_edges={"vehicle_uuid": [{"relation": "IS_A", "target": "entity_root"}]},
     )
+    _park(hcg, "b0", "b1", "b2")
     milvus = _RecordingMilvus()
     mint_calls = []
 
@@ -135,7 +172,23 @@ def test_parent_drives_placement_not_centroid(monkeypatch):
     # The LLM-named parent drives placement; the graph asserts via that parent.
     assert kwargs["parent_type_uuid"] == "vehicle_uuid"
     assert kwargs["placed_by"] == "parent_resolution"
-    assert kwargs["retype_members"] is True
+    # mint no longer retypes; drainage owns member placement via placement.reparent.
+    assert kwargs["retype_members"] is False
+    # Each fitting member's instance->type IS_A edge is re-pointed to the minted
+    # type, carrying the type's placed_by; no type_uuid property is stamped.
+    assert set(hcg.membership_edges()) == {
+        ("b0", "boat_uuid"),
+        ("b1", "boat_uuid"),
+        ("b2", "boat_uuid"),
+    }
+    assert all(
+        props == {"placed_by": "parent_resolution"}
+        for _s, _t, rel, props in hcg.added_edges
+        if rel == "IS_A"
+    )
+    assert hcg.updated == []
+    # The stale realm-root edges were dropped (single upward pointer invariant).
+    assert set(hcg.deleted_edges) == {"e_b0", "e_b1", "e_b2"}
     # Centroids never decide placement.
     assert milvus.find_nearest_calls == 0
 
@@ -143,7 +196,7 @@ def test_parent_drives_placement_not_centroid(monkeypatch):
 def test_one_cluster_one_flat_placement(monkeypatch):
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "a0", "a1")
     mint_calls = []
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -162,6 +215,9 @@ def test_one_cluster_one_flat_placement(monkeypatch):
 
     # One cluster -> exactly one mint; no recursive sub-tree minting.
     assert mint_calls == ["gadget"]
+    # Both members are re-pointed onto the minted type; no type_uuid stamp.
+    assert set(hcg.membership_edges()) == {("a0", "x_uuid"), ("a1", "x_uuid")}
+    assert hcg.updated == []
 
 
 def test_reuse_on_in_realm_name_match(monkeypatch):
@@ -172,6 +228,7 @@ def test_reuse_on_in_realm_name_match(monkeypatch):
         extra_nodes={"vehicle_uuid": {"uuid": "vehicle_uuid", "name": "vehicle"}},
         extra_edges={"vehicle_uuid": [{"relation": "IS_A", "target": "entity_root"}]},
     )
+    _park(hcg, "v0", "v1")
     minted = []
     handler = _handler(
         hcg,
@@ -183,12 +240,20 @@ def test_reuse_on_in_realm_name_match(monkeypatch):
     )
     handler.run(type_uuid="entity_root")
 
-    # Null parent + same name already in-realm -> reuse (attach), never re-mint.
-    # placed_by is "name_reuse" internally; the observable effect is the retype.
+    # Null parent + same name already in-realm -> reuse (re-point edges), never
+    # re-mint. Members inherit the type's placed_by (name_reuse).
     assert minted == []
-    assert {u for u, _ in hcg.updated} == {"v0", "v1"}
-    assert all(p["type_uuid"] == "vehicle_uuid" for _, p in hcg.updated)
-    assert all(p["type"] == "vehicle" for _, p in hcg.updated)
+    assert set(hcg.membership_edges()) == {
+        ("v0", "vehicle_uuid"),
+        ("v1", "vehicle_uuid"),
+    }
+    assert all(
+        props == {"placed_by": "name_reuse"}
+        for _s, _t, rel, props in hcg.added_edges
+        if rel == "IS_A"
+    )
+    # No type_uuid/type property stamp on members.
+    assert hcg.updated == []
 
 
 def test_cross_realm_name_match_not_reused(monkeypatch):
@@ -212,6 +277,7 @@ def test_cross_realm_name_match_not_reused(monkeypatch):
             "vehicle_concept_uuid": [{"relation": "IS_A", "target": "concept_root"}]
         },
     )
+    _park(hcg, "x0", "x1")
     mint_calls = []
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -232,13 +298,19 @@ def test_cross_realm_name_match_not_reused(monkeypatch):
     assert len(mint_calls) == 1
     assert mint_calls[0]["parent_type_uuid"] == "entity_root"
     assert mint_calls[0]["placed_by"] == "root_fallback"
-    assert hcg.updated == []  # no retype onto the cross-realm type
+    # Members are placed onto the freshly-minted entity-realm type, NOT the
+    # cross-realm same-name type.
+    assert set(hcg.membership_edges()) == {
+        ("x0", "vehicle_entity_uuid"),
+        ("x1", "vehicle_entity_uuid"),
+    }
+    assert hcg.updated == []  # no type_uuid/type stamp on members
 
 
 def test_mint_under_realm_root_fallback(monkeypatch):
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "a0", "a1")
     mint_calls = []
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -259,12 +331,22 @@ def test_mint_under_realm_root_fallback(monkeypatch):
     assert len(mint_calls) == 1
     assert mint_calls[0]["parent_type_uuid"] == "entity_root"
     assert mint_calls[0]["placed_by"] == "root_fallback"
+    # Members re-pointed onto the minted type, carrying root_fallback.
+    assert set(hcg.membership_edges()) == {
+        ("a0", "gadget_uuid"),
+        ("a1", "gadget_uuid"),
+    }
+    assert all(
+        props == {"placed_by": "root_fallback"}
+        for _s, _t, rel, props in hcg.added_edges
+        if rel == "IS_A"
+    )
 
 
 def test_unresolvable_parent_falls_back_to_realm_root(monkeypatch):
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "a0", "a1")
     mint_calls = []
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -284,12 +366,17 @@ def test_unresolvable_parent_falls_back_to_realm_root(monkeypatch):
 
     assert mint_calls[0]["parent_type_uuid"] == "entity_root"
     assert mint_calls[0]["placed_by"] == "root_fallback"
+    # Members re-pointed onto the minted type under the realm root.
+    assert set(hcg.membership_edges()) == {
+        ("a0", "gadget_uuid"),
+        ("a1", "gadget_uuid"),
+    }
 
 
 def test_outliers_stay_in_pool(monkeypatch):
     cluster = EmergentCluster(members=[_m("k0"), _m("k1"), _m("k2"), _m("out")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "k0", "k1", "k2", "out")
     minted_members: dict[str, list[str]] = {}
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -309,7 +396,16 @@ def test_outliers_stay_in_pool(monkeypatch):
     # The outlier is excluded from the minted cohort...
     assert set(minted_members["thing"]) == {"k0", "k1", "k2"}
     assert "out" not in minted_members["thing"]
-    # ...and is NOT retyped or parked -- it stays untouched in the pool.
+    # ...and is NOT re-pointed -- it keeps its realm-root edge (untouched) and
+    # re-enters the next pass. Only the fitting cohort gets new instance->type
+    # edges; no type_uuid/type stamp anywhere.
+    assert set(hcg.membership_edges()) == {
+        ("k0", "thing_uuid"),
+        ("k1", "thing_uuid"),
+        ("k2", "thing_uuid"),
+    }
+    assert "out" not in {member for member, _type in hcg.membership_edges()}
+    assert "e_out" not in hcg.deleted_edges
     assert hcg.updated == []
 
 
@@ -329,7 +425,8 @@ def test_all_outliers_mints_nothing_and_leaves_members(monkeypatch):
     handler.run(type_uuid="entity_root")
 
     assert minted == []  # nothing minted when every member is an outlier
-    assert hcg.updated == []  # members untouched, left in the pool
+    assert hcg.membership_edges() == []  # members untouched, left in the pool
+    assert hcg.updated == []
 
 
 def test_no_name_leaves_cluster_in_pool(monkeypatch):
@@ -346,6 +443,7 @@ def test_no_name_leaves_cluster_in_pool(monkeypatch):
     handler.run(type_uuid="entity_root")
 
     assert minted == []
+    assert hcg.membership_edges() == []
     assert hcg.updated == []
 
 
@@ -353,7 +451,7 @@ def test_in_pass_dedup_reuses_fresh_mint(monkeypatch):
     c1 = EmergentCluster(members=[_m("a0"), _m("a1")])
     c2 = EmergentCluster(members=[_m("b0"), _m("b1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [c1, c2])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "a0", "a1", "b0", "b1")
     mint_calls = []
 
     def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -372,16 +470,22 @@ def test_in_pass_dedup_reuses_fresh_mint(monkeypatch):
     )
     handler.run(type_uuid="entity_root")
 
-    # First cluster mints "widget"; the second reuses that fresh uuid (attach).
+    # First cluster mints "widget"; the second reuses that fresh uuid (re-point).
+    # Both cohorts' instance->type IS_A edges land on the one minted type.
     assert mint_calls == ["widget"]
-    assert {u for u, _ in hcg.updated} == {"b0", "b1"}
-    assert all(p["type_uuid"] == "widget_minted" for _, p in hcg.updated)
+    assert set(hcg.membership_edges()) == {
+        ("a0", "widget_minted"),
+        ("a1", "widget_minted"),
+        ("b0", "widget_minted"),
+        ("b1", "widget_minted"),
+    }
+    assert hcg.updated == []
 
 
 def test_mint_publishes_event_without_ancestors(monkeypatch):
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "a0", "a1")
     published = []
 
     class EB:
@@ -415,7 +519,7 @@ def test_handler_isolates_failing_cluster(monkeypatch):
     c1 = EmergentCluster(members=[_m("a0"), _m("a1")])
     c2 = EmergentCluster(members=[_m("b0"), _m("b1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [c1, c2])
-    hcg = _entity_pool_hcg()
+    hcg = _park(_entity_pool_hcg(), "a0", "a1", "b0", "b1")
     minted = []
 
     def flaky_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
@@ -437,6 +541,8 @@ def test_handler_isolates_failing_cluster(monkeypatch):
     handler.run(type_uuid="entity_root")  # must not raise
 
     assert minted == ["b"]  # the failing cluster is skipped; the other places
+    # The failing cluster placed no member edges; the other one did.
+    assert set(hcg.membership_edges()) == {("b0", "ok_uuid"), ("b1", "ok_uuid")}
 
 
 def test_no_clusters_is_a_noop(monkeypatch):
@@ -459,3 +565,7 @@ def test_legacy_subtree_and_match_helpers_removed():
     assert not hasattr(EmergenceHandler, "_park_residuals")
     assert not hasattr(eh, "_UNSORTED_TYPE")
     assert not hasattr(eh, "_UNSORTED_TYPE_UUID")
+    # The type_uuid-stamping retype helper is replaced by the edge-based
+    # placement helper (B2/B3): membership is the instance->type IS_A edge.
+    assert not hasattr(EmergenceHandler, "_attach_members")
+    assert hasattr(EmergenceHandler, "_place_members")
