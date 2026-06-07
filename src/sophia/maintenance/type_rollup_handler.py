@@ -77,12 +77,6 @@ def _is_rollup_candidate(td: dict) -> bool:
     if name in _PROTECTED_ROOT_NAMES or name.startswith("reserved_"):
         return False
     props = td.get("properties") or {}
-    anc = props.get("ancestors")
-    # Edge-type-defs are not entity types: minted ones carry `edge_type` in
-    # their ancestors; the seeded edge-type ROOT (`type_edge_type`) carries no
-    # ancestors at all, so it is excluded by name.
-    if name == "edge_type" or (isinstance(anc, list) and "edge_type" in anc):
-        return False
     # Structural type-layer detection (#171). The foundry is structure-not-
     # flags: add_node/the seeder never write an `is_type_definition` flag, so
     # filtering on it dropped every seeded root. The node `type` is set to

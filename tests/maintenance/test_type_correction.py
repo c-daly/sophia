@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from uuid import NAMESPACE_DNS, uuid5
+
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.type_correction_handler import (
     build_type_correction_handler,
 )
+
+# The seeded `entity` realm root's real uuid5 (NOT the legacy `type_entity`
+# slug). `_evict` resolves the eviction target by name and writes this uuid.
+_ENTITY_UUID = str(uuid5(NAMESPACE_DNS, "logos.hcg.type.entity"))
 
 
 class FakeHCG:
@@ -16,6 +22,19 @@ class FakeHCG:
         self.nodes = {n["uuid"]: dict(n) for n in nodes}
         self.edges = list(edges)
         self.updates = []  # (uuid, props)
+        # Seeded `entity` realm root (real uuid5), found by name via list_all_nodes.
+        self.nodes[_ENTITY_UUID] = {
+            "uuid": _ENTITY_UUID,
+            "type": "type_definition",
+            "name": "entity",
+        }
+
+    def list_all_nodes(self, node_type=None):
+        return [
+            n
+            for n in self.nodes.values()
+            if node_type is None or n.get("type") == node_type
+        ]
 
     def list_all_edges(self, relation_type=None, limit=1000):
         return [
@@ -52,7 +71,7 @@ def test_evicts_part_from_its_same_type_whole():
     _run(hcg)
     # the part (source of PART_OF) returns to the junk-drawer
     assert hcg.nodes["tusk"]["type"] == "entity"
-    assert hcg.nodes["tusk"]["type_uuid"] == "type_entity"
+    assert hcg.nodes["tusk"]["type_uuid"] == _ENTITY_UUID
     assert hcg.nodes["tusk"]["needs_reclassification"] is True
     # the whole, and an unrelated peer, are untouched
     assert hcg.nodes["narwhal"]["type"] == "marine_mammal"

@@ -41,7 +41,7 @@ Disposable-graph policy: every uuid this suite creates embeds a per-test
 namespace token, and the stub namer embeds the token in every label so
 minted type uuids (type_<slug>_<hex8>) inherit it. Teardown DETACH-DELETEs
 every node and reified edge node carrying the token. The only shared key
-touched is the seeded type_entity realm root (the graft terminal), created
+touched is the seeded entity realm root (the graft terminal), created
 only when absent and removed again only if this suite created it.
 """
 
@@ -75,6 +75,13 @@ _DIM = 8
 _JITTER_AXIS = 6
 # Axis layout for the synthetic embeddings: 0/1 = rollup super groups,
 # 2/3 = rollup fine-group offsets, 4/5 = emergence member groups, 6 = jitter.
+
+# Graft terminal for the entity realm root. A real uuid4 (never a ^type_ slug,
+# per the seeded-skeleton design), held as a module constant so the fixture and
+# the frozen invariant bodies share one identity. B7 (the invariant-body
+# rewrite to the live-edge skeleton) will fold this into the seeded realm uuid;
+# until then this de-couples the previously-hardcoded slug.
+_ENTITY_REALM_UUID = "3c73215f-2f7c-4c66-b31f-b744b8e369f0"
 
 
 def _vec(
@@ -348,27 +355,27 @@ def hcg():
 
 @pytest.fixture(scope="module")
 def entity_root(hcg):
-    """Ensure the seeded type_entity realm root (rollup graft terminal) exists.
+    """Ensure the seeded entity realm root (rollup graft terminal) exists.
 
     Created only when absent (routinely-wiped dev graphs); deleted again in
     teardown only if THIS suite created it, so a seeded shared root is never
     touched.
     """
     marker = "r1-gate-fixture"
-    created = hcg.get_node("type_entity") is None
+    created = hcg.get_node(_ENTITY_REALM_UUID) is None
     if created:
         hcg.add_node(
             name="entity",
             node_type="type_definition",
-            uuid="type_entity",
+            uuid=_ENTITY_REALM_UUID,
             properties={"is_type_definition": True, "ancestors": ["root", "node"]},
             source=marker,
         )
-    yield "type_entity"
+    yield _ENTITY_REALM_UUID
     if created:
         hcg._execute_query(
             "MATCH (n:Node {uuid: $u, source: $s}) DETACH DELETE n",
-            {"u": "type_entity", "s": marker},
+            {"u": _ENTITY_REALM_UUID, "s": marker},
         )
 
 
@@ -428,7 +435,7 @@ def test_run_twice_zero_churn(hcg, entity_root, ns):
                 f"{ro_ns} t{gi}{j}",
                 ["root", "node", "entity"],
                 f"r1-{ns}",
-                parent_uuid="type_entity",
+                parent_uuid=_ENTITY_REALM_UUID,
             )
             milvus.update_centroid(
                 type_uuid=uuid,
@@ -489,7 +496,7 @@ def test_two_writer_arbitration_no_loop(hcg, entity_root, ns):
         f"{ns} alpha",
         ["root", "node", "entity"],
         f"r1-{ns}",
-        parent_uuid="type_entity",
+        parent_uuid=_ENTITY_REALM_UUID,
     )
     b_uuid = _seed_type_def(
         hcg,
@@ -497,7 +504,7 @@ def test_two_writer_arbitration_no_loop(hcg, entity_root, ns):
         f"{ns} beta",
         ["root", "node", "entity"],
         f"r1-{ns}",
-        parent_uuid="type_entity",
+        parent_uuid=_ENTITY_REALM_UUID,
     )
     ma = _seed_member(hcg, milvus, ns, "ma", a_uuid, _vec(4))
     mb = _seed_member(hcg, milvus, ns, "mb", b_uuid, _vec(5))
@@ -530,7 +537,7 @@ def test_two_writer_arbitration_no_loop(hcg, entity_root, ns):
     # The loser was NOT force-reparented: it keeps its original root parent.
     (winner_child, winner_parent) = next(iter(between))
     loser = b_uuid if winner_child == a_uuid else a_uuid
-    assert {t for (s, t, _e) in is_a if s == loser} == {"type_entity"}
+    assert {t for (s, t, _e) in is_a if s == loser} == {_ENTITY_REALM_UUID}
     assert {t for (s, t, _e) in is_a if s == winner_child} == {winner_parent}
 
     # Second writer pass over the same evidence: zero churn, still one record.

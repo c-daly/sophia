@@ -26,7 +26,7 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     hcg_client.add_node(
         uuid="table",
         name="Table",
-        node_type="location",
+        node_type="entity",
         properties={"location_type": "surface"},
         source="bootstrap",
         derivation="observed",
@@ -34,7 +34,7 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     hcg_client.add_node(
         uuid="bin",
         name="Bin",
-        node_type="location",
+        node_type="entity",
         properties={"location_type": "container"},
         source="bootstrap",
         derivation="observed",
@@ -44,7 +44,7 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     hcg_client.add_node(
         uuid="red_block",
         name="Red Block",
-        node_type="object",
+        node_type="entity",
         properties={"color": "red", "object_type": "block"},
         source="bootstrap",
         derivation="observed",
@@ -52,7 +52,7 @@ def seed_pick_and_place_data(hcg_client: HCGClient) -> None:
     hcg_client.add_node(
         uuid="blue_block",
         name="Blue Block",
-        node_type="object",
+        node_type="entity",
         properties={"color": "blue", "object_type": "block"},
         source="bootstrap",
         derivation="observed",
