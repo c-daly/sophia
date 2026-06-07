@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections import Counter
 
 import httpx
@@ -190,15 +189,20 @@ def test_type_cluster_parent_null_and_missing_residuals(monkeypatch):
     assert result.residual_ids == []
 
 
-def test_type_cluster_empty_name_returns_none(monkeypatch, caplog):
+def test_type_cluster_empty_name_returns_none(monkeypatch):
     def fake_post(url, json=None, headers=None, timeout=None):
         return _FakeResp({"name": "", "parent": "entity"})
 
     monkeypatch.setattr(hn.httpx, "post", fake_post)
-    with caplog.at_level(logging.WARNING, logger="sophia.maintenance.hermes_naming"):
-        result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    # Spy on the module logger directly rather than via caplog: in a full-suite
+    # run the app's logging config can disable propagation to caplog's root
+    # handler, so the (emitted) warning isn't captured -- a CI-only flake. The
+    # contract is `result is None` AND a warning was logged.
+    warnings: list[tuple] = []
+    monkeypatch.setattr(hn.logger, "warning", lambda *a, **k: warnings.append((a, k)))
+    result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
     assert result is None
-    assert any(r.levelno == logging.WARNING for r in caplog.records)
+    assert warnings
 
 
 def test_type_cluster_missing_name_returns_none(monkeypatch):
