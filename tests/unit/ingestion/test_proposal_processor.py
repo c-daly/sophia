@@ -1419,6 +1419,14 @@ class TestRealmTriage:
         assert _realm_for("") == "entity"
         assert _realm_for(None) == "entity"
 
+    def test_realm_for_non_string_defaults_to_entity(self):
+        """A malformed payload (non-string ontology type) must not raise."""
+        from sophia.ingestion.proposal_processor import _realm_for
+
+        assert _realm_for(5) == "entity"  # type: ignore[arg-type]
+        assert _realm_for({"x": 1}) == "entity"  # type: ignore[arg-type]
+        assert _realm_for(["entity"]) == "entity"  # type: ignore[arg-type]
+
     def test_collection_for_is_single_content_collection(self):
         from sophia.ingestion.proposal_processor import _collection_for
 

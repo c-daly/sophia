@@ -120,10 +120,13 @@ _RESERVED_EDGE_KEYS = frozenset(
 def _realm_for(ontology_type: str) -> str:
     """Collapse a hermes NER ontology type to one of the 3 realms.
 
-    LLM-free triage over the existing NER output (#505, DESIGN s5). An unknown or
-    missing ontology type defaults to the ``entity`` realm.
+    LLM-free triage over the existing NER output (#505, DESIGN s5). An unknown,
+    missing, or non-string ontology type (a malformed payload) defaults to the
+    ``entity`` realm rather than raising.
     """
-    return _ONTOLOGY_TYPE_TO_REALM.get((ontology_type or "").strip().lower(), "entity")
+    return _ONTOLOGY_TYPE_TO_REALM.get(
+        str(ontology_type or "").strip().lower(), "entity"
+    )
 
 
 def _collection_for(node_type: str) -> str:
