@@ -139,6 +139,8 @@ def reparent(
     that would close a cycle, record it as competing evidence and return rather
     than force a false IS_A (deflect-and-record, DESIGN sec 6).
     """
+    if placed_by not in PLACED_BY_REASONS:
+        raise ValueError(f"invalid placed_by: {placed_by!r}")
     if child_uuid == new_parent_uuid:
         return
     if creates_cycle(child_uuid, new_parent_uuid, children_of):
@@ -302,7 +304,11 @@ def _walk_to_realm(uuid: str, *, hcg: Any) -> str | None:
     cur: str | None = uuid
     while cur and cur not in seen:
         seen.add(cur)
-        node = hcg.get_node(cur)
+        try:
+            node = hcg.get_node(cur)
+        except Exception:
+            logger.exception("placement: _walk_to_realm get_node failed for %s", cur)
+            return None
         if not node:
             return None
         name = str(node.get("name") or "").strip().lower()

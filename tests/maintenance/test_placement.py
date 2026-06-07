@@ -9,6 +9,8 @@ guards deflect-and-record (cycle -> AMBIGUOUS_SUBSUMPTION) rather than force.
 
 from __future__ import annotations
 
+import pytest
+
 from sophia.maintenance import placement
 
 
@@ -314,6 +316,30 @@ def test_resolve_parent_no_realm_arg_skips_check():
     )
 
 
+def test_resolve_parent_returns_none_on_walk_get_node_error():
+    # The first get_node (the uuid->node lookup in resolve_parent) succeeds; the
+    # SECOND call -- the ancestor hop inside _walk_to_realm -- raises. The walk
+    # must fail closed so resolve_parent returns None and never propagates the
+    # exception (callers then degrade to mint-under-realm-root).
+    nodes, edges, uuid_by_name = _seed_skeleton()
+
+    class WalkRaisingHCG(FakeHCG):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._get_calls = 0
+
+        def get_node(self, uuid):
+            self._get_calls += 1
+            if self._get_calls >= 2:
+                raise RuntimeError("boom during ancestor walk")
+            return super().get_node(uuid)
+
+    hcg = WalkRaisingHCG(nodes, edges)
+    assert (
+        placement.resolve_parent("vehicle", uuid_by_name=uuid_by_name, hcg=hcg) is None
+    )
+
+
 # --------------------------------------------------------------------------- #
 # realm_of                                                                    #
 # --------------------------------------------------------------------------- #
@@ -441,6 +467,21 @@ def test_reparent_self_is_noop():
         placed_by="parent_resolution",
     )
     assert hcg.edges == before
+
+
+def test_reparent_rejects_invalid_placed_by():
+    # placed_by must be one of PLACED_BY_REASONS -- a non-canonical tag would
+    # break IS_A edge traceability, so reparent rejects it up front.
+    nodes, edges, _ = _seed_skeleton()
+    hcg = FakeHCG(nodes, edges)
+    with pytest.raises(ValueError):
+        placement.reparent(
+            "u_vehicle",
+            "u_entity",
+            hcg=hcg,
+            children_of={},
+            placed_by="bogus",
+        )
 
 
 # --------------------------------------------------------------------------- #
