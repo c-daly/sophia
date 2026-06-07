@@ -77,17 +77,17 @@ class TestHCGSnapshotEndpoint:
         assert "edges" in data
 
     @patch("sophia.api.app._hcg_client")
-    def test_snapshot_embeddings_batched_and_routed_by_collection(
+    def test_snapshot_embeddings_batched_from_one_content_collection(
         self, mock_hcg, client, auth_headers
     ):
-        """include_embeddings looks each node up in the collection that holds its
-        vector (Entity vs Concept), and batches the `uuid in [...]` filter so the
-        expression stays under Milvus's length cap (greptile #158 + collection
-        sharding)."""
+        """include_embeddings looks every content node up in the SINGLE content
+        collection keyed by uuid (#505, Chris: "one collection") regardless of
+        realm, and batches the `uuid in [...]` filter so the expression stays
+        under Milvus's length cap (greptile #158)."""
         import re
 
-        # 3 entity nodes + 1 concept node. With the batch size forced to 2, the
-        # entity collection must be queried in 2 chunks; concept in 1.
+        # 3 entity nodes + 1 concept node. All content vectors share ONE
+        # collection; with the batch size forced to 2 it is queried in 2 chunks.
         mock_hcg.list_all_nodes.return_value = [
             {"uuid": "e1", "type": "entity", "name": "e1", "properties": {}},
             {"uuid": "e2", "type": "entity", "name": "e2", "properties": {}},
@@ -96,13 +96,15 @@ class TestHCGSnapshotEndpoint:
         ]
         mock_hcg.list_all_edges.return_value = []
 
+        # The realm (entity/concept) does NOT select a collection: every content
+        # vector lives in the one content collection (hcg_entity_embeddings).
         store = {
             "hcg_entity_embeddings": {
                 "e1": [0.1, 0.2],
                 "e2": [0.3, 0.4],
                 "e3": [0.5, 0.6],
+                "c1": [0.7, 0.8],
             },
-            "hcg_concept_embeddings": {"c1": [0.7, 0.8]},
         }
 
         class FakeCollection:
@@ -137,17 +139,17 @@ class TestHCGSnapshotEndpoint:
         assert response.status_code == 200
         ents = {e["id"]: e["embedding"] for e in response.json()["entities"]}
         # Every node got its vector -- including the concept node, whose vector
-        # lives in a different collection than hcg_entity_embeddings.
+        # shares the single content collection.
         assert ents == {
             "e1": [0.1, 0.2],
             "e2": [0.3, 0.4],
             "e3": [0.5, 0.6],
             "c1": [0.7, 0.8],
         }
-        by_name = {c.name: c for c in FakeCollection.instances}
-        # Entity collection queried in 2 batches ([e1,e2], [e3]); concept once.
-        assert by_name["hcg_entity_embeddings"].queries == [["e1", "e2"], ["e3"]]
-        assert by_name["hcg_concept_embeddings"].queries == [["c1"]]
+        # Exactly one collection is opened (the single content collection),
+        # queried in 2 batches: [e1, e2] then [e3, c1].
+        assert [c.name for c in FakeCollection.instances] == ["hcg_entity_embeddings"]
+        assert FakeCollection.instances[0].queries == [["e1", "e2"], ["e3", "c1"]]
 
 
 class TestHCGEntitiesEndpoint:
