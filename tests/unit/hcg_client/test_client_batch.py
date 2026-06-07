@@ -151,3 +151,81 @@ def test_find_nodes_by_names_empty_input(client: HCGClient) -> None:
     """find_nodes_by_names should return empty dict for empty input."""
     result = client.find_nodes_by_names([])
     assert result == {}
+
+
+# --- get_members_of_type tests ---
+
+
+def test_get_members_of_type_returns_members(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """get_members_of_type returns decoded member nodes for a type via IS_A edge."""
+    mock_read = MagicMock(
+        return_value=[
+            {
+                "uuid": "aaa",
+                "name": "Alpha",
+                "type": "concept",
+                "props": {
+                    "uuid": "aaa",
+                    "name": "Alpha",
+                    "type": "concept",
+                    "custom": "val1",
+                },
+            },
+            {
+                "uuid": "bbb",
+                "name": "Beta",
+                "type": "entity",
+                "props": {
+                    "uuid": "bbb",
+                    "name": "Beta",
+                    "type": "entity",
+                    "custom": "val2",
+                },
+            },
+        ]
+    )
+    monkeypatch.setattr(client, "_execute_read", mock_read)
+
+    result = client.get_members_of_type("type-123")
+
+    assert len(result) == 2
+    assert result[0]["uuid"] == "aaa"
+    assert result[0]["name"] == "Alpha"
+    assert result[0]["type"] == "concept"
+    assert result[0]["properties"] == {"custom": "val1"}
+    assert result[1]["uuid"] == "bbb"
+    assert result[1]["name"] == "Beta"
+    assert result[1]["properties"] == {"custom": "val2"}
+    # membership is the edge now: no top-level type_uuid key is returned
+    assert "type_uuid" not in result[0]
+    assert "type_uuid" not in result[1]
+
+    # Verify the query joins through the instance->type IS_A edge
+    # (FROM=member, TO=type) and binds type_uuid.
+    mock_read.assert_called_once()
+    query, params = mock_read.call_args[0]
+    assert "relation: 'IS_A'" in query
+    # uuid-anchored: seek the type by its unique-indexed uuid, then walk the
+    # INCOMING :TO edges to the IS_A edge -- NOT a graph-wide IS_A scan.
+    assert "{uuid: $type_uuid}" in query
+    assert "<-[:TO]-" in query
+    assert "[:FROM]->" in query
+    assert "$type_uuid" in query
+    assert params == {"type_uuid": "type-123"}
+
+
+def test_get_members_of_type_empty(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """get_members_of_type returns an empty list when the type has no members."""
+    mock_read = MagicMock(return_value=[])
+    monkeypatch.setattr(client, "_execute_read", mock_read)
+
+    result = client.get_members_of_type("type-empty")
+
+    assert result == []
+    mock_read.assert_called_once()
+    params = mock_read.call_args[0][1]
+    assert params == {"type_uuid": "type-empty"}

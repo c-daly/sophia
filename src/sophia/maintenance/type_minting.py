@@ -1,15 +1,16 @@
-"""Mint an emergent type from a named cluster: type node + centroid + retype (#505).
+"""Mint an emergent type from a named cluster: type node + centroid + IS_A edge.
 
 `mint_type` creates one NEW type-definition from a cluster:
 - create a `:Node` type-definition under its parent with name_history lineage,
 - seed its Milvus centroid (= mean of member embeddings),
-- retype each member (authoritative `type_uuid` property via update_node),
-  unless `retype_members=False` (an internal super-type whose members are
-  retyped at the leaf subtypes below it).
+- wire its own single upward IS_A edge to the parent type-definition.
 
-Membership is the `type_uuid` property -- emergence does NOT create an
-instance->type IS_A edge (it was redundant with `type_uuid`). The taxonomy
-IS_A (new type-definition -> parent type-definition) is created below.
+Membership is the instance->type IS_A edge now, NOT a `type_uuid` property
+(B2/B3, DESIGN §3): minting does NOT touch the members. The draining caller
+(`EmergenceHandler._place_cluster`) owns member placement -- it re-points each
+fitting member's single upward IS_A edge onto this type through
+`placement.reparent`. The `retype_members` flag is therefore a no-op, kept only
+so the gated-off rollup tier's `retype_members=False` call site still resolves.
 
 HCGClient encodes nested properties (name_history) transparently. No `ancestors`
 property is stored: structure (the IS_A edges) is the membership/typing fact,
@@ -69,16 +70,21 @@ def mint_type(
     # always pass a real uuid.
     parent_ancestors: list[str] | None = None,
     parent_name: str | None = None,
+    # NO-OP since B2/B3: membership is the instance->type IS_A edge, re-pointed by
+    # the draining caller via placement.reparent -- mint_type no longer retypes
+    # members. Kept only so the gated-off rollup tier's `retype_members=False`
+    # call site still resolves; removed when rollup is converted onto placement.py.
     retype_members: bool = True,
     placed_by: str | None = None,
 ) -> str:
-    """Create the type-definition node, seed its centroid, and retype members.
+    """Create the type-definition node, seed its centroid, and wire its IS_A edge.
 
     The type uuid carries a random suffix so that two clusters that Hermes
     happens to name identically mint *distinct* type-definition nodes (and
-    distinct centroids) instead of overwriting each other -- members are tied
-    to a specific minted type via their ``type_uuid`` property pointing at this
-    uuid, not via the shared label string.
+    distinct centroids) instead of overwriting each other. Members are NOT
+    touched here -- membership is the instance->type IS_A edge, re-pointed onto
+    this type by the draining caller through ``placement.reparent`` (B2/B3,
+    DESIGN §3).
     """
     slug = _slugify(name.label)
     type_uuid = f"type_{slug}_{uuid4().hex[:8]}"
@@ -122,19 +128,11 @@ def mint_type(
         model=model,
     )
 
-    # Retype members onto this type, unless this is an internal super-type whose
-    # members belong to its child subtypes (the caller retypes them at the
-    # leaves). Membership is a pure property: stamp the authoritative current-type
-    # pointer (`type_uuid`, overwritten on each retype) and the human-facing
-    # `type` slug. We deliberately do NOT create an instance->type IS_A edge --
-    # that edge was redundant bookkeeping over `type_uuid` and only polluted the
-    # edge graph. _member_rows loads members directly by this `type_uuid`
-    # property, so a member retyped away from a parent is excluded automatically
-    # (no stale-edge cleanup needed) (#505).
-    if retype_members:
-        for member in cluster.members:
-            hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
-
+    # Members are NOT retyped here. Membership is the instance->type IS_A edge
+    # (B2/B3, DESIGN §3): the draining caller re-points each fitting member's
+    # single upward IS_A edge onto this type via placement.reparent. mint_type
+    # only owns the type-definition node, its centroid, and its own IS_A edge to
+    # the parent (created above). No `type_uuid`/`type` property is stamped.
     logger.info(
         "Minted type %s (%s) from %d members", name.label, type_uuid, cluster.size
     )

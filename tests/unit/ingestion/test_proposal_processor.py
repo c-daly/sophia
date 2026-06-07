@@ -44,69 +44,12 @@ class TestProposalProcessor:
         )
 
         assert len(result["stored_node_ids"]) == 1
-        # add_node called twice: once for entity, once for type_definition
-        assert mock_hcg.add_node.call_count == 2
+        # add_node called once: only the entity. No type-definition is minted at
+        # ingest now -- the realm roots are seeded and membership is the IS_A edge.
+        assert mock_hcg.add_node.call_count == 1
         # Embeddings should be batched, not individually upserted
         mock_milvus.upsert_embedding.assert_not_called()
         mock_milvus.batch_upsert_embeddings.assert_called()
-
-    def test_emergent_hex_type_stamps_authoritative_type_uuid(self):
-        """A node classified to a hex-suffixed emergent type is stamped with that
-        exact type_uuid (and the type-def is registered under it) -- not a ghost
-        uuid rebuilt from the clean name, which would orphan it from its type-def
-        and break the membership the rollup loads by (greptile #161)."""
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        HEX = "type_organism_a1b2c3"
-        mock_hcg = MagicMock()
-        mock_hcg.add_node.return_value = "new-uuid"
-        # the classifier resolves the clean name via get_node (post-af0ab36)
-        mock_hcg.get_node.return_value = {"uuid": HEX, "name": "organism"}
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []
-        mock_milvus.find_nearest_types.return_value = [{"uuid": HEX, "score": 0.1}]
-
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-        processor.process(
-            {
-                "proposal_id": "p1",
-                "proposed_nodes": [
-                    {
-                        "name": "Rex",
-                        "type": "ANIMAL",
-                        "embedding": [0.1] * 384,
-                        "embedding_id": "emb-1",
-                        "dimension": 384,
-                        "model": "all-MiniLM-L6-v2",
-                        "properties": {},
-                    }
-                ],
-                "document_embedding": {
-                    "embedding": [0.5] * 384,
-                    "embedding_id": "doc-1",
-                    "dimension": 384,
-                    "model": "all-MiniLM-L6-v2",
-                },
-                "raw_text": "Rex",
-                "source_service": "hermes",
-                "confidence": 0.7,
-                "metadata": {},
-            }
-        )
-
-        calls = mock_hcg.add_node.call_args_list
-        entity_calls = [
-            c for c in calls if c.kwargs.get("node_type") != "type_definition"
-        ]
-        td_calls = [c for c in calls if c.kwargs.get("node_type") == "type_definition"]
-        assert entity_calls, "no entity node was created"
-        assert entity_calls[0].kwargs["properties"]["type_uuid"] == HEX, (
-            "node membership must point at the authoritative hex type_uuid, "
-            f"got {entity_calls[0].kwargs['properties'].get('type_uuid')!r}"
-        )
-        assert (
-            td_calls and td_calls[0].kwargs["uuid"] == HEX
-        ), "type-def must be registered under the authoritative hex uuid (no ghost)"
 
     def test_returns_relevant_context(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor
@@ -331,78 +274,6 @@ class TestProposalProcessor:
             f"add_node called {len(entity_add_calls)} times for the repeated "
             "embedding-less entity; expected exactly 2 (no name-based dedup)"
         )
-
-    def test_similar_embeddings_in_different_collections_not_merged(self):
-        """Cross-collection nodes must not be merged by in-process dedup (#151).
-
-        Two mentions with (near-)identical embeddings but classified into
-        different collections (Entity vs Concept) are distinct identities. The
-        persisted Milvus dedup (2a) is collection-scoped, so the in-process pass
-        must be too -- batch membership alone must not collapse two nodes that
-        separate batches would keep apart.
-        """
-        from types import SimpleNamespace
-
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        mock_hcg = MagicMock()
-        mock_hcg.add_node.side_effect = [f"uuid-{i}" for i in range(10)]
-        mock_hcg.get_node.return_value = None
-
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []
-
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-        # Force two different collections for identical embeddings.
-        processor._classifier = MagicMock()
-        processor._classifier.classify.side_effect = [
-            SimpleNamespace(
-                type_name="entity",
-                type_uuid="type_entity",
-                confidence=0.9,
-                needs_reclassification=False,
-            ),
-            SimpleNamespace(
-                type_name="concept",
-                type_uuid="type_concept",
-                confidence=0.9,
-                needs_reclassification=False,
-            ),
-        ]
-
-        emb = [0.1] * 384
-        result = processor.process(
-            {
-                "proposal_id": "p-xcoll",
-                "source_service": "hermes",
-                "confidence": 0.7,
-                "raw_text": "x",
-                "proposed_nodes": [
-                    {
-                        "name": "Alpha",
-                        "type": "entity",
-                        "embedding": list(emb),
-                        "embedding_id": "e1",
-                        "dimension": 384,
-                        "model": "m",
-                        "properties": {},
-                    },
-                    {
-                        "name": "Beta",
-                        "type": "concept",
-                        "embedding": list(emb),
-                        "embedding_id": "e2",
-                        "dimension": 384,
-                        "model": "m",
-                        "properties": {},
-                    },
-                ],
-                "proposed_edges": [],
-            }
-        )
-
-        # Identical embeddings but different collections => two distinct nodes.
-        assert len(result["stored_node_ids"]) == 2, result["stored_node_ids"]
 
     def test_skips_empty_name_nodes(self):
         from sophia.ingestion.proposal_processor import ProposalProcessor
@@ -741,236 +612,6 @@ class TestProposalProcessor:
         assert "relation" not in props
         assert props.get("safe_key") == "safe_value"
 
-    # -- Deferred centroid update tests --
-
-    def test_centroid_updates_deferred(self):
-        """3 nodes sharing the same type -> get_node for the type called once,
-        update_node for the type called once (batched after node loop)."""
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        mock_hcg = MagicMock()
-        # add_node returns distinct uuids for the 3 entity nodes + type_definition merges
-        node_uuids = iter(["uuid-a", "uuid-b", "uuid-c"])
-
-        def add_node_side_effect(**kwargs):
-            if kwargs.get("node_type") == "type_definition":
-                return kwargs.get("uuid", "type_entity")
-            return next(node_uuids)
-
-        mock_hcg.add_node.side_effect = add_node_side_effect
-
-        # get_node is called during centroid flush -- return type node with existing centroid
-        mock_hcg.get_node.return_value = {
-            "uuid": "type_entity",
-            "name": "entity",
-            "type": "type_definition",
-            "properties": {
-                "member_count": 10,
-                "centroid": [0.5] * 384,
-            },
-        }
-
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []  # no dedup matches
-        mock_milvus.find_nearest_types.return_value = [
-            {"uuid": "type_entity", "score": 0.1},
-        ]
-
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-        result = processor.process(
-            {
-                "proposal_id": "p-batch",
-                "proposed_nodes": [
-                    {
-                        "name": f"Node{i}",
-                        "type": "entity",
-                        "embedding": [0.1 * i] * 384,
-                        "embedding_id": f"emb-{i}",
-                        "dimension": 384,
-                        "model": "all-MiniLM-L6-v2",
-                        "properties": {},
-                    }
-                    for i in range(1, 4)
-                ],
-                "proposed_edges": [],
-                "document_embedding": None,
-                "raw_text": "",
-                "source_service": "hermes",
-                "confidence": 0.7,
-                "metadata": {},
-            }
-        )
-
-        assert len(result["stored_node_ids"]) == 3
-
-        # get_node("type_entity") is called once per node by the classifier
-        # (resolving the type's clean label) plus once by the batched centroid
-        # flush -> 3 + 1 for this 3-node proposal. The flush itself stays batched
-        # regardless: that guarantee is asserted via the single update_node call
-        # (and final member_count) below, not via the get_node count.
-        type_get_calls = [
-            c
-            for c in mock_hcg.get_node.call_args_list
-            if c.args == ("type_entity",) or c.kwargs.get("uuid") == "type_entity"
-        ]
-        assert (
-            len(type_get_calls) == 4
-        ), f"Expected 4 get_node calls for type_entity, got {len(type_get_calls)}"
-
-        # update_node for the type should be called once with the final member_count
-        type_update_calls = [
-            c for c in mock_hcg.update_node.call_args_list if c.args[0] == "type_entity"
-        ]
-        assert (
-            len(type_update_calls) == 1
-        ), f"Expected 1 update_node call for type_entity, got {len(type_update_calls)}"
-        # Final member_count should be 10 + 3 = 13
-        assert type_update_calls[0].args[1]["member_count"] == 13
-
-    def test_centroid_first_node_initializes(self):
-        """When there is no current centroid, update_centroid should be called
-        to initialize it with the first embedding."""
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        mock_hcg = MagicMock()
-        mock_hcg.add_node.return_value = "uuid-new"
-        # Type node has no centroid yet
-        mock_hcg.get_node.return_value = {
-            "uuid": "type_entity",
-            "name": "entity",
-            "type": "type_definition",
-            "properties": {
-                "member_count": 0,
-            },
-        }
-
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []
-        mock_milvus.find_nearest_types.return_value = [
-            {"uuid": "type_entity", "score": 0.1},
-        ]
-
-        embedding = [0.3] * 384
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-        result = processor.process(
-            {
-                "proposal_id": "p-init",
-                "proposed_nodes": [
-                    {
-                        "name": "FirstNode",
-                        "type": "entity",
-                        "embedding": embedding,
-                        "embedding_id": "emb-init",
-                        "dimension": 384,
-                        "model": "all-MiniLM-L6-v2",
-                        "properties": {},
-                    }
-                ],
-                "proposed_edges": [],
-                "document_embedding": None,
-                "raw_text": "",
-                "source_service": "hermes",
-                "confidence": 0.7,
-                "metadata": {},
-            }
-        )
-
-        assert len(result["stored_node_ids"]) == 1
-        # update_centroid should be called to initialize the centroid
-        mock_milvus.update_centroid.assert_called_once_with(
-            type_uuid="type_entity",
-            centroid=embedding,
-            model="all-MiniLM-L6-v2",
-        )
-
-    def test_centroid_failure_does_not_block(self):
-        """A centroid update failure must not affect stored_node_ids."""
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        mock_hcg = MagicMock()
-        mock_hcg.add_node.return_value = "uuid-ok"
-        # Make get_node raise during centroid flush
-        mock_hcg.get_node.side_effect = RuntimeError("Neo4j down")
-
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []
-        mock_milvus.find_nearest_types.return_value = [
-            {"uuid": "type_entity", "score": 0.1},
-        ]
-
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-        result = processor.process(
-            {
-                "proposal_id": "p-fail",
-                "proposed_nodes": [
-                    {
-                        "name": "SafeNode",
-                        "type": "entity",
-                        "embedding": [0.2] * 384,
-                        "embedding_id": "emb-safe",
-                        "dimension": 384,
-                        "model": "all-MiniLM-L6-v2",
-                        "properties": {},
-                    }
-                ],
-                "proposed_edges": [],
-                "document_embedding": None,
-                "raw_text": "",
-                "source_service": "hermes",
-                "confidence": 0.7,
-                "metadata": {},
-            }
-        )
-
-        # Node should still be stored even though centroid update failed
-        assert result["stored_node_ids"] == ["uuid-ok"]
-
-    def test_process_uses_type_classifier(self):
-        """Sophia classifies node type via centroid, ignoring Hermes type hint."""
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        mock_hcg = MagicMock()
-        mock_hcg.add_node.return_value = "uuid-1"
-        mock_hcg.get_node.return_value = None
-
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []  # no dedup match
-        mock_milvus.find_nearest_types.return_value = [
-            {"uuid": "type_location", "score": 0.1},
-        ]
-
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-        proposal = {
-            "proposal_id": "test-1",
-            "source_service": "hermes",
-            "confidence": 0.8,
-            "raw_text": "Dublin is a city",
-            "proposed_nodes": [
-                {
-                    "name": "Dublin",
-                    "type": "state",  # Hermes says state -- should be ignored
-                    "embedding": [0.1] * 384,
-                    "embedding_id": "emb-1",
-                    "dimension": 384,
-                    "model": "all-MiniLM-L6-v2",
-                    "properties": {"start": 0, "end": 6},
-                }
-            ],
-            "proposed_edges": [],
-            "document_embedding": {
-                "embedding": [0.2] * 384,
-                "embedding_id": "doc-1",
-                "dimension": 384,
-                "model": "all-MiniLM-L6-v2",
-            },
-        }
-
-        processor.process(proposal)
-
-        # Verify add_node was called with Sophia's classification, not Hermes's
-        add_node_call = mock_hcg.add_node.call_args_list[0]
-        assert add_node_call.kwargs.get("node_type") == "location"  # NOT "state"
-
 
 class TestBatchEmbeddings:
     """Tests for batch embedding upsert behavior in ProposalProcessor."""
@@ -1031,51 +672,6 @@ class TestBatchEmbeddings:
 
         mock_milvus.upsert_embedding.assert_not_called()
         mock_milvus.batch_upsert_embeddings.assert_called()
-
-    def test_multiple_nodes_different_collections_get_separate_batches(self):
-        """Nodes classified into different collections should produce separate batch calls."""
-        mock_hcg = MagicMock()
-        mock_hcg.add_node.side_effect = [
-            "uuid-entity",
-            "type-def-1",
-            "uuid-concept",
-            "type-def-2",
-        ]
-        mock_hcg.get_node.return_value = None
-
-        mock_milvus = MagicMock()
-        mock_milvus.search_similar.return_value = []
-        mock_milvus.find_nearest_types.side_effect = [
-            [{"uuid": "type_entity", "score": 0.1}],
-            [{"uuid": "type_concept", "score": 0.1}],
-        ]
-
-        from sophia.ingestion.proposal_processor import ProposalProcessor
-
-        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
-
-        # Distinct embeddings: these are different entities in different
-        # collections. (The default _make_node embedding is identical for every
-        # node, which the within-ingest embedding dedup would correctly collapse
-        # into one node -- defeating this test's purpose of exercising separate
-        # per-collection batches.)
-        proposal = self._make_proposal(
-            nodes=[
-                self._make_node("Alpha", node_type="entity", embedding=[0.1] * 384),
-                self._make_node("Beta", node_type="concept", embedding=[0.9] * 384),
-            ]
-        )
-        processor.process(proposal)
-
-        batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
-        called_collections = set()
-        for c in batch_calls:
-            nt = c.kwargs.get("node_type")
-            if nt is None and c.args:
-                nt = c.args[0]
-            called_collections.add(nt)
-        assert "Entity" in called_collections
-        assert "Concept" in called_collections
 
     def test_edge_embeddings_batched_to_edge_collection(self):
         """Edge embeddings should be batched into the Edge collection."""
@@ -1705,7 +1301,9 @@ class TestProposalProcessorRedisSnapshot:
             },
         ]
 
-        processor.process(self._make_proposal())
+        # Ingest no longer mints types, so the snapshot is exercised directly
+        # rather than through process() (#505).
+        processor._write_type_snapshot()
 
         # Verify Redis write
         mock_redis.set.assert_called_once()
@@ -1785,9 +1383,113 @@ class TestProposalProcessorRedisSnapshot:
             {"uuid": "type_empty", "name": "", "properties": {"member_count": 0}},
         ]
 
-        processor.process(self._make_proposal())
+        processor._write_type_snapshot()
 
         value = json.loads(mock_redis.set.call_args[0][1])
         assert "entity" in value
         assert "" not in value
         assert len(value) == 1
+
+
+class TestRealmTriage:
+    """#505: ingest collapses the hermes NER ontology type to a realm and parks
+    the new instance under its realm root via an IS_A edge (membership = edge).
+    """
+
+    def test_realm_for_maps_ontology_types(self):
+        from sophia.ingestion.proposal_processor import _realm_for
+
+        for t in ["entity", "location", "object", "agent", "workspace", "zone"]:
+            assert _realm_for(t) == "entity", t
+        for t in ["process", "action"]:
+            assert _realm_for(t) == "process", t
+        for t in ["concept", "state", "data", "goal", "plan", "capability"]:
+            assert _realm_for(t) == "concept", t
+
+    def test_realm_for_is_case_insensitive(self):
+        from sophia.ingestion.proposal_processor import _realm_for
+
+        assert _realm_for("LOCATION") == "entity"
+        assert _realm_for("Action") == "process"
+
+    def test_realm_for_unknown_defaults_to_entity(self):
+        from sophia.ingestion.proposal_processor import _realm_for
+
+        assert _realm_for("GPE") == "entity"
+        assert _realm_for("") == "entity"
+        assert _realm_for(None) == "entity"
+
+    def test_realm_for_non_string_defaults_to_entity(self):
+        """A malformed payload (non-string ontology type) must not raise."""
+        from sophia.ingestion.proposal_processor import _realm_for
+
+        assert _realm_for(5) == "entity"  # type: ignore[arg-type]
+        assert _realm_for({"x": 1}) == "entity"  # type: ignore[arg-type]
+        assert _realm_for(["entity"]) == "entity"  # type: ignore[arg-type]
+
+    def test_collection_for_is_single_content_collection(self):
+        from sophia.ingestion.proposal_processor import _collection_for
+
+        for nt in ["entity", "concept", "process", "object", "anything"]:
+            assert _collection_for(nt) == "Entity", nt
+
+    def test_ingest_parks_instance_under_realm_root_via_is_a_edge(self):
+        """A proposed concept-realm node is created with node_type=concept and an
+        IS_A edge to the concept realm root: no type_uuid property is stamped, the
+        classifier is never consulted, and the embedding lands in the one content
+        collection.
+        """
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "node-1"
+        mock_hcg.list_all_nodes.return_value = [
+            {"name": "entity", "uuid": "realm-entity", "type": "type_definition"},
+            {"name": "concept", "uuid": "realm-concept", "type": "type_definition"},
+            {"name": "process", "uuid": "realm-process", "type": "type_definition"},
+        ]
+        mock_hcg.query_edges_from.return_value = []
+        mock_hcg.add_edge.return_value = "edge-1"
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "Democracy",
+                        "type": "concept",
+                        "embedding": [0.1] * 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [],
+                "document_embedding": {},
+                "raw_text": "Democracy",
+                "source_service": "hermes",
+                "confidence": 0.7,
+            }
+        )
+
+        add_node_kwargs = mock_hcg.add_node.call_args.kwargs
+        assert add_node_kwargs["node_type"] == "concept"
+        assert "type_uuid" not in add_node_kwargs["properties"]
+        assert add_node_kwargs["properties"]["hermes_type_hint"] == "concept"
+
+        is_a_calls = [
+            c for c in mock_hcg.add_edge.call_args_list if c.args[2:3] == ("IS_A",)
+        ]
+        assert is_a_calls, "expected an instance->realm IS_A edge"
+        assert is_a_calls[0].args[0] == "node-1"
+        assert is_a_calls[0].args[1] == "realm-concept"
+
+        mock_milvus.find_nearest_types.assert_not_called()
+
+        batch_calls = mock_milvus.batch_upsert_embeddings.call_args_list
+        assert batch_calls
+        assert batch_calls[0].kwargs.get("node_type") == "Entity"
+        assert batch_calls[0].kwargs["embeddings"][0]["uuid"] == "node-1"

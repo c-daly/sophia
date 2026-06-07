@@ -194,9 +194,8 @@ def attach(
 ) -> None:
     """Create the first upward IS_A edge for a loose node -- the degenerate
     re-parent with no stale edge to remove. General signature (child may be any
-    node) so a later task can reuse it for entity->type edges. NB: this writes an
-    IS_A EDGE; it is NOT the rollup/emergence ``_attach_members`` (which stamps a
-    ``type_uuid`` property) -- do not conflate the two.
+    node): used for entity->type membership (B2) and type->type placement. The
+    IS_A EDGE is the membership/typing fact -- there is no ``type_uuid`` property.
     """
     reparent(
         child_uuid,

@@ -8,19 +8,22 @@ from sophia.maintenance.emergence_handler import current_categories, load_type_m
 
 
 class _FakeHCG:
-    def __init__(self, nodes_by_type, edges, batch, nodes_by_type_uuid=None):
-        self._nodes_by_type = nodes_by_type
-        self._edges = edges
-        self._batch = batch
-        # Membership is now a pure `type_uuid` property: minted-type members are
-        # served by get_nodes_by_type_uuid, NOT by IS_A-edge traversal (#505).
-        self._nodes_by_type_uuid = nodes_by_type_uuid or {}
+    def __init__(self, members_by_type=None, edges=None, batch=None, type_defs=None):
+        # Membership is the instance->type IS_A edge: get_members_of_type(uuid)
+        # returns the member rows for a realm-root uuid (its drainage pool) or a
+        # minted-type uuid (its members) uniformly (B2/B3, DESIGN §3).
+        self._members_by_type = members_by_type or {}
+        self._edges = edges or {}
+        self._batch = batch or {}
+        self._type_defs = type_defs or []
+
+    def get_members_of_type(self, type_uuid):
+        return list(self._members_by_type.get(type_uuid, []))
 
     def list_all_nodes(self, node_type=None):
-        return self._nodes_by_type.get(node_type, [])
-
-    def get_nodes_by_type_uuid(self, type_uuid):
-        return list(self._nodes_by_type_uuid.get(type_uuid, []))
+        if node_type == "type_definition":
+            return list(self._type_defs)
+        return []
 
     def query_edges_from(self, uuid):
         return self._edges.get(uuid, [])
@@ -39,24 +42,22 @@ class _FakeMilvus:
 
 def test_current_categories_excludes_entity_and_reserved():
     hcg = _FakeHCG(
-        nodes_by_type={
-            "type_definition": [
-                {"name": "entity"},
-                {"name": "concept"},
-                {"name": "reserved_state"},
-                {"name": "object"},
-            ]
-        },
-        edges={},
-        batch={},
+        type_defs=[
+            {"name": "entity"},
+            {"name": "concept"},
+            {"name": "reserved_state"},
+            {"name": "object"},
+        ]
     )
     assert set(current_categories(hcg)) == {"concept", "object"}
 
 
 def test_load_type_members_builds_member_with_signature():
+    # A realm-root uuid yields that realm's pool via the instance->type IS_A edge
+    # query (get_members_of_type), uniform with minted types (B2/B3).
     hcg = _FakeHCG(
-        nodes_by_type={
-            "entity": [
+        members_by_type={
+            "type_entity": [
                 {
                     "uuid": "u1",
                     "name": "derivative",
@@ -82,37 +83,24 @@ def test_load_type_members_builds_member_with_signature():
 
 def test_load_type_members_skips_nodes_without_embedding():
     hcg = _FakeHCG(
-        nodes_by_type={"entity": [{"uuid": "u1", "name": "x", "type": "entity"}]},
-        edges={},
-        batch={},
+        members_by_type={
+            "type_entity": [{"uuid": "u1", "name": "x", "type": "entity"}]
+        },
     )
     milvus = _FakeMilvus({})  # no embedding for u1
     assert load_type_members(hcg, milvus, "type_entity") == []
 
 
-def test_load_type_members_minted_type_uses_type_uuid_property():
-    # A minted type resolves membership via the authoritative `type_uuid`
-    # property (get_nodes_by_type_uuid), NOT a label scan or IS_A edges -- so a
-    # same-label sibling type cannot bleed members in (#505).
+def test_load_type_members_minted_type_uses_is_a_edge_query():
+    # A minted type resolves membership via the instance->type IS_A edge
+    # (get_members_of_type), anchored on THIS type's uuid -- so a same-label
+    # sibling type cannot bleed members in (B2/B3).
     type_uuid = "type_concept_abc12345"
     hcg = _FakeHCG(
-        nodes_by_type={},
-        edges={},
-        batch={},
-        nodes_by_type_uuid={
+        members_by_type={
             type_uuid: [
-                {
-                    "uuid": "u1",
-                    "name": "deriv",
-                    "type": "concept",
-                    "type_uuid": type_uuid,
-                },
-                {
-                    "uuid": "u2",
-                    "name": "integ",
-                    "type": "concept",
-                    "type_uuid": type_uuid,
-                },
+                {"uuid": "u1", "name": "deriv", "type": "concept"},
+                {"uuid": "u2", "name": "integ", "type": "concept"},
             ]
         },
     )
@@ -127,16 +115,13 @@ def test_load_type_members_minted_type_uses_type_uuid_property():
 
 
 def test_load_type_members_skips_minted_member_without_embedding():
-    # A type_uuid member with no Milvus embedding can't be clustered -> dropped.
+    # A member with no Milvus embedding can't be clustered -> dropped.
     type_uuid = "type_concept_deadbeef"
     hcg = _FakeHCG(
-        nodes_by_type={},
-        edges={},
-        batch={},
-        nodes_by_type_uuid={
+        members_by_type={
             type_uuid: [
-                {"uuid": "u1", "name": "x", "type": "concept", "type_uuid": type_uuid},
-                {"uuid": "u2", "name": "y", "type": "concept", "type_uuid": type_uuid},
+                {"uuid": "u1", "name": "x", "type": "concept"},
+                {"uuid": "u2", "name": "y", "type": "concept"},
             ]
         },
     )
@@ -152,18 +137,8 @@ def test_minted_member_embeddings_read_from_base_collection():
     wrong collection, misses, and silently drops the member (greptile #149)."""
     type_uuid = "type_concept_abc12345"
     hcg = _FakeHCG(
-        nodes_by_type={},
-        edges={},
-        batch={},
-        nodes_by_type_uuid={
-            type_uuid: [
-                {
-                    "uuid": "u1",
-                    "name": "deriv",
-                    "type": "concept",
-                    "type_uuid": type_uuid,
-                }
-            ]
+        members_by_type={
+            type_uuid: [{"uuid": "u1", "name": "deriv", "type": "concept"}]
         },
     )
 
@@ -181,26 +156,19 @@ def test_minted_member_embeddings_read_from_base_collection():
     assert {m.uuid for m in members} == {"u1"}
 
 
-def test_retyped_member_excluded_from_parent_by_type_uuid():
-    """A member split out of a parent type into a child has its authoritative
-    `type_uuid` repointed at the child. Membership is that property, so loading
-    the parent (get_nodes_by_type_uuid(parent)) simply does not return it -- no
-    stale-edge cleanup or guard is needed (#505)."""
+def test_retyped_member_excluded_from_parent_by_is_a_edge():
+    """A member re-pointed out of a parent type into a child has its single upward
+    IS_A edge moved to the child. Membership is that edge, so loading the parent
+    (get_members_of_type(parent)) simply does not return it -- no stale-edge
+    cleanup or guard is needed (B2/B3, DESIGN §3)."""
     parent_uuid = "type_tool_parent01"
     child_uuid = "type_hammer_child02"
     hcg = _FakeHCG(
-        nodes_by_type={},
-        edges={},
-        batch={},
-        nodes_by_type_uuid={
-            # u1 still belongs to the parent; u2 was retyped into the child, so
-            # its `type_uuid` now points there and it is absent from the parent.
-            parent_uuid: [
-                {"uuid": "u1", "name": "w", "type": "tool", "type_uuid": parent_uuid}
-            ],
-            child_uuid: [
-                {"uuid": "u2", "name": "h", "type": "hammer", "type_uuid": child_uuid}
-            ],
+        members_by_type={
+            # u1's IS_A edge still points at the parent; u2's was re-pointed at
+            # the child, so the parent's edge query no longer returns it.
+            parent_uuid: [{"uuid": "u1", "name": "w", "type": "entity"}],
+            child_uuid: [{"uuid": "u2", "name": "h", "type": "entity"}],
         },
     )
     milvus = _FakeMilvus(
@@ -210,5 +178,47 @@ def test_retyped_member_excluded_from_parent_by_type_uuid():
         }
     )
     members = load_type_members(hcg, milvus, parent_uuid)
-    # u2 retyped away -> excluded; membership follows the `type_uuid` property.
+    # u2 re-pointed away -> excluded; membership follows the IS_A edge.
     assert {m.uuid for m in members} == {"u1"}
+
+
+def test_member_read_uses_is_a_edge_query_for_realm_root_and_minted():
+    """Membership is read through the instance->type IS_A edge query
+    (get_members_of_type) for BOTH a realm-root uuid (its pool) and a minted-type
+    uuid -- never get_nodes_by_type_uuid or a list_all_nodes scan (de-slug, B2/B3).
+    """
+    calls: list[tuple[str, object]] = []
+
+    class _RecordingHCG(_FakeHCG):
+        def get_members_of_type(self, type_uuid):
+            calls.append(("get_members_of_type", type_uuid))
+            return super().get_members_of_type(type_uuid)
+
+        def get_nodes_by_type_uuid(self, type_uuid):  # must NOT be used
+            calls.append(("get_nodes_by_type_uuid", type_uuid))
+            return []
+
+        def list_all_nodes(self, node_type=None):  # must NOT be used for members
+            calls.append(("list_all_nodes", node_type))
+            return super().list_all_nodes(node_type)
+
+    hcg = _RecordingHCG(
+        members_by_type={
+            "type_entity": [{"uuid": "r1", "name": "r", "type": "entity"}],
+            "type_car_abc12345": [{"uuid": "c1", "name": "c", "type": "entity"}],
+        },
+    )
+    milvus = _FakeMilvus(
+        {
+            "r1": {"embedding": [0.1], "model": "m"},
+            "c1": {"embedding": [0.2], "model": "m"},
+        }
+    )
+
+    load_type_members(hcg, milvus, "type_entity")  # realm-root drainage pool
+    load_type_members(hcg, milvus, "type_car_abc12345")  # minted type
+
+    assert calls == [
+        ("get_members_of_type", "type_entity"),
+        ("get_members_of_type", "type_car_abc12345"),
+    ]

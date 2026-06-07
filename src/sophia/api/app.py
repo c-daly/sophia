@@ -1967,17 +1967,16 @@ def create_app() -> FastAPI:
             # Fetch all nodes
             nodes = _hcg_client.list_all_nodes(node_type=entity_type, limit=limit)
 
-            # Optionally attach stored entity vectors so Apollo's explorer can
-            # lay nodes out by embedding (semantic layout). Two things matter:
-            #   1. Embeddings are sharded across per-type Milvus collections
-            #      (Entity/Concept/State/Process) and a snapshot returns nodes of
-            #      every type -- so each uuid must be looked up in the collection
-            #      that actually holds its vector, not just hcg_entity_embeddings,
-            #      or every Concept/State/Process node silently comes back null.
-            #   2. The `uuid in [...]` filter is batched: a single list of up to
-            #      10k 36-char uuids is ~400 KB and exceeds Milvus's expression
-            #      cap, which would throw and (via the except) null *everything*.
-            # uuid is a VARCHAR primary key, so each value is double-quoted.
+            # Optionally attach stored content vectors so Apollo's explorer can
+            # lay nodes out by embedding (semantic layout). All content node
+            # types share ONE Milvus collection keyed by uuid (#505, Chris:
+            # "one collection is how it's supposed to be"); the realm
+            # (Entity/Concept/State/Process) does NOT select a collection, so
+            # every uuid is looked up in that single content collection. The
+            # `uuid in [...]` filter is batched: a single list of up to 10k
+            # 36-char uuids is ~400 KB and exceeds Milvus's expression cap,
+            # which would throw and (via the except) null *everything*. uuid is
+            # a VARCHAR primary key, so each value is double-quoted.
             emb_by_uuid: Dict[str, Any] = {}
             if include_embeddings and nodes:
                 try:
@@ -1985,37 +1984,23 @@ def create_app() -> FastAPI:
                     from pymilvus import Collection
 
                     from logos_hcg.sync import COLLECTION_NAMES
-                    from sophia.ingestion.proposal_processor import _collection_for
+                    from sophia.ingestion.proposal_processor import (
+                        _CONTENT_COLLECTION,
+                    )
 
-                    uuids_by_collection: Dict[str, list[str]] = {}
-                    for _n in nodes:
-                        _cname = COLLECTION_NAMES[_collection_for(_n["type"])]
-                        uuids_by_collection.setdefault(_cname, []).append(
-                            str(_n["uuid"])
-                        )
-
-                    for _cname, _uuids in uuids_by_collection.items():
-                        try:
-                            _col = Collection(_cname)
-                            _col.load()
-                            for _i in range(0, len(_uuids), _SNAPSHOT_EMB_BATCH):
-                                _batch = _uuids[_i : _i + _SNAPSHOT_EMB_BATCH]
-                                _uuid_list = ", ".join(f'"{u}"' for u in _batch)
-                                for _row in _col.query(
-                                    expr=f"uuid in [{_uuid_list}]",
-                                    output_fields=["uuid", "embedding"],
-                                    limit=len(_batch),
-                                ):
-                                    emb_by_uuid[_row["uuid"]] = _row.get("embedding")
-                        except Exception as _e:
-                            # Log per-collection so a genuine query failure is
-                            # visible, not indistinguishable from nodes that
-                            # simply have no stored vector.
-                            logger.warning(
-                                "snapshot embeddings unavailable for %s: %s",
-                                _cname,
-                                _e,
-                            )
+                    _cname = COLLECTION_NAMES[_CONTENT_COLLECTION]
+                    _uuids = [str(_n["uuid"]) for _n in nodes]
+                    _col = Collection(_cname)
+                    _col.load()
+                    for _i in range(0, len(_uuids), _SNAPSHOT_EMB_BATCH):
+                        _batch = _uuids[_i : _i + _SNAPSHOT_EMB_BATCH]
+                        _uuid_list = ", ".join(f'"{u}"' for u in _batch)
+                        for _row in _col.query(
+                            expr=f"uuid in [{_uuid_list}]",
+                            output_fields=["uuid", "embedding"],
+                            limit=len(_batch),
+                        ):
+                            emb_by_uuid[_row["uuid"]] = _row.get("embedding")
                 except Exception as _e:
                     logger.warning(f"snapshot embeddings unavailable: {_e}")
 

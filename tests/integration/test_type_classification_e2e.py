@@ -3,8 +3,12 @@
 Requires: Neo4j (bolt://localhost:7687) and Milvus (localhost:19530) running.
 Does NOT require Sophia or Hermes HTTP services — tests ProposalProcessor directly.
 
-Verifies that Sophia classifies node types using embedding-space centroids,
-ignoring the type hint provided by Hermes.
+SUPERSEDED (#505): ingest no longer classifies node types by embedding-space
+centroid proximity. The TypeClassifier was removed and replaced by LLM-free
+realm triage (``_realm_for`` over the hermes NER ontology type). These tests
+assert the removed "centroid overrides Hermes" contract -- the inverse of the
+current design (realm triage trusts the NER ontology type). Restoring live e2e
+coverage as realm-triage assertions is soak-prep work (#27); skipped until then.
 """
 
 import logging
@@ -19,8 +23,14 @@ from sophia.ingestion.proposal_processor import ProposalProcessor
 
 logger = logging.getLogger(__name__)
 
-# Mark all tests as integration
-pytestmark = pytest.mark.integration
+# Mark all tests as integration; skipped pending realm-triage rewrite.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skip(
+        reason="centroid-based ingest classification removed (#505); rewrite as "
+        "realm-triage e2e at soak-prep (#27)"
+    ),
+]
 
 # Embedding dimension — must match logos_hcg default (384)
 DIM = int(os.getenv("LOGOS_EMBEDDING_DIM", "384"))

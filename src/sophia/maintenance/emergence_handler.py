@@ -24,15 +24,15 @@ from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_clusters
 from sophia.maintenance.emergence_types import EmergentCluster, Member, NameResult
 from sophia.maintenance.structural_signature import build_signature
-from sophia.maintenance.type_minting import _slugify
 
 logger = logging.getLogger(__name__)
 
 ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 
-# The base "junk-drawer" type that holds un-specialised nodes. Its membership is
-# resolved by node-type scan; minted types resolve membership via the
-# authoritative `type_uuid` property (no instance->type IS_A edges -- #505).
+# The base "junk-drawer" realm whose Milvus collection physically holds the
+# entity-derived embeddings. It is NOT a membership assertion any more (B2/B3):
+# membership is the instance->type IS_A edge, read via get_members_of_type. This
+# constant only routes embedding reads to the base collection (_build_member).
 _BASE_TYPE = "entity"
 
 # The three content realm roots. A realm-root pool (e.g. the base `entity`
@@ -57,7 +57,8 @@ def _type_name(type_uuid: str) -> str:
     """Best-effort label from a type-definition uuid.
 
     Minted uuids are ``type_<label>_<hex8>`` and base/legacy ones ``type_<name>``.
-    Used only for the base junk-drawer scan and for embedding-collection routing.
+    Used only as the ``current_type`` display fallback in :func:`_build_member`;
+    membership itself is the IS_A edge, never this slug (B2/B3, DESIGN §3).
     """
     return type_uuid[len("type_") :] if type_uuid.startswith("type_") else type_uuid
 
@@ -73,26 +74,19 @@ def current_categories(hcg: Any) -> list[str]:
     return out
 
 
-def _member_rows(hcg: Any, type_uuid: str, type_name: str) -> list[dict[str, Any]]:
-    """Resolve the node rows that belong to ``type_uuid``.
+def _member_rows(hcg: Any, type_uuid: str) -> list[dict[str, Any]]:
+    """Resolve the node rows that are members of ``type_uuid``.
 
-    The base junk-drawer (``entity``) is resolved by node-type scan. Any minted
-    type is resolved by the nodes whose authoritative ``type_uuid`` property
-    points at *this specific* type-definition uuid -- so two minted types that
-    share a label do not bleed members into one another, and a member retyped
-    out of this type (its ``type_uuid`` now points elsewhere) is excluded
-    automatically.
-
-    Membership is the ``type_uuid`` property; emergence no longer creates an
-    instance->type IS_A edge, so there is nothing to traverse or guard against
-    here (#505).
+    Membership is the instance->type ``IS_A`` edge (B2/B3, DESIGN §3): a node is
+    a member of ``type_uuid`` iff its single upward IS_A edge points there. The
+    edge query is anchored on the type uuid, so it serves both cases uniformly --
+    a REALM-ROOT uuid yields that realm's drainage pool (entities parked directly
+    under the root) and a minted-type uuid yields that type's members. There is
+    no node-type scan and no ``type_uuid``-property/slug read any more (de-slug);
+    a member re-pointed away from this type is excluded automatically because its
+    edge no longer targets it.
     """
-    if type_name == _BASE_TYPE:
-        return list(hcg.list_all_nodes(node_type=type_name))
-
-    return [
-        n for n in (hcg.get_nodes_by_type_uuid(type_uuid) or []) if n and "uuid" in n
-    ]
+    return [n for n in (hcg.get_members_of_type(type_uuid) or []) if n and "uuid" in n]
 
 
 def _build_member(
@@ -142,16 +136,15 @@ def _build_member(
 def load_type_members(hcg: Any, milvus: Any, type_uuid: str) -> list[Member]:
     """Load all members of a type as Member objects (embedding + structural signature).
 
-    Membership is resolved by :func:`_member_rows` (node-type scan for the base
-    junk-drawer, `type_uuid`-property lookup for minted types). Embeddings come
-    from Milvus;
-    the structural signature is built from the node's outgoing reified edges
-    (relation + resolved neighbor type). Nodes without an embedding are skipped
-    (they can't be clustered).
+    Membership is resolved by :func:`_member_rows` (the instance->type IS_A edge
+    query, uniform across the realm-root pool and minted types). Embeddings come
+    from Milvus; the structural signature is built from the node's outgoing
+    reified edges (relation + resolved neighbor type). Nodes without an embedding
+    are skipped (they can't be clustered).
     """
     type_name = _type_name(type_uuid)
     members: list[Member] = []
-    for row in _member_rows(hcg, type_uuid, type_name):
+    for row in _member_rows(hcg, type_uuid):
         if not row or "uuid" not in row:
             continue
         member = _build_member(hcg, milvus, row, type_name)
@@ -228,6 +221,13 @@ class EmergenceHandler:
             logger.info("emergence: realm %r has no catalog uuid; skipping", realm)
             return
 
+        # The in-pass IS_A adjacency placement.reparent reads (cycle guard) and
+        # keeps consistent as members are re-pointed onto their types. Members are
+        # leaves, so the cycle check is trivially false and the type-layer
+        # hierarchy is never polluted; the map only tracks the instance->type
+        # edges drawn this pass.
+        children_of: dict[str, list[str]] = {}
+
         # Per-cluster isolation: a transient error on one cluster must not abort
         # the whole pass -- log it and let the others place.
         for cluster in clusters:
@@ -238,6 +238,7 @@ class EmergenceHandler:
                     realm_root_uuid=realm_root_uuid,
                     uuid_by_name=uuid_by_name,
                     source_type_uuid=type_uuid,
+                    children_of=children_of,
                 )
             except Exception:
                 logger.exception("emergence: cluster failed, skipping")
@@ -250,6 +251,7 @@ class EmergenceHandler:
         realm_root_uuid: str,
         uuid_by_name: dict[str, str],
         source_type_uuid: str,
+        children_of: dict[str, list[str]],
     ) -> None:
         """Place ONE cluster flat: the LLM names it, the cascade decides where.
 
@@ -293,11 +295,14 @@ class EmergenceHandler:
             else:
                 parent_uuid, placed_by = realm_root_uuid, "root_fallback"
 
+        # The cascade above always settles on a placement reason.
+        assert placed_by is not None
+
         if reuse_target is not None:
-            # Reuse: retype the cohort onto the existing same-name type (membership
-            # is the type_uuid property -- no mint, no new edge).
-            existing_node = self._hcg.get_node(reuse_target) or {}
-            self._attach_members(fitting, reuse_target, existing_node)
+            # Reuse: re-point the cohort's instance->type IS_A edges onto the
+            # existing same-name type (membership is the edge -- no mint, no
+            # type_uuid stamp). Members inherit the type's placed_by (name_reuse).
+            self._place_members(fitting, reuse_target, placed_by, children_of)
             logger.info(
                 "emergence: reused %s for %d members (%s)",
                 reuse_target,
@@ -306,8 +311,9 @@ class EmergenceHandler:
             )
             return
 
-        # Mint a new type under the chosen parent. mint_type stamps the
-        # type->parent IS_A edge with placed_by (the parent-driven traceability).
+        # Mint a new type under the chosen parent. mint_type writes the type's
+        # own type->parent IS_A edge (carrying placed_by) but does NOT touch the
+        # members -- drainage owns member placement (retype_members is a no-op).
         name_obj = NameResult(
             label=tc.name, description="", confidence=1.0, removed=[], parent=tc.parent
         )
@@ -319,8 +325,12 @@ class EmergenceHandler:
             source_cluster_id=uuid_lib.uuid4().hex[:8],
             parent_type_uuid=parent_uuid,
             placed_by=placed_by,
-            retype_members=True,
+            retype_members=False,
         )
+        # Re-point each fitting member's instance->type IS_A edge onto the
+        # freshly-minted type, carrying the SAME placed_by the type was placed by
+        # (parent_resolution / root_fallback). Membership is the edge (DESIGN §3).
+        self._place_members(fitting, new_uuid, placed_by, children_of)
         # In-pass dedup: a later same-named cluster reuses this freshly-minted
         # uuid instead of re-minting a sibling.
         uuid_by_name[tc.name.strip().lower()] = new_uuid
@@ -341,17 +351,30 @@ class EmergenceHandler:
             len(fitting),
         )
 
-    def _attach_members(
-        self, members: list[Member], type_uuid: str, type_node: dict[str, Any]
+    def _place_members(
+        self,
+        members: list[Member],
+        type_uuid: str,
+        placed_by: str,
+        children_of: dict[str, list[str]],
     ) -> None:
-        """Retype members onto an existing type when reconciling (#504).
+        """Re-point each member's single upward instance->type IS_A edge to a type.
 
-        Membership is the authoritative `type_uuid` property plus the `type`
-        slug -- the same convention mint_type uses; no IS_A edge.
+        Membership is the edge now (B2/B3, DESIGN §3): for every member,
+        :func:`placement.reparent` drops its stale realm/parent IS_A edge and
+        writes the new one to ``type_uuid`` carrying ``placed_by`` (the SAME
+        reason the type itself was placed by). No ``type_uuid``/``type`` property
+        is stamped. Members are leaves, so the cycle guard is trivially false and
+        the type-layer hierarchy in ``children_of`` is unaffected.
         """
-        slug = _slugify(type_node.get("name") or _type_name(type_uuid))
         for member in members:
-            self._hcg.update_node(member.uuid, {"type": slug, "type_uuid": type_uuid})
+            placement.reparent(
+                member.uuid,
+                type_uuid,
+                hcg=self._hcg,
+                children_of=children_of,
+                placed_by=placed_by,
+            )
 
 
 def build_emergence_handler(
