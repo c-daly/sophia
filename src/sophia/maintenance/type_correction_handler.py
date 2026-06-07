@@ -69,6 +69,7 @@ class TypeCorrectionHandler:
         self._config = config
         self._hcg = hcg
         self._event_bus = event_bus
+        self._entity_uuid: str | None = None
 
     def run(self) -> None:
         try:
@@ -117,14 +118,38 @@ class TypeCorrectionHandler:
         if evicted:
             logger.info("type_correction: evicted %d part/product member(s)", evicted)
 
+    def _resolve_entity_uuid(self) -> str | None:
+        """Resolve the real ``entity`` realm-root uuid (cached).
+
+        Skeleton type-defs carry real uuids (uuid5), not the legacy
+        ``type_<name>`` slug, so the eviction target is looked up by name
+        rather than hard-coded -- a literal ``"type_entity"`` would dangle
+        against a reseeded graph.
+        """
+        if self._entity_uuid is None:
+            try:
+                for n in self._hcg.list_all_nodes(node_type="type_definition"):
+                    if n.get("name") == "entity":
+                        self._entity_uuid = n.get("uuid")
+                        break
+            except Exception:
+                logger.exception("type_correction: failed to resolve entity uuid")
+        return self._entity_uuid
+
     def _evict(self, uuid: str, from_type: str, rel: str) -> bool:
         """Retype the member back to the junk-drawer (inverse of mint_type)."""
+        entity_uuid = self._resolve_entity_uuid()
+        if not entity_uuid:
+            logger.warning(
+                "type_correction: cannot evict %s -- entity realm root not found", uuid
+            )
+            return False
         try:
             self._hcg.update_node(
                 uuid,
                 {
                     "type": "entity",
-                    "type_uuid": "type_entity",
+                    "type_uuid": entity_uuid,
                     "needs_reclassification": True,
                 },
             )
