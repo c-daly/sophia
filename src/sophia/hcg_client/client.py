@@ -491,9 +491,15 @@ class HCGClient(LogosHCGClient):
         Calling this with a REALM-ROOT uuid yields the drainage pool of
         that realm -- the entities parked directly under the realm root.
         """
+        # Anchor on the type's uuid (the UNIQUE-constraint index) and walk the
+        # INCOMING :TO -> edge -> :FROM, so the plan is O(this type's members),
+        # not a scan of every IS_A edge graph-wide. Leading with
+        # (:Node {relation:'IS_A'}) would let the planner use the broad
+        # Node.relation index and scan ALL IS_A edges -- the membership read must
+        # stay anchored on the uuid seek (the only type_uuid index that exists is
+        # the uniqueness constraint on Node.uuid; there is no type_uuid index).
         query = """
-        MATCH (edge:Node {relation: 'IS_A'})-[:TO]->(:Node {uuid: $type_uuid})
-        MATCH (edge)-[:FROM]->(m:Node)
+        MATCH (:Node {uuid: $type_uuid})<-[:TO]-(edge:Node {relation: 'IS_A'})-[:FROM]->(m:Node)
         WHERE m.relation IS NULL
         RETURN m.uuid as uuid, m.name as name, m.type as type,
                properties(m) as props
