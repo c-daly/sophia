@@ -28,11 +28,6 @@ ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 # authoritative `type_uuid` property (no instance->type IS_A edges -- #505).
 _BASE_TYPE = "entity"
 
-# Lineage of the `entity` junk-drawer (root -> node -> entity). Emergence mints
-# directly under `type_entity`, so a minted type's parent ancestors are these
-# two prefixes and its own full ancestors append "entity" (#505).
-_ENTITY_ANCESTORS = ["root", "node"]
-
 # Durable neutral home for evicted/residual members (SPEC 5.13 / R8, #175).
 # A dedicated sentinel rather than `type_entity`: emergence clusters the
 # `entity` junk drawer itself (the `_BASE_TYPE` branches in `run` and
@@ -211,13 +206,13 @@ class EmergenceHandler:
         # `entity` (#505).
         if _type_name(type_uuid) == _BASE_TYPE:
             parent_type_uuid = f"type_{_BASE_TYPE}"
-            parent_ancestors = _ENTITY_ANCESTORS
+            parent_ancestors = ["root", "node"]
             parent_name = _BASE_TYPE
         else:
             parent_type_uuid = type_uuid
             parent_node = self._hcg.get_node(type_uuid) or {}
             parent_props = parent_node.get("properties") or {}
-            parent_ancestors = list(parent_props.get("ancestors") or _ENTITY_ANCESTORS)
+            parent_ancestors = list(parent_props.get("ancestors") or ["root", "node"])
             # Clean name of the type being subdivided. Never derive it from the
             # uuid -- minted type uuids carry a random `_<hex>` suffix that would
             # leak into descendants' ancestors (greptile #159).

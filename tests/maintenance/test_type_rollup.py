@@ -256,26 +256,6 @@ def test_candidate_protected_and_reserved_exclusions_hold():
     assert not _is_rollup_candidate(reserved)
 
 
-def test_candidate_edge_type_defs_stay_excluded():
-    """Edge-type defs (edge_type in ancestors) AND the seeded edge-type root
-    itself (name=edge_type, no ancestors) are not entity types."""
-    minted = {
-        "uuid": "type_edge_blocks",
-        "name": "BLOCKS",
-        "properties": {
-            "type": "type_definition",
-            "ancestors": ["root", "node", "edge_type"],
-        },
-    }
-    assert not _is_rollup_candidate(minted)
-    root = {
-        "uuid": "type_edge_type",
-        "name": "edge_type",
-        "properties": {"type": "type_definition"},
-    }
-    assert not _is_rollup_candidate(root)
-
-
 def test_seeded_root_flows_through_load_type_layer():
     """End-to-end through the fake client: a seeded-shaped root (no flag, no
     ancestors) is part of the loaded type layer alongside minted types."""

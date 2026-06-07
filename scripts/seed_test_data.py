@@ -32,7 +32,6 @@ from sophia.hcg_client.seeder import (  # noqa: E402
     seed_persona_entries,
     seed_pick_and_place_data,
     seed_plan_data,
-    seed_type_definitions,
 )
 
 
@@ -81,9 +80,8 @@ def seed_data(uri: str, user: str, password: str) -> bool:
         logger.info("Clearing existing data...")
         client.clear_all()
 
-        # Seed type definitions first (required for auto-compute ancestors)
-        logger.info("Seeding type definitions...")
-        seed_type_definitions(client)
+        # Type definitions / bootstrap skeleton are seeded by the foundry
+        # (logos_hcg.seeder); this script seeds demo/test data only.
 
         # Seed pick-and-place scenario
         logger.info("Seeding pick-and-place scenario...")

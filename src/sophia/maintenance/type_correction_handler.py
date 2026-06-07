@@ -27,21 +27,7 @@ _BIG = 100000
 
 # Node ``type`` values that are NOT emergent types (base ontology + plan
 # scaffold). Correction only fires when two members share a *non-base* type.
-_BASE_TYPES = frozenset(
-    {
-        "entity",
-        "edge",
-        "type_definition",
-        "object",
-        "action",
-        "location",
-        "state",
-        "goal",
-        "plan",
-        "reserved_state",
-        "",
-    }
-)
+_BASE_TYPES = frozenset({"entity", "concept", "process"})
 
 # Relations meaning "different KIND of thing": a member linked to a same-type
 # peer by one of these is a part/product, not a co-member.
