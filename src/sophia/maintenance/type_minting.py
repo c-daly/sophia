@@ -62,6 +62,11 @@ def mint_type(
     milvus: Any,
     source_cluster_id: str,
     parent_type_uuid: str = "type_entity",
+    # DEPRECATED, unused since the `ancestors` property was removed (B1 T3): kept
+    # only so the gated-off rollup tier's call site still resolves. Removed when
+    # rollup is converted onto placement.py. The `parent_type_uuid="type_entity"`
+    # default is likewise a legacy slug slated for that cleanup -- drainage callers
+    # always pass a real uuid.
     parent_ancestors: list[str] | None = None,
     parent_name: str | None = None,
     retype_members: bool = True,

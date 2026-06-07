@@ -205,6 +205,14 @@ def test_type_cluster_empty_name_returns_none(monkeypatch):
     assert warnings
 
 
+def test_type_cluster_returns_none_on_non_dict_json(monkeypatch):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp(["not", "a", "dict"])
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    assert hn.type_cluster(_cluster(), hermes_url="http://h", token="t") is None
+
+
 def test_type_cluster_missing_name_returns_none(monkeypatch):
     def fake_post(url, json=None, headers=None, timeout=None):
         return _FakeResp({"parent": "entity", "residual_ids": []})

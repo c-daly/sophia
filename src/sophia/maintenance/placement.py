@@ -164,7 +164,12 @@ def reparent(
             if siblings and child_uuid in siblings:
                 siblings.remove(child_uuid)
         except Exception:
+            # Do NOT add the new edge if the stale one couldn't be removed -- that
+            # would leave the node with two upward IS_A edges, violating the
+            # single-upward-pointer invariant (DESIGN sec 3). Fail safe: keep the
+            # old parent rather than create a fork.
             logger.exception("placement: delete stale IS_A failed for %s", child_uuid)
+            return
     try:
         hcg.add_edge(
             child_uuid,
@@ -281,11 +286,22 @@ def _current_is_a(child_uuid: str, *, hcg: Any) -> tuple[str | None, str | None]
     edge was persisted without an id.
     """
     try:
-        for e in hcg.query_edges_from(child_uuid) or []:
-            if e.get("relation") == "IS_A":
-                target = e.get("target")
-                edge_id = e.get("id") or e.get("uuid")
-                return target, edge_id
+        is_a = [
+            e
+            for e in (hcg.query_edges_from(child_uuid) or [])
+            if e.get("relation") == "IS_A"
+        ]
+        if len(is_a) > 1:
+            # The single-upward-pointer invariant says there is exactly one;
+            # surface a corruption rather than silently picking the first.
+            logger.warning(
+                "placement: node %s has %d upward IS_A edges (expected 1)",
+                child_uuid,
+                len(is_a),
+            )
+        if is_a:
+            e = is_a[0]
+            return e.get("target"), (e.get("id") or e.get("uuid"))
     except Exception:
         logger.exception("placement: query_edges_from failed for %s", child_uuid)
     return None, None

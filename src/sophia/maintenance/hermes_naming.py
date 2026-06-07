@@ -128,7 +128,10 @@ def type_cluster(
         )
         resp.raise_for_status()
         data = resp.json()
-        name = str(data["name"]).strip()
+        if not isinstance(data, dict):
+            logger.warning("type_cluster returned non-dict JSON: %r", data)
+            return None
+        name = str(data.get("name") or "").strip()
         if not name:
             logger.warning("type_cluster returned an empty name; treating as failure")
             return None

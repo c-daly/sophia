@@ -398,6 +398,41 @@ def test_reparent_swings_edge_and_tags_placed_by():
     assert "u_car" in children_of["u_vehicle"]
 
 
+def test_reparent_aborts_when_stale_delete_fails():
+    """If deleting the stale IS_A edge fails, reparent must NOT add the new edge
+    -- that would leave two upward IS_A edges. Fail safe: keep the old parent."""
+    nodes, edges, _ = _seed_skeleton()
+    nodes = nodes + [_node("u_car", "car")]
+    edges = edges + [
+        {
+            "id": "e_car",
+            "source": "u_car",
+            "target": "u_entity",
+            "relation": "IS_A",
+            "properties": {},
+        }
+    ]
+    hcg = FakeHCG(nodes, edges)
+
+    def boom(_edge_id):
+        raise RuntimeError("db glitch")
+
+    hcg.delete_edge = boom  # stale-edge deletion fails
+
+    children_of = {"u_entity": ["u_car"]}
+    placement.reparent(
+        "u_car",
+        "u_vehicle",
+        hcg=hcg,
+        children_of=children_of,
+        placed_by="parent_resolution",
+    )
+
+    car_edges = hcg.is_a_edges_from("u_car")
+    assert len(car_edges) == 1  # still exactly one upward edge
+    assert car_edges[0]["target"] == "u_entity"  # old parent unchanged (no fork)
+
+
 def test_reparent_writes_no_ancestors_property():
     nodes, edges, _ = _seed_skeleton()
     nodes = nodes + [_node("u_car", "car")]
