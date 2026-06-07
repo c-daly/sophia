@@ -11,7 +11,12 @@ import random
 
 import httpx
 
-from sophia.maintenance.emergence_types import EmergentCluster, Member, NameResult
+from sophia.maintenance.emergence_types import (
+    EmergentCluster,
+    Member,
+    NameResult,
+    TypeClusterResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,4 +87,65 @@ def name_cluster(
         )
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         logger.warning("name_cluster failed: %s", exc)
+        return None
+
+
+def type_cluster(
+    cluster: EmergentCluster,
+    *,
+    hermes_url: str,
+    token: str,
+    timeout: float = 30.0,
+    max_members: int | None = None,
+) -> TypeClusterResult | None:
+    """Ask Hermes v2 /type-cluster what type the cluster members are.
+
+    Parallel to :func:`name_cluster`, but for the v2 typing tier: the catalog
+    lives server-side, so no ``candidates`` are sent and members carry only
+    id/name/hint/neighbors (no ``type``). Returns None on failure. When
+    ``max_members`` is set, larger clusters are down-sampled first.
+    """
+    members = _sample_members(cluster.members, max_members)
+    payload = {
+        "members": [
+            {
+                "id": m.uuid,
+                "name": m.name,
+                "hermes_type_hint": m.hermes_type_hint,
+                "neighbors": m.neighbors,
+            }
+            for m in members
+        ],
+    }
+    base = hermes_url.rstrip("/")
+    url = f"{base}/type-cluster"
+    try:
+        resp = httpx.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=httpx.Timeout(timeout),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            logger.warning("type_cluster returned non-dict JSON: %r", data)
+            return None
+        name = str(data.get("name") or "").strip()
+        if not name:
+            logger.warning("type_cluster returned an empty name; treating as failure")
+            return None
+        parent = data.get("parent")
+        residual = data.get("residual_ids") or []
+        return TypeClusterResult(
+            name=name,
+            parent=(
+                str(parent).strip()
+                if isinstance(parent, str) and parent.strip()
+                else None
+            ),
+            residual_ids=[str(r) for r in residual if r],
+        )
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        logger.warning("type_cluster failed: %s", exc)
         return None

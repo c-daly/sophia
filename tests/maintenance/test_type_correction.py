@@ -118,6 +118,20 @@ def test_no_eviction_for_base_types():
     assert hcg.updates == []
 
 
+def test_no_eviction_for_underscore_cognition_root():
+    """The underscore-namespaced cognition root (_cognition) is a base type too
+    (seeder fold 54b49d2) -> members under it are skipped, not corrected."""
+    hcg = FakeHCG(
+        nodes=[
+            {"uuid": "a", "type": "_cognition"},
+            {"uuid": "b", "type": "_cognition"},
+        ],
+        edges=[{"id": "r1", "source": "a", "target": "b", "relation": "PART_OF"}],
+    )
+    _run(hcg)
+    assert hcg.updates == []
+
+
 def test_taxonomic_isa_edge_is_not_a_correction():
     """IS_A is taxonomy, not meronymy -> never triggers eviction."""
     hcg = FakeHCG(

@@ -49,3 +49,14 @@ class NameResult:
     confidence: float
     removed: list[str] = field(default_factory=list)
     parent: str | None = None
+
+
+@dataclass(frozen=True)
+class TypeClusterResult:
+    """Hermes v2 /type-cluster verdict: a type ``name``, an optional existing
+    ``parent`` to mint it under (None means reuse ``name`` as-is), and member
+    ``residual_ids`` that do not fit (already mapped back by Hermes)."""
+
+    name: str
+    parent: str | None
+    residual_ids: list[str]

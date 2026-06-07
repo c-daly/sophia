@@ -57,9 +57,14 @@ class MaintenanceConfig(BaseSettings):
         description="Discard Hermes cluster names below this confidence.",
     )
     rollup_enabled: bool = Field(
-        default=True,
+        # Deferred for naming-driven-typing B1: the rollup (revision) tier still
+        # threads/writes the `ancestors` property and resolves `type_<name>`
+        # slugs, both incompatible with the uuid5 + no-ancestors design. It is
+        # gated OFF until its own follow-up converts it onto placement.py.
+        default=False,
         description="Run the periodic type-level rollup that groups the flat "
-        "layer of emergent types into super-types (#160).",
+        "layer of emergent types into super-types (#160). Disabled pending the "
+        "rollup-onto-placement conversion (naming-driven-typing follow-up).",
     )
     rollup_interval_seconds: int = Field(
         default=600,
