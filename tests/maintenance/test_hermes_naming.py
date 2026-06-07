@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
 import httpx
 
 import sophia.maintenance.hermes_naming as hn
-from sophia.maintenance.emergence_types import EmergentCluster, Member
+from sophia.maintenance.emergence_types import (
+    EmergentCluster,
+    Member,
+    TypeClusterResult,
+)
 
 
 class _FakeResp:
@@ -138,3 +143,90 @@ def test_name_cluster_sends_all_when_under_max(monkeypatch):
         max_members=50,
     )
     assert len(captured["json"]["members"]) == 1
+
+
+def test_type_cluster_posts_and_parses(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(url=url, json=json, headers=headers)
+        return _FakeResp(
+            {"name": "vehicle", "parent": "entity", "residual_ids": ["m3"]}
+        )
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+
+    result = hn.type_cluster(
+        _cluster(),
+        hermes_url="http://hermes:17000",
+        token="t",
+    )
+
+    assert result == TypeClusterResult(
+        name="vehicle", parent="entity", residual_ids=["m3"]
+    )
+    assert captured["url"].endswith("/type-cluster")
+    assert captured["headers"]["Authorization"] == "Bearer t"
+    # Type catalog is server-side for /type-cluster: no candidates are sent.
+    assert "candidates" not in captured["json"]
+    # /type-cluster members carry no `type` field (unlike /name-cluster).
+    member = captured["json"]["members"][0]
+    assert "type" not in member
+    assert member["id"] == "u1"
+    assert member["name"] == "derivative"
+    assert member["hermes_type_hint"] == "concept"
+
+
+def test_type_cluster_parent_null_and_missing_residuals(monkeypatch):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp({"name": "concept", "parent": None})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+
+    result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    assert result is not None
+    assert result.name == "concept"
+    assert result.parent is None
+    assert result.residual_ids == []
+
+
+def test_type_cluster_empty_name_returns_none(monkeypatch, caplog):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp({"name": "", "parent": "entity"})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    with caplog.at_level(logging.WARNING, logger="sophia.maintenance.hermes_naming"):
+        result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    assert result is None
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_type_cluster_missing_name_returns_none(monkeypatch):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp({"parent": "entity", "residual_ids": []})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    assert hn.type_cluster(_cluster(), hermes_url="http://h", token="t") is None
+
+
+def test_type_cluster_returns_none_on_connect_error(monkeypatch):
+    def fake_post(*args, **kwargs):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    assert hn.type_cluster(_cluster(), hermes_url="http://h", token="t") is None
+
+
+def test_type_cluster_returns_none_on_http_status_error(monkeypatch):
+    class _FakeBadStatusResp:
+        def raise_for_status(self):
+            raise httpx.HTTPError("500 server error")
+
+        def json(self):
+            return {"name": "vehicle"}
+
+    def fake_post(*args, **kwargs):
+        return _FakeBadStatusResp()
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    assert hn.type_cluster(_cluster(), hermes_url="http://h", token="t") is None
