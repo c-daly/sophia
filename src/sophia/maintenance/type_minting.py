@@ -11,10 +11,11 @@ Membership is the `type_uuid` property -- emergence does NOT create an
 instance->type IS_A edge (it was redundant with `type_uuid`). The taxonomy
 IS_A (new type-definition -> parent type-definition) is created below.
 
-HCGClient encodes nested properties (name_history) transparently; ancestors is a
-native string list. Deciding whether to mint here vs. reconcile a cluster into
-an *existing* type (#504 match-before-mint) is the caller's job -- see
-`EmergenceHandler._match_existing_type`.
+HCGClient encodes nested properties (name_history) transparently. No `ancestors`
+property is stored: structure (the IS_A edges) is the membership/typing fact,
+walked on demand (DESIGN §3). Deciding whether to mint here vs. reconcile a
+cluster into an *existing* type (#504 match-before-mint) is the caller's job --
+see `EmergenceHandler._match_existing_type`.
 """
 
 from __future__ import annotations
@@ -85,20 +86,6 @@ def mint_type(
             "hermes_confidence": name.confidence,
         }
     ]
-    # Descend from the parent type (default `type_entity`) rather than `root`:
-    # the seeder represents the type hierarchy via IS_A edges, and spec 21.3
-    # expects a minted type's `ancestors` to match that IS_A chain. For the
-    # default entity parent this yields ["root", "node", "entity"].
-    _anc = parent_ancestors or ["root", "node"]
-    # Prefer the parent's clean name. Minted parent uuids carry a random
-    # `_<hex>` suffix (`type_<slug>_<hex>`), so stripping "type_" off the uuid
-    # would pollute the lineage with that suffix (greptile #159). Fall back to
-    # the stripped uuid only for legacy/base parents like `type_entity`.
-    _pname = (
-        parent_name
-        if parent_name is not None
-        else parent_type_uuid.removeprefix("type_")
-    )
     hcg.add_node(
         name=name.label,
         node_type="type_definition",
@@ -106,13 +93,15 @@ def mint_type(
         properties={
             # No `is_type_definition` flag (#171): the type layer is detected
             # structurally via node_type="type_definition" + the type_ uuid.
-            "ancestors": _anc + [_pname],
+            # No `ancestors` snapshot either: the IS_A edge below IS the
+            # membership/typing structure, walked on demand (DESIGN §3).
             "name_history": name_history,
         },
         source="emergence",
     )
-    # Wire the minted type into the IS_A hierarchy under its parent so the
-    # graph chain matches the stored `ancestors` (new_type IS_A parent).
+    # Wire the minted type into the IS_A hierarchy under its parent. This edge
+    # IS the membership/typing structure (walked on demand), so there is no
+    # redundant `ancestors` property to keep in sync (new_type IS_A parent).
     hcg.add_edge(type_uuid, parent_type_uuid, "IS_A")
 
     model = next((m.model for m in cluster.members if m.model), _DEFAULT_MODEL)

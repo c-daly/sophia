@@ -99,7 +99,8 @@ def test_mint_creates_type_node_centroid_and_retypes():
     # Structural typing (#171): node_type="type_definition" + the type_ uuid
     # prefix carry the type-layer signal; the legacy flag is never written.
     assert "is_type_definition" not in props
-    assert props["ancestors"] == ["root", "node", "entity"]
+    # No `ancestors` snapshot -- structure (IS_A edges) is the typing fact (B1).
+    assert "ancestors" not in props
     assert props["name_history"][0]["name"] == "concept"
     assert props["name_history"][0]["hermes_confidence"] == 0.8
 
@@ -123,9 +124,10 @@ def test_mint_creates_type_node_centroid_and_retypes():
     assert (type_uuid, "type_entity", "IS_A") in hcg.edges
 
 
-def test_mint_under_explicit_parent_sets_lineage_and_is_a_edge():
-    """An explicit parent_type_uuid / parent_ancestors must drive both the
-    stored ancestors list and the IS_A edge to that parent (#505)."""
+def test_mint_under_explicit_parent_creates_is_a_edge():
+    """An explicit parent_type_uuid drives the IS_A edge to that parent (#505).
+    That structural edge IS the typing fact -- no `ancestors` snapshot is
+    stored on the node (B1 T3)."""
     hcg, milvus = FakeHCG(), FakeMilvus()
     name = NameResult(label="mammal", description="", confidence=0.8)
 
@@ -136,41 +138,11 @@ def test_mint_under_explicit_parent_sets_lineage_and_is_a_edge():
         milvus=milvus,
         source_cluster_id="cl1",
         parent_type_uuid="type_animal",
-        parent_ancestors=["root", "node", "entity"],
     )
 
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
-    assert tdef[0]["properties"]["ancestors"] == [
-        "root",
-        "node",
-        "entity",
-        "animal",
-    ]
+    assert "ancestors" not in tdef[0]["properties"]
     assert (type_uuid, "type_animal", "IS_A") in hcg.edges
-
-
-def test_mint_uses_clean_parent_name_not_uuid_suffix():
-    """When the parent is a minted type, its uuid carries a random `_<hex>`
-    suffix (`type_<slug>_<hex>`). The child's stored ancestors must use the
-    parent's clean name passed via `parent_name`, not the suffixed uuid
-    (greptile #159)."""
-    hcg, milvus = FakeHCG(), FakeMilvus()
-    name = NameResult(label="sedan", description="", confidence=0.8)
-
-    mint_type(
-        _cluster(),
-        name,
-        hcg=hcg,
-        milvus=milvus,
-        source_cluster_id="cl1",
-        parent_type_uuid="type_vehicle_a1b2c3d4",
-        parent_ancestors=["root", "node", "entity"],
-        parent_name="vehicle",
-    )
-
-    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
-    # Clean "vehicle" -- NOT "vehicle_a1b2c3d4".
-    assert tdef[0]["properties"]["ancestors"] == ["root", "node", "entity", "vehicle"]
 
 
 def test_same_label_mints_are_distinct_no_overwrite():
@@ -270,3 +242,31 @@ def test_mint_type_only_skips_member_retype_for_super_types():
     assert any(n["uuid"] == type_uuid for n in hcg.added_nodes)
     assert type_uuid in milvus.centroids
     assert (type_uuid, "type_entity", "IS_A") in hcg.edges
+
+
+def test_mint_writes_no_ancestors_property():
+    """Structure -- the IS_A edges, walked on demand -- is the membership/typing
+    fact; there is NO `ancestors` property on a minted type node (DESIGN §3,
+    naming-driven-typing B1 T3). The parent IS_A edge, which IS that structural
+    fact, must still be created."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="concept", description="ideas", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="type_animal",
+    )
+
+    # The add_node call captured the node's properties kwarg.
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    assert len(tdef) == 1
+    props = tdef[0]["properties"]
+    assert "ancestors" not in props
+    # The genuine non-structural property (name_history) is still written.
+    assert props["name_history"][0]["name"] == "concept"
+    # The parent IS_A edge IS the structure and is still created.
+    assert (type_uuid, "type_animal", "IS_A") in hcg.edges
