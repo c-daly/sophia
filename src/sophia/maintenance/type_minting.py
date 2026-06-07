@@ -13,9 +13,9 @@ IS_A (new type-definition -> parent type-definition) is created below.
 
 HCGClient encodes nested properties (name_history) transparently. No `ancestors`
 property is stored: structure (the IS_A edges) is the membership/typing fact,
-walked on demand (DESIGN §3). Deciding whether to mint here vs. reconcile a
-cluster into an *existing* type (#504 match-before-mint) is the caller's job --
-see `EmergenceHandler._match_existing_type`.
+walked on demand (DESIGN §3). Deciding whether to mint here vs. reuse an
+existing same-name type is the caller's job -- see
+`EmergenceHandler._place_cluster` (the flat parent-driven cascade).
 """
 
 from __future__ import annotations
@@ -65,6 +65,7 @@ def mint_type(
     parent_ancestors: list[str] | None = None,
     parent_name: str | None = None,
     retype_members: bool = True,
+    placed_by: str | None = None,
 ) -> str:
     """Create the type-definition node, seed its centroid, and retype members.
 
@@ -102,7 +103,12 @@ def mint_type(
     # Wire the minted type into the IS_A hierarchy under its parent. This edge
     # IS the membership/typing structure (walked on demand), so there is no
     # redundant `ancestors` property to keep in sync (new_type IS_A parent).
-    hcg.add_edge(type_uuid, parent_type_uuid, "IS_A")
+    hcg.add_edge(
+        type_uuid,
+        parent_type_uuid,
+        "IS_A",
+        properties={"placed_by": placed_by} if placed_by else None,
+    )
 
     model = next((m.model for m in cluster.members if m.model), _DEFAULT_MODEL)
     milvus.update_centroid(

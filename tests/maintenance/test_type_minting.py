@@ -14,6 +14,7 @@ class FakeHCG:
         self.updated = []
         self.edges = []
         self.deleted = []
+        self.edge_props = []
         self._existing_edges = existing_edges or {}
 
     def query_edges_from(self, uuid):
@@ -43,6 +44,7 @@ class FakeHCG:
 
     def add_edge(self, source_uuid, target_uuid, relation, **kw):
         self.edges.append((source_uuid, target_uuid, relation))
+        self.edge_props.append(kw.get("properties"))
         return "edge"
 
 
@@ -270,3 +272,38 @@ def test_mint_writes_no_ancestors_property():
     assert props["name_history"][0]["name"] == "concept"
     # The parent IS_A edge IS the structure and is still created.
     assert (type_uuid, "type_animal", "IS_A") in hcg.edges
+
+
+def test_mint_carries_placed_by_on_parent_is_a_edge():
+    """When placed_by is supplied, the type->parent IS_A edge carries it as the
+    parent-driven traceability tag (DESIGN sec 6, B1 T4b)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="boat", description="", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="type_vehicle",
+        placed_by="parent_resolution",
+    )
+
+    assert (type_uuid, "type_vehicle", "IS_A") in hcg.edges
+    idx = hcg.edges.index((type_uuid, "type_vehicle", "IS_A"))
+    assert hcg.edge_props[idx] == {"placed_by": "parent_resolution"}
+
+
+def test_mint_omits_placed_by_property_when_absent():
+    """The gated-off rollup caller omits placed_by; the IS_A edge then carries no
+    placement property (non-breaking)."""
+    hcg, milvus = FakeHCG(), FakeMilvus()
+    name = NameResult(label="boat", description="", confidence=0.8)
+
+    type_uuid = mint_type(
+        _cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="cl1"
+    )
+
+    idx = hcg.edges.index((type_uuid, "type_entity", "IS_A"))
+    assert hcg.edge_props[idx] is None

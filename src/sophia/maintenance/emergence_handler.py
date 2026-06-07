@@ -1,9 +1,15 @@
-"""The 'type_emergence' maintenance handler (#505).
+"""The 'type_emergence' maintenance handler (B1 flat parent-driven drainage).
 
 Dispatched by MaintenanceScheduler as handlers['type_emergence'](type_uuid=...).
-Dependencies (load_members / name_fn / mint_fn / candidates_fn) are injected so
-the orchestration is unit-testable without Neo4j / Milvus / Hermes. Emergence
-always mints NEW types from the residue; it never attaches to existing ones.
+Dependencies (load_members / name_fn / mint_fn) are injected so the
+orchestration is unit-testable without Neo4j / Milvus / Hermes.
+
+Drainage is FLAT and parent-driven (DESIGN sec 5 / sec 6): embeddings only
+PROPOSE clusters; the graph ASSERTS placement via the parent the LLM names,
+validated closed-world through sophia.maintenance.placement. Centroids never
+decide placement, depth accumulates across passes (never within one), and
+structure (the single upward IS_A edge) is the only membership -- no ancestors
+snapshot and no type_<name> slug (names resolve via the in-pass catalog map).
 """
 
 from __future__ import annotations
@@ -13,9 +19,10 @@ import uuid as uuid_lib
 from collections.abc import Callable
 from typing import Any
 
+from sophia.maintenance import placement
 from sophia.maintenance.config import MaintenanceConfig
-from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
-from sophia.maintenance.emergence_types import EmergentCluster, Member
+from sophia.maintenance.emergence_clustering import find_emergent_clusters
+from sophia.maintenance.emergence_types import EmergentCluster, Member, NameResult
 from sophia.maintenance.structural_signature import build_signature
 from sophia.maintenance.type_minting import _slugify
 
@@ -28,18 +35,18 @@ ONTOLOGY_CHANGED_CHANNEL = "ontology.type_created"
 # authoritative `type_uuid` property (no instance->type IS_A edges -- #505).
 _BASE_TYPE = "entity"
 
-# Durable neutral home for evicted/residual members (SPEC 5.13 / R8, #175).
-# A dedicated sentinel rather than `type_entity`: emergence clusters the
-# `entity` junk drawer itself (the `_BASE_TYPE` branches in `run` and
-# `_member_rows`), so parking evictees at `type_entity` would re-include them
-# whenever the junk drawer is the seed. The sentinel has no type-definition
-# node and `run` skips it, so it is never a candidate source.
-_UNSORTED_TYPE = "unsorted"
-_UNSORTED_TYPE_UUID = "type_unsorted"
+# The three content realm roots. A realm-root pool (e.g. the base `entity`
+# junk-drawer) IS its own realm; any other pool walks IS_A up to one of these.
+# Names are matched case-folded against the in-pass catalog (DESIGN sec 3 / 5).
+_GRAFTABLE_REALMS = frozenset({"entity", "concept", "process"})
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
-    """Cosine similarity of two equal-length vectors (0.0 if either is zero)."""
+    """Cosine similarity of two equal-length vectors (0.0 if either is zero).
+
+    Retained here (emergence no longer matches on centroids -- B1) because the
+    gated-off rollup tier still imports it for its own centroid comparisons.
+    """
     dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = sum(x * x for x in a) ** 0.5
     nb = sum(y * y for y in b) ** 0.5
@@ -166,7 +173,6 @@ class EmergenceHandler:
         load_members: Any,
         name_fn: Any,
         mint_fn: Any,
-        candidates_fn: Any,
     ) -> None:
         self._config = config
         self._hcg = hcg
@@ -177,241 +183,163 @@ class EmergenceHandler:
         self._load_members = load_members
         self._name_fn = name_fn
         self._mint_fn = mint_fn
-        self._candidates_fn = candidates_fn
 
     def run(self, type_uuid: str) -> None:
-        # Parked residuals are not a clustering source (SPEC 5.13): the
-        # sentinel exists precisely so evicted members stop re-entering
-        # candidate pulls.
-        if type_uuid == _UNSORTED_TYPE_UUID:
-            logger.info("emergence: skipping unsorted sentinel (parked residuals)")
-            return
+        """Drain one realm pool: cluster -> name -> flat parent-driven placement.
+
+        Embeddings only PROPOSE the clusters; placement is asserted via the
+        parent the LLM names (or the realm root), validated closed-world. The
+        pass is FLAT -- one placement per cluster, no per-pass sub-tree.
+        """
         members = self._load_members(type_uuid)
-        # Roll the fine clusters up into a multi-level hierarchy: leaves are the
-        # fine clusters, internal nodes are super-types grouping related leaves
-        # (e.g. "linear algebra" + "calculus" -> "mathematics") (#505).
-        hierarchy = find_emergent_hierarchy(
+        # Embeddings propose cohesive sub-groups; they never decide placement.
+        clusters = find_emergent_clusters(
             members,
             min_cluster_size=self._config.min_cluster_size,
             variance_threshold=self._config.variance_threshold,
         )
-        if not hierarchy:
+        if not clusters:
             logger.info("emergence: no qualifying clusters in %s", type_uuid)
             return
 
-        # Mint the whole tree *under the type being subdivided*. For the base
-        # `entity` junk-drawer that parent is `type_entity`; when re-emergence
-        # runs on an already-minted type we nest the new subtypes under it, so
-        # the hierarchy actually deepens instead of everything landing flat under
-        # `entity` (#505).
-        if _type_name(type_uuid) == _BASE_TYPE:
-            parent_type_uuid = f"type_{_BASE_TYPE}"
-            parent_ancestors = ["root", "node"]
-            parent_name = _BASE_TYPE
+        # In-pass catalog (the de-slug): every type name -> its real uuid, lower
+        # cased. Names resolve ONLY through this map -- never a fabricated
+        # `type_<name>` slug (DESIGN sec 3).
+        uuid_by_name = {
+            n["name"].strip().lower(): n["uuid"]
+            for n in self._hcg.list_all_nodes(node_type="type_definition")
+            if n.get("name") and n.get("uuid")
+        }
+
+        # Resolve the pool's realm. A realm-root pool (entity/concept/process)
+        # IS its own realm; any other pool walks IS_A up to its realm root. We
+        # can only place inside a realm, so bail if there is none.
+        node = self._hcg.get_node(type_uuid) or {}
+        node_name = (node.get("name") or "").strip().lower()
+        if node_name in _GRAFTABLE_REALMS:
+            realm = node_name
         else:
-            parent_type_uuid = type_uuid
-            parent_node = self._hcg.get_node(type_uuid) or {}
-            parent_props = parent_node.get("properties") or {}
-            parent_ancestors = list(parent_props.get("ancestors") or ["root", "node"])
-            # Clean name of the type being subdivided. Never derive it from the
-            # uuid -- minted type uuids carry a random `_<hex>` suffix that would
-            # leak into descendants' ancestors (greptile #159).
-            parent_name = parent_node.get("name") or _type_name(type_uuid)
+            realm = placement.realm_of(type_uuid, hcg=self._hcg)
+        if realm is None:
+            logger.info("emergence: %s has no realm; skipping", type_uuid)
+            return
+        realm_root_uuid = uuid_by_name.get(realm)
+        if realm_root_uuid is None:
+            logger.info("emergence: realm %r has no catalog uuid; skipping", realm)
+            return
 
-        # Mutable copy: each successful mint adds its label so later clusters in
-        # this same run see it as a candidate and don't silently re-mint a
-        # same-label sibling.
-        candidates = list(self._candidates_fn())
-        for node in hierarchy:
-            self._mint_subtree(
-                node, parent_type_uuid, parent_ancestors, candidates, parent_name
-            )
-
-    def _mint_subtree(
-        self,
-        node: Any,
-        parent_type_uuid: str,
-        parent_ancestors: list[str],
-        candidates: list[str],
-        parent_name: str,
-    ) -> None:
-        """Mint (or reconcile) one hierarchy node, then recurse into its children.
-
-        Leaf nodes carry real instance members and get them retyped onto the
-        minted/reconciled type. Internal nodes are pure super-types: their type
-        node is created but members are retyped at the leaves below. Every level
-        is named by Hermes, and children are minted under their freshly-created
-        parent so the IS_A chain and `ancestors` nest correctly.
-        """
-        # Per-node isolation: a transient HCG/Milvus/Redis error on one node must
-        # not abort the whole run -- log it and let siblings proceed (#149).
-        try:
-            cluster = EmergentCluster(members=node.members)
-            name = self._name_fn(cluster, candidates, self._hermes_url, self._token)
-            if name is None or name.confidence < self._config.hermes_confidence_floor:
-                logger.info("emergence: skip cluster (no/low-confidence name)")
-                return
-
-            # Hermes flags members that don't fit the named category (#504):
-            # outliers -- a part of another member, or a different kind -- that
-            # would force a looser name. Leave them in the base type rather than
-            # mint them in. Naming-time judgment handles self-similar part-types
-            # (a component within a component) that the structural PART_OF evictor
-            # cannot distinguish.
-            members = node.members
-            if name.removed:
-                removed_set = set(name.removed)
-                members = [m for m in node.members if m.uuid not in removed_set]
-                if not members:
-                    # Total rejection still parks (SPEC 5.13): at temperature
-                    # 0 the namer's verdict is deterministic, so leaving the
-                    # members on the seed re-clusters and re-rejects them on
-                    # EVERY pass -- an unbounded churn loop with repeated LLM
-                    # spend. The sentinel is a durable, recoverable home, not
-                    # destruction (PR #176 review).
-                    logger.info(
-                        "emergence: all %d members flagged as outliers; "
-                        "parking to %s",
-                        len(node.members),
-                        _UNSORTED_TYPE_UUID,
-                    )
-                    self._park_residuals(list(node.members), name.label)
-                    return
-                if len(members) < len(node.members):
-                    logger.info(
-                        "emergence: omitting %d Hermes-flagged outlier(s) from %r",
-                        len(node.members) - len(members),
-                        name.label,
-                    )
-                    cluster = EmergentCluster(members=members)
-                    # Durably park the evictees off the candidate source
-                    # (SPEC 5.13 / R8, #175): without the retype they keep
-                    # the seed type_uuid and the next pull re-includes them.
-                    self._park_residuals(
-                        [m for m in node.members if m.uuid in removed_set],
-                        name.label,
-                    )
-
-            is_leaf = not node.children
-            existing = self._match_existing_type(node.centroid, parent_type_uuid)
-            if existing is not None:
-                # Reconcile into the existing type rather than mint a duplicate
-                # (#504): retype the leaf's members onto it; children nest under
-                # it using its stored ancestors.
-                type_uuid = existing
-                existing_node = self._hcg.get_node(type_uuid) or {}
-                existing_props = existing_node.get("properties") or {}
-                child_ancestors = list(
-                    existing_props.get("ancestors") or parent_ancestors
-                )
-                minted_name = existing_node.get("name") or _type_name(type_uuid)
-                if is_leaf:
-                    self._attach_members(members, type_uuid, existing_node)
-                logger.info(
-                    "emergence: reconciled %d members into existing type %s",
-                    len(members),
-                    type_uuid,
-                )
-            else:
-                cluster_id = uuid_lib.uuid4().hex[:8]
-                type_uuid = self._mint_fn(
-                    cluster,
-                    name,
-                    hcg=self._hcg,
-                    milvus=self._milvus,
-                    source_cluster_id=cluster_id,
-                    parent_type_uuid=parent_type_uuid,
-                    parent_ancestors=parent_ancestors,
-                    parent_name=parent_name,
-                    retype_members=is_leaf,
-                )
-                if name.label not in candidates:
-                    candidates.append(name.label)
-                minted_name = name.label
-                # The minted type's own ancestors are parent_ancestors + its
-                # parent's clean name -- the chain its children descend from.
-                child_ancestors = list(parent_ancestors) + [parent_name]
-                if self._event_bus is not None:
-                    self._event_bus.publish(
-                        ONTOLOGY_CHANGED_CHANNEL,
-                        {
-                            "type_uuid": type_uuid,
-                            "name": name.label,
-                            "ancestors": child_ancestors,
-                        },
-                    )
-                logger.info(
-                    "emergence: minted %s from %d members", name.label, cluster.size
-                )
-
-            for child in node.children:
-                self._mint_subtree(
-                    child, type_uuid, child_ancestors, candidates, minted_name
-                )
-        except Exception:
-            logger.exception("emergence: node failed, skipping")
-
-    def _park_residuals(self, evicted: list[Member], label: str) -> None:
-        """Retype Hermes-flagged outliers onto the `unsorted` sentinel.
-
-        Mirrors the production retype write (type_minting): membership is the
-        authoritative `type_uuid` property, so stamping the sentinel removes
-        the member from the next candidate pull of its seed, while `run`
-        keeps the sentinel itself out of clustering. Per-member isolation:
-        one failed write must not abort the mint of the surviving cluster.
-        """
-        for m in evicted:
+        # Per-cluster isolation: a transient error on one cluster must not abort
+        # the whole pass -- log it and let the others place.
+        for cluster in clusters:
             try:
-                self._hcg.update_node(
-                    m.uuid,
-                    {"type": _UNSORTED_TYPE, "type_uuid": _UNSORTED_TYPE_UUID},
-                )
-                logger.info(
-                    "emergence: parked residual %s (outlier of %r)", m.uuid, label
+                self._place_cluster(
+                    cluster,
+                    realm=realm,
+                    realm_root_uuid=realm_root_uuid,
+                    uuid_by_name=uuid_by_name,
+                    source_type_uuid=type_uuid,
                 )
             except Exception:
-                logger.exception("emergence: failed to park residual %s", m.uuid)
+                logger.exception("emergence: cluster failed, skipping")
 
-    def _match_existing_type(
-        self, centroid: list[float], parent_type_uuid: str
-    ) -> str | None:
-        """Nearest existing type whose centroid is within the match threshold of
-        ``centroid``, or None to mint fresh (#504 match-before-mint).
+    def _place_cluster(
+        self,
+        cluster: EmergentCluster,
+        *,
+        realm: str,
+        realm_root_uuid: str,
+        uuid_by_name: dict[str, str],
+        source_type_uuid: str,
+    ) -> None:
+        """Place ONE cluster flat: the LLM names it, the cascade decides where.
 
-        The parent being subdivided is excluded -- a cluster matching its own
-        parent isn't a distinct type, so we mint/keep rather than self-attach.
+        The parent the LLM suggests drives placement, validated closed-world via
+        :mod:`placement` (centroids never decide). Outliers are left untouched in
+        the realm pool -- no graveyard, reconsidered next pass (DESIGN sec 5).
         """
-        try:
-            nearest = self._milvus.find_nearest_types(centroid, top_k=1)
-        except Exception:
-            logger.exception("emergence: find_nearest_types failed")
-            return None
-        if not nearest:
-            return None
-        cand_uuid = nearest[0].get("uuid")
-        if not cand_uuid or cand_uuid == parent_type_uuid:
-            return None
-        try:
-            row = self._milvus.get_embedding(node_type="TypeCentroid", uuid=cand_uuid)
-        except Exception:
-            logger.exception("emergence: get_embedding failed for %s", cand_uuid)
-            return None
-        if not row or not row.get("embedding"):
-            return None
-        try:
-            similarity = _cosine(centroid, row["embedding"])
-        except ValueError:
-            # Dimension mismatch (e.g. a candidate centroid stored under a
-            # different embedding model). Decline the match here so the cluster
-            # mints fresh, rather than letting the error bubble up to
-            # _mint_subtree's catch-all and skip the whole node (greptile #159).
-            logger.warning(
-                "emergence: centroid dim mismatch vs %s; minting fresh", cand_uuid
+        tc = self._name_fn(cluster)
+        if tc is None or not (tc.name or "").strip():
+            logger.info("emergence: cluster left in pool (no name)")
+            return
+
+        # Outliers stay in the pool (DESIGN sec 5 -- no graveyard): drop them from
+        # the cohort we place, but do NOT retype or park them. Untouched, they
+        # keep pointing at the realm root and re-enter the next pass.
+        residual = set(tc.residual_ids or [])
+        fitting = [m for m in cluster.members if m.uuid not in residual]
+        if not fitting:
+            logger.info("emergence: cluster all outliers, leaving in pool")
+            return
+
+        # Cascade (DESIGN sec 6): resolvable parent -> mint under it; else reuse
+        # an in-realm type of the same name; else mint under the realm root.
+        parent_uuid: str | None = None
+        placed_by: str | None = None
+        reuse_target: str | None = None
+        if tc.parent:
+            pu = placement.resolve_parent(
+                tc.parent, uuid_by_name=uuid_by_name, hcg=self._hcg, realm=realm
             )
-            return None
-        if similarity < self._config.type_match_threshold:
-            return None
-        return str(cand_uuid)
+            if pu:
+                parent_uuid, placed_by = pu, "parent_resolution"
+        if parent_uuid is None:
+            existing = uuid_by_name.get(tc.name.strip().lower())
+            if (
+                existing
+                and existing != source_type_uuid
+                and placement.realm_of(existing, hcg=self._hcg) == realm
+            ):
+                reuse_target, placed_by = existing, "name_reuse"
+            else:
+                parent_uuid, placed_by = realm_root_uuid, "root_fallback"
+
+        if reuse_target is not None:
+            # Reuse: retype the cohort onto the existing same-name type (membership
+            # is the type_uuid property -- no mint, no new edge).
+            existing_node = self._hcg.get_node(reuse_target) or {}
+            self._attach_members(fitting, reuse_target, existing_node)
+            logger.info(
+                "emergence: reused %s for %d members (%s)",
+                reuse_target,
+                len(fitting),
+                placed_by,
+            )
+            return
+
+        # Mint a new type under the chosen parent. mint_type stamps the
+        # type->parent IS_A edge with placed_by (the parent-driven traceability).
+        name_obj = NameResult(
+            label=tc.name, description="", confidence=1.0, removed=[], parent=tc.parent
+        )
+        new_uuid = self._mint_fn(
+            EmergentCluster(members=fitting),
+            name_obj,
+            hcg=self._hcg,
+            milvus=self._milvus,
+            source_cluster_id=uuid_lib.uuid4().hex[:8],
+            parent_type_uuid=parent_uuid,
+            placed_by=placed_by,
+            retype_members=True,
+        )
+        # In-pass dedup: a later same-named cluster reuses this freshly-minted
+        # uuid instead of re-minting a sibling.
+        uuid_by_name[tc.name.strip().lower()] = new_uuid
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                ONTOLOGY_CHANGED_CHANNEL,
+                {
+                    "type_uuid": new_uuid,
+                    "name": tc.name,
+                    "parent_uuid": parent_uuid,
+                    "placed_by": placed_by,
+                },
+            )
+        logger.info(
+            "emergence: minted %s (%s) from %d members",
+            tc.name,
+            placed_by,
+            len(fitting),
+        )
 
     def _attach_members(
         self, members: list[Member], type_uuid: str, type_node: dict[str, Any]
@@ -435,8 +363,13 @@ def build_emergence_handler(
     hermes_url: str,
     token: str,
 ) -> Callable[[str], None]:
-    """Return the callable registered as handlers['type_emergence']."""
-    from sophia.maintenance.hermes_naming import name_cluster
+    """Return the callable registered as handlers['type_emergence'].
+
+    name_fn wraps the Hermes v2 /type-cluster client: the catalog lives server
+    side, so no candidates are sent. Dedup across clusters in a pass happens via
+    the in-pass `uuid_by_name` map, not a candidates seam.
+    """
+    from sophia.maintenance.hermes_naming import type_cluster
     from sophia.maintenance.type_minting import mint_type
 
     handler = EmergenceHandler(
@@ -447,15 +380,13 @@ def build_emergence_handler(
         hermes_url=hermes_url,
         token=token,
         load_members=lambda u: load_type_members(hcg, milvus, u),
-        name_fn=lambda c, cand, url, tok: name_cluster(
+        name_fn=lambda c: type_cluster(
             c,
-            candidates=cand,
-            hermes_url=url,
-            token=tok,
+            hermes_url=hermes_url,
+            token=token,
             max_members=config.max_cluster_size,
         ),
         mint_fn=mint_type,
-        candidates_fn=lambda: current_categories(hcg),
     )
 
     def _run(type_uuid: str) -> None:
