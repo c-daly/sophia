@@ -472,6 +472,50 @@ class HCGClient(LogosHCGClient):
             )
         return results
 
+    def get_members_of_type(self, type_uuid: str) -> list[dict]:
+        """Fetch content nodes that are members of *type_uuid* via an IS_A edge.
+
+        Membership is the instance->type ``IS_A`` edge (entity -> type): an
+        entity is a member of type ``T`` iff a reified edge node
+        ``{relation: 'IS_A'}`` has its ``:FROM`` pointing at the entity and
+        its ``:TO`` pointing at ``T``. This single Cypher query joins through
+        that edge directly, so there is no uuid round-trip.
+
+        This replaces the ``type_uuid``-property scan in
+        :meth:`get_nodes_by_type_uuid` (kept for now, removed in a later
+        task). Returns node dicts with the same
+        ``uuid``/``name``/``type``/``properties`` shape so callers can swap
+        over; there is no top-level ``type_uuid`` key because membership is
+        the edge now, not a property.
+
+        Calling this with a REALM-ROOT uuid yields the drainage pool of
+        that realm -- the entities parked directly under the realm root.
+        """
+        query = """
+        MATCH (edge:Node {relation: 'IS_A'})-[:TO]->(:Node {uuid: $type_uuid})
+        MATCH (edge)-[:FROM]->(m:Node)
+        WHERE m.relation IS NULL
+        RETURN m.uuid as uuid, m.name as name, m.type as type,
+               properties(m) as props
+        """
+        records = self._execute_read(query, {"type_uuid": type_uuid})
+
+        results: list[dict] = []
+        for record in records:
+            props = dict(record["props"])
+            for key in ["uuid", "name", "type"]:
+                props.pop(key, None)
+            props = self._decode_properties(props)
+            results.append(
+                {
+                    "uuid": record["uuid"],
+                    "name": record["name"],
+                    "type": record["type"],
+                    "properties": props,
+                }
+            )
+        return results
+
     def find_nodes_by_names(self, names: list[str]) -> dict[str, dict]:
         """Find multiple content nodes by exact name match in a single query.
 
