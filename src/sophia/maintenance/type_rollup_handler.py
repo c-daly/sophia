@@ -385,8 +385,9 @@ class TypeRollupHandler:
                 ):
                     parent_type_uuid = rooted
                     logger.info(
-                        "type_rollup: rooting super-type %r under %s",
+                        "type_rollup: rooting super-type %r under %s (%s)",
                         name.label,
+                        self._name_of.get(parent_type_uuid, parent_type_uuid),
                         parent_type_uuid,
                     )
             super_uuid = self._match_existing_type(
