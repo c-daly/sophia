@@ -1,11 +1,17 @@
 """Integration test for MaintenanceScheduler with real Redis.
 
-Requires: Redis running on localhost:6379
+Requires: Redis running on localhost:6379.
+
+Uses a dedicated Redis DB (15 by default, override with SOPHIA_TEST_REDIS_URL)
+so the test queue is isolated from a live Sophia instance: its maintenance
+dispatch loop runs on db 0 and would otherwise brpop the jobs these tests
+enqueue out from under them, making pending_count assertions flaky.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,9 +21,13 @@ from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.job_queue import MaintenanceQueue, PRIORITY_ORDER
 from sophia.maintenance.scheduler import MaintenanceScheduler
 
+# Dedicated test DB so a running Sophia (which uses db 0) cannot drain the
+# queue mid-test; override with SOPHIA_TEST_REDIS_URL if db 15 is taken.
+TEST_REDIS_URL = os.environ.get("SOPHIA_TEST_REDIS_URL", "redis://localhost:6379/15")
+
 REDIS_AVAILABLE = False
 try:
-    _r = redis_lib.from_url("redis://localhost:6379/0")
+    _r = redis_lib.from_url(TEST_REDIS_URL)
     _r.ping()
     REDIS_AVAILABLE = True
     _r.close()
@@ -31,7 +41,7 @@ class TestMaintenanceSchedulerIntegration:
     """Integration tests for MaintenanceScheduler against real Redis."""
 
     def setup_method(self) -> None:
-        self.redis = redis_lib.from_url("redis://localhost:6379/0")
+        self.redis = redis_lib.from_url(TEST_REDIS_URL)
         # Clean up all priority queue keys and failed key before each test
         for key in PRIORITY_ORDER:
             self.redis.delete(key)
