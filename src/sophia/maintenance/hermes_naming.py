@@ -144,6 +144,14 @@ def type_cluster(
             logger.warning("type_cluster returned no groups; treating as failure")
             return None
         group = groups[0]
+        if len(groups) > 1:
+            # Hermes v2 guarantees exactly one group; surface a contract
+            # violation (e.g. a partial batch) rather than silently dropping the
+            # rest.
+            logger.warning(
+                "type_cluster returned %d groups; using only the first",
+                len(groups),
+            )
         if not isinstance(group, dict):
             logger.warning("type_cluster group is not an object; treating as failure")
             return None
@@ -151,12 +159,21 @@ def type_cluster(
         if not name:
             logger.warning("type_cluster group has no name; treating as failure")
             return None
-        assign_to = str(group.get("assign_to") or "NEW").strip()
+        # Coerce to str + strip BEFORE defaulting, so a whitespace-only or
+        # non-string assign_to falls back to "NEW" instead of slipping through
+        # as a falsy value on the existing-type-reuse path.
+        assign_to = str(group.get("assign_to") or "").strip() or "NEW"
         chain = group.get("chain")
         parent: str | None = None
         if assign_to == "NEW" and isinstance(chain, list) and len(chain) > 1:
-            parent = str(chain[1]).strip() or None
-        residual = data.get("residual_ids") or []
+            # chain[1] may be JSON null; guard so it never becomes the literal
+            # string "None" used as a parent name.
+            parent = None if chain[1] is None else (str(chain[1]).strip() or None)
+        residual = data.get("residual_ids")
+        if not isinstance(residual, list):
+            # A non-list residual_ids (string/int from a serialisation glitch)
+            # would iterate char-by-char or raise; treat anything non-list as none.
+            residual = []
         return TypeClusterResult(
             name=name,
             parent=parent,

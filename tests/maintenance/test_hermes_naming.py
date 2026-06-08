@@ -309,3 +309,99 @@ def test_type_cluster_returns_none_on_http_status_error(monkeypatch):
 
     monkeypatch.setattr(hn.httpx, "post", fake_post)
     assert hn.type_cluster(_cluster(), hermes_url="http://h", token="t") is None
+
+
+def test_type_cluster_null_chain_entry_yields_no_parent(monkeypatch):
+    """A JSON null at chain[1] must NOT become the literal string "None" as a
+    parent name; it should resolve to parent=None."""
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp(
+            {
+                "groups": [
+                    {
+                        "assign_to": "NEW",
+                        "name": "vehicle",
+                        "chain": ["vehicle", None, "entity"],
+                    }
+                ],
+                "residual_ids": [],
+            }
+        )
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    assert result == TypeClusterResult(name="vehicle", parent=None, residual_ids=[])
+
+
+def test_type_cluster_non_list_residual_ids_ignored(monkeypatch):
+    """A non-list residual_ids (e.g. a bare string from a serialisation glitch)
+    must not be iterated char-by-char; it is treated as no residuals."""
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp(
+            {
+                "groups": [
+                    {
+                        "assign_to": "NEW",
+                        "name": "vehicle",
+                        "chain": ["vehicle", "object"],
+                    }
+                ],
+                "residual_ids": "m3",
+            }
+        )
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    assert result == TypeClusterResult(name="vehicle", parent="object", residual_ids=[])
+
+
+def test_type_cluster_whitespace_assign_to_treated_as_new(monkeypatch):
+    """A whitespace-only assign_to is a missing value, not an existing-type
+    reuse: it must default to NEW so the parent is taken from the chain."""
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp(
+            {
+                "groups": [
+                    {
+                        "assign_to": "   ",
+                        "name": "vehicle",
+                        "chain": ["vehicle", "object", "entity"],
+                    }
+                ],
+                "residual_ids": [],
+            }
+        )
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    assert result == TypeClusterResult(name="vehicle", parent="object", residual_ids=[])
+
+
+def test_type_cluster_multiple_groups_uses_first_and_warns(monkeypatch):
+    """Hermes v2 guarantees one group; if more arrive, use the first but log a
+    warning so the contract violation is observable."""
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return _FakeResp(
+            {
+                "groups": [
+                    {
+                        "assign_to": "NEW",
+                        "name": "vehicle",
+                        "chain": ["vehicle", "object"],
+                    },
+                    {"assign_to": "NEW", "name": "boat", "chain": ["boat", "object"]},
+                ],
+                "residual_ids": [],
+            }
+        )
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    warnings: list[tuple] = []
+    monkeypatch.setattr(hn.logger, "warning", lambda *a, **k: warnings.append((a, k)))
+    result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
+    assert result == TypeClusterResult(name="vehicle", parent="object", residual_ids=[])
+    assert warnings  # the >1-group contract violation was logged
