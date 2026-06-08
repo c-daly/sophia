@@ -482,6 +482,56 @@ def test_in_pass_dedup_reuses_fresh_mint(monkeypatch):
     assert hcg.updated == []
 
 
+def test_dedup_reuses_in_realm_type_even_when_parent_proposed(monkeypatch):
+    """#38 regression: a same-name in-realm type is REUSED -- members re-pointed
+    onto it -- even when Hermes proposes a (resolvable) parent. The same-name dedup
+    check runs BEFORE parent resolution, so no duplicate type is minted."""
+    cluster = EmergentCluster(members=[_m("c0"), _m("c1")])
+    monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
+    # Both the proposed parent (vehicle) AND the same-name type (boat) already
+    # exist in the entity realm. Pre-fix, the resolvable parent would mint a second
+    # boat under vehicle; post-fix the existing boat is reused, never duplicated.
+    hcg = _entity_pool_hcg(
+        extra_type_defs=[
+            {"name": "vehicle", "uuid": "vehicle_uuid"},
+            {"name": "boat", "uuid": "boat_existing_uuid"},
+        ],
+        extra_nodes={
+            "vehicle_uuid": {"uuid": "vehicle_uuid", "name": "vehicle"},
+            "boat_existing_uuid": {"uuid": "boat_existing_uuid", "name": "boat"},
+        },
+        extra_edges={
+            "vehicle_uuid": [{"relation": "IS_A", "target": "entity_root"}],
+            "boat_existing_uuid": [{"relation": "IS_A", "target": "entity_root"}],
+        },
+    )
+    _park(hcg, "c0", "c1")
+    minted = []
+    handler = _handler(
+        hcg,
+        _RecordingMilvus(),
+        name_fn=lambda c: TypeClusterResult(
+            name="boat", parent="vehicle", residual_ids=[]
+        ),
+        mint_fn=lambda *a, **k: minted.append(1),
+    )
+    handler.run(type_uuid="entity_root")
+
+    # A parent WAS proposed, but the same-name in-realm boat already exists ->
+    # reuse it (re-point member edges); never mint a duplicate (#38).
+    assert minted == []
+    assert set(hcg.membership_edges()) == {
+        ("c0", "boat_existing_uuid"),
+        ("c1", "boat_existing_uuid"),
+    }
+    assert all(
+        props == {"placed_by": "name_reuse"}
+        for _s, _t, rel, props in hcg.added_edges
+        if rel == "IS_A"
+    )
+    assert hcg.updated == []
+
+
 def test_mint_publishes_event_without_ancestors(monkeypatch):
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
