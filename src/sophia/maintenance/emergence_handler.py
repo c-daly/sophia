@@ -273,27 +273,31 @@ class EmergenceHandler:
             logger.info("emergence: cluster all outliers, leaving in pool")
             return
 
-        # Cascade (DESIGN sec 6): resolvable parent -> mint under it; else reuse
-        # an in-realm type of the same name; else mint under the realm root.
+        # Cascade (DESIGN sec 6). Dedup FIRST: a same-named type already in this
+        # realm IS this type (identity = name + realm; IS_A defines type), so reuse
+        # it -- route members onto it, never mint a second node. This must run
+        # whether or not Hermes proposed a parent; otherwise a name minted by an
+        # earlier cluster (the uuid_by_name map is updated on each mint) or a prior
+        # pass gets duplicated (#38). Only when no same-name type exists do we
+        # resolve the proposed parent, falling back to the realm root.
         parent_uuid: str | None = None
         placed_by: str | None = None
         reuse_target: str | None = None
-        if tc.parent:
+        existing = uuid_by_name.get(tc.name.strip().lower())
+        if (
+            existing
+            and existing != source_type_uuid
+            and placement.realm_of(existing, hcg=self._hcg) == realm
+        ):
+            reuse_target, placed_by = existing, "name_reuse"
+        elif tc.parent:
             pu = placement.resolve_parent(
                 tc.parent, uuid_by_name=uuid_by_name, hcg=self._hcg, realm=realm
             )
             if pu:
                 parent_uuid, placed_by = pu, "parent_resolution"
-        if parent_uuid is None:
-            existing = uuid_by_name.get(tc.name.strip().lower())
-            if (
-                existing
-                and existing != source_type_uuid
-                and placement.realm_of(existing, hcg=self._hcg) == realm
-            ):
-                reuse_target, placed_by = existing, "name_reuse"
-            else:
-                parent_uuid, placed_by = realm_root_uuid, "root_fallback"
+        if reuse_target is None and parent_uuid is None:
+            parent_uuid, placed_by = realm_root_uuid, "root_fallback"
 
         # The cascade above always settles on a placement reason.
         assert placed_by is not None

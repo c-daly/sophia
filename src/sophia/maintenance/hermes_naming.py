@@ -131,19 +131,35 @@ def type_cluster(
         if not isinstance(data, dict):
             logger.warning("type_cluster returned non-dict JSON: %r", data)
             return None
-        name = str(data.get("name") or "").strip()
-        if not name:
-            logger.warning("type_cluster returned an empty name; treating as failure")
+        # Hermes v2 returns exactly ONE group (the most-specific type it can form
+        # for the cluster; members that blur it are excluded as residuals) under
+        # `groups`, NOT a top-level `name`. The group's IS_A `chain` runs
+        # specific->general with chain[0]==name, so the proposed parent is
+        # chain[1] -- and it is guaranteed to already exist. `parent` is None only
+        # when the group reuses an existing type (assign_to != "NEW"); the handler
+        # then re-points members onto the existing same-name type rather than
+        # minting.
+        groups = data.get("groups")
+        if not isinstance(groups, list) or not groups:
+            logger.warning("type_cluster returned no groups; treating as failure")
             return None
-        parent = data.get("parent")
+        group = groups[0]
+        if not isinstance(group, dict):
+            logger.warning("type_cluster group is not an object; treating as failure")
+            return None
+        name = str(group.get("name") or "").strip()
+        if not name:
+            logger.warning("type_cluster group has no name; treating as failure")
+            return None
+        assign_to = str(group.get("assign_to") or "NEW").strip()
+        chain = group.get("chain")
+        parent: str | None = None
+        if assign_to == "NEW" and isinstance(chain, list) and len(chain) > 1:
+            parent = str(chain[1]).strip() or None
         residual = data.get("residual_ids") or []
         return TypeClusterResult(
             name=name,
-            parent=(
-                str(parent).strip()
-                if isinstance(parent, str) and parent.strip()
-                else None
-            ),
+            parent=parent,
             residual_ids=[str(r) for r in residual if r],
         )
     except (httpx.HTTPError, KeyError, ValueError) as exc:
