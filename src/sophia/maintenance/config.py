@@ -57,14 +57,16 @@ class MaintenanceConfig(BaseSettings):
         description="Discard Hermes cluster names below this confidence.",
     )
     rollup_enabled: bool = Field(
-        # Deferred for naming-driven-typing B1: the rollup (revision) tier still
-        # threads/writes the `ancestors` property and resolves `type_<name>`
-        # slugs, both incompatible with the uuid5 + no-ancestors design. It is
-        # gated OFF until its own follow-up converts it onto placement.py.
+        # The rollup (revision) tier's WRITE side is now on placement.py -- it
+        # re-points IS_A edges and writes no `ancestors` property (#24). It stays
+        # gated OFF because it still (a) resolves `type_<name>` slugs for realm
+        # roots, which dangle against the uuid5 seeder, and (b) infers membership
+        # by reading the `type`/`type_uuid` properties (#35). Both must go
+        # edge-based before it can run correctly on a reseeded graph.
         default=False,
         description="Run the periodic type-level rollup that groups the flat "
-        "layer of emergent types into super-types (#160). Disabled pending the "
-        "rollup-onto-placement conversion (naming-driven-typing follow-up).",
+        "layer of emergent types into super-types (#160). Disabled pending "
+        "realm-root uuid + read-path edge conversion (#35).",
     )
     rollup_interval_seconds: int = Field(
         default=600,

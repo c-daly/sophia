@@ -133,9 +133,13 @@ class TypeRollupHandler:
         # match a coined label and never bypass the reuse / protected-root guards
         # (review #165: case-insensitive lookup on the name->uuid map).
         self._uuid_by_name = {r["name"].strip().lower(): r["uuid"] for r in rows}
-        # The `entity` realm root is the tier-2 fallback parent. Resolve its real
-        # uuid from the name map; the legacy `type_entity` slug is only the
-        # last-resort default (the seeder now mints real uuids).
+        # Tier-2 fallback parent for residual types. Realm roots are NOT in
+        # `_uuid_by_name` (it holds rollup candidates only), so this resolves to
+        # the `type_entity` SLUG today -- which is exactly what the tier-2
+        # top-level check (`parent_type_uuid == f"type_{_BASE_TYPE}"`) keys on.
+        # Against the uuid5 seeder that slug is dangling; reconciling realm roots
+        # to their real uuids is part of un-gating this tier (#35) -- which is
+        # why the tier stays gated OFF (config.rollup_enabled).
         entity_root_uuid = self._uuid_by_name.get("entity") or "type_entity"
 
         # Include the realm roots so Hermes can name one as a super-type's
