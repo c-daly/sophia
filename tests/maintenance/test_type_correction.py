@@ -22,6 +22,8 @@ class FakeHCG:
         self.nodes = {n["uuid"]: dict(n) for n in nodes}
         self.edges = list(edges)
         self.updates = []  # (uuid, props)
+        self._eid = 0
+        self.writes = []  # (op, *args) -- edge writes done by placement.reparent
         # Seeded `entity` realm root (real uuid5), found by name via list_all_nodes.
         self.nodes[_ENTITY_UUID] = {
             "uuid": _ENTITY_UUID,
@@ -51,6 +53,44 @@ class FakeHCG:
         self.updates.append((uuid, dict(properties or {})))
         return uuid
 
+    def get_node(self, uuid):
+        return self.nodes.get(uuid)
+
+    def query_edges_from(self, uuid):
+        return [e for e in self.edges if e["source"] == uuid]
+
+    def add_edge(self, source, target, relation, **kw):
+        # MERGE semantics: dedupe on (source, target, relation).
+        for e in self.edges:
+            if (e["source"], e["target"], e["relation"]) == (source, target, relation):
+                return e.get("id")
+        self._eid += 1
+        eid = f"edge{self._eid}"
+        self.edges.append(
+            {"id": eid, "source": source, "target": target, "relation": relation}
+        )
+        self.writes.append(("add_edge", source, target, relation))
+        return eid
+
+    def delete_edge(self, edge_uuid):
+        self.edges = [e for e in self.edges if e.get("id") != edge_uuid]
+        self.writes.append(("delete_edge", edge_uuid))
+        return True
+
+    def delete_edges_between(self, source, target, relation):
+        before = len(self.edges)
+        self.edges = [
+            e
+            for e in self.edges
+            if not (
+                e["source"] == source
+                and e["target"] == target
+                and e["relation"] == relation
+            )
+        ]
+        self.writes.append(("delete_edges_between", source, target, relation))
+        return before - len(self.edges)
+
 
 def _run(hcg):
     build_type_correction_handler(config=MaintenanceConfig(), hcg=hcg)()
@@ -69,14 +109,21 @@ def test_evicts_part_from_its_same_type_whole():
         ],
     )
     _run(hcg)
-    # the part (source of PART_OF) returns to the junk-drawer
-    assert hcg.nodes["tusk"]["type"] == "entity"
-    assert hcg.nodes["tusk"]["type_uuid"] == _ENTITY_UUID
-    assert hcg.nodes["tusk"]["needs_reclassification"] is True
-    # the whole, and an unrelated peer, are untouched
+    # the part (source of PART_OF) returns to the junk-drawer: its single upward
+    # IS_A membership edge now points at the entity realm root (no type_uuid stamp)
+    assert any(
+        e["source"] == "tusk"
+        and e["target"] == _ENTITY_UUID
+        and e["relation"] == "IS_A"
+        for e in hcg.edges
+    )
+    # the whole, and an unrelated peer, are untouched (no eviction edge)
     assert hcg.nodes["narwhal"]["type"] == "marine_mammal"
     assert hcg.nodes["dolphin"]["type"] == "marine_mammal"
-    assert "dolphin" not in {u for u, _ in hcg.updates}
+    assert not any(
+        e["source"] in {"narwhal", "dolphin"} and e["relation"] == "IS_A"
+        for e in hcg.edges
+    )
 
 
 def test_evicts_product_target_for_production_relation():
@@ -88,8 +135,16 @@ def test_evicts_product_target_for_production_relation():
         ],
     )
     _run(hcg)
-    assert hcg.nodes["acorn"]["type"] == "entity"  # the product leaves
+    # the product (target of PRODUCES) is evicted: its IS_A edge now points at the
+    # entity realm root.
+    assert any(
+        e["source"] == "acorn"
+        and e["target"] == _ENTITY_UUID
+        and e["relation"] == "IS_A"
+        for e in hcg.edges
+    )
     assert hcg.nodes["oak"]["type"] == "flora"  # the producer stays
+    assert not any(e["source"] == "oak" and e["relation"] == "IS_A" for e in hcg.edges)
 
 
 def test_no_eviction_across_different_types():
@@ -104,7 +159,7 @@ def test_no_eviction_across_different_types():
         ],
     )
     _run(hcg)
-    assert hcg.updates == []
+    assert hcg.writes == []  # no eviction edge written
     assert hcg.nodes["tusk"]["type"] == "animal_part"
 
 
@@ -115,7 +170,7 @@ def test_no_eviction_for_base_types():
         edges=[{"id": "r1", "source": "a", "target": "b", "relation": "PART_OF"}],
     )
     _run(hcg)
-    assert hcg.updates == []
+    assert hcg.writes == []  # no eviction edge written
 
 
 def test_no_eviction_for_underscore_cognition_root():
@@ -129,7 +184,7 @@ def test_no_eviction_for_underscore_cognition_root():
         edges=[{"id": "r1", "source": "a", "target": "b", "relation": "PART_OF"}],
     )
     _run(hcg)
-    assert hcg.updates == []
+    assert hcg.writes == []  # no eviction edge written
 
 
 def test_taxonomic_isa_edge_is_not_a_correction():
@@ -139,4 +194,4 @@ def test_taxonomic_isa_edge_is_not_a_correction():
         edges=[{"id": "r1", "source": "x", "target": "y", "relation": "IS_A"}],
     )
     _run(hcg)
-    assert hcg.updates == []
+    assert hcg.writes == []  # no eviction edge written

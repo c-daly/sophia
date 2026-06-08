@@ -7,9 +7,10 @@ can end up containing both a whole and its part -- e.g. ``tusk`` inside the
 marine-mammal type, ``acorn`` inside the oak's type. An intra-type meronymic /
 productive edge (``tusk PART_OF narwhal``, ``oak PRODUCES acorn``) is conclusive
 structural evidence that one member is a part/product of another, NOT a
-co-member. We evict the part/product back to the ``type_entity`` junk-drawer
-(its ``PART_OF``/``PRODUCES`` edge stays, so its role is still recorded) by
-writing the inverse of ``type_minting``'s retype.
+co-member. We evict the part/product back to the ``entity`` junk-drawer (its
+``PART_OF``/``PRODUCES`` edge stays, so its role is still recorded) by re-pointing
+its single upward ``IS_A`` membership edge onto the ``entity`` realm root via
+``placement.reparent`` -- the inverse of ``type_minting``'s placement.
 
 This redirects #504 off the falsified centroid-cohesion approach (embedding
 distance cannot separate "same kind" from "merely related") onto the proven
@@ -20,6 +21,8 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
+from sophia.maintenance import placement
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +101,10 @@ class TypeCorrectionHandler:
         except Exception:
             logger.exception("type_correction: get_nodes_batch failed")
             return
-        # Membership is the node's emergent type. `type` (the slug) is set
-        # alongside `type_uuid` on every retype (type_minting), so two members
-        # of one emergent type share a non-base `type`.
+        # Co-membership is detected from the `type` slug two members share on a
+        # retype. Membership itself is the instance->type IS_A edge now, not a
+        # `type_uuid` stamp; this detection scan is a read path left unconverted.
+        # TODO #35: read still infers membership from property; convert to IS_A walk
         type_of: dict[str, str] = {
             r.get("uuid"): r.get("type") for r in rows if r.get("uuid")
         }
@@ -140,7 +144,14 @@ class TypeCorrectionHandler:
         return self._entity_uuid
 
     def _evict(self, uuid: str, from_type: str, rel: str) -> bool:
-        """Retype the member back to the junk-drawer (inverse of mint_type)."""
+        """Re-point the member's membership edge back to the junk-drawer.
+
+        Membership is the instance->type IS_A edge now (B2/B3, DESIGN sec 3), not
+        a `type_uuid` stamp -- eviction re-points that single upward edge onto the
+        `entity` realm root via placement.reparent (the inverse of mint_type's
+        placement). An empty `children_of` is safe: an evicted instance is a leaf
+        that never roots a type IS_A subtree, so no cycle is possible.
+        """
         entity_uuid = self._resolve_entity_uuid()
         if not entity_uuid:
             logger.warning(
@@ -148,13 +159,12 @@ class TypeCorrectionHandler:
             )
             return False
         try:
-            self._hcg.update_node(
+            placement.reparent(
                 uuid,
-                {
-                    "type": "entity",
-                    "type_uuid": entity_uuid,
-                    "needs_reclassification": True,
-                },
+                entity_uuid,
+                hcg=self._hcg,
+                children_of={},
+                placed_by="root_fallback",
             )
             logger.info(
                 "type_correction: evicted %s from %s (intra-type %s edge)",
@@ -174,8 +184,9 @@ def build_type_correction_handler(
     """Return the callable registered as ``handlers['type_correction']`` (#504).
 
     Deterministic + embedding-free: scans for intra-type meronymic edges and
-    evicts the part/product member to ``type_entity`` via the existing
-    ``update_node`` retype. No Milvus / Hermes needed.
+    evicts the part/product member back under the ``entity`` realm root by
+    re-pointing its ``IS_A`` membership edge (placement.reparent). No Milvus /
+    Hermes needed.
     """
     handler = TypeCorrectionHandler(config=config, hcg=hcg, event_bus=event_bus)
     return lambda **_kw: handler.run()

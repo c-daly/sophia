@@ -283,6 +283,8 @@ def _seed_member(
     uuid = f"{ns}-{ident}"
     hcg.add_node(name=f"{ns} {ident}", node_type="entity", uuid=uuid, source=f"r1-{ns}")
     # The production retype write: the authoritative current-type pointer.
+    # TODO #27: stamps type_uuid; convert to an IS_A membership edge when this
+    # module-skipped suite is un-skipped (membership is the IS_A edge now).
     hcg.update_node(uuid, {"type": "entity", "type_uuid": type_uuid})
     milvus.members[uuid] = {"embedding": list(embedding), "model": _MODEL}
     return uuid

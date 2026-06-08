@@ -3,8 +3,9 @@
 A slow-cadence maintenance pass. Emergence mints a wide flat layer of leaf
 type-definitions under `entity` and never revisits it, so the ontology stays
 flat. This pass groups those *types* into super-types. It RE-PARENTS existing
-type-definitions (sets `ancestors` + a single `type->parent IS_A` edge); it never
-retypes instance members.
+type-definitions (re-points the single `type->parent IS_A` edge via
+`placement.reparent`, the only membership-write path); it never retypes instance
+members.
 
 Two tiers, run in order:
   1. **Explicit subsumption lift** -- member relations already cross type
@@ -16,9 +17,9 @@ Two tiers, run in order:
      clustered recursively into super-types via the same `find_emergent_hierarchy`
      used for entity emergence, but with type centroids as the points.
 
-Idempotent: `_reparent_one` change-detects and is a no-op when the type already
-has the right parent/ancestors; super-types reconcile (match-before-mint) so a
-re-run does not duplicate them. Safe to fire on a plain periodic trigger.
+Idempotent: `placement.reparent` is a no-op when the type already has the right
+parent; super-types reconcile (match-before-mint) so a re-run does not duplicate
+them. Safe to fire on a plain periodic trigger.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from typing import Any
 
+from sophia.maintenance import placement
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
 from sophia.maintenance.emergence_handler import _cosine, _type_name
@@ -131,6 +133,10 @@ class TypeRollupHandler:
         # match a coined label and never bypass the reuse / protected-root guards
         # (review #165: case-insensitive lookup on the name->uuid map).
         self._uuid_by_name = {r["name"].strip().lower(): r["uuid"] for r in rows}
+        # The `entity` realm root is the tier-2 fallback parent. Resolve its real
+        # uuid from the name map; the legacy `type_entity` slug is only the
+        # last-resort default (the seeder now mints real uuids).
+        entity_root_uuid = self._uuid_by_name.get("entity") or "type_entity"
 
         # Include the realm roots so Hermes can name one as a super-type's
         # parent: the rollup is the single authority that roots types under
@@ -152,7 +158,7 @@ class TypeRollupHandler:
             and len(r["ancestors"]) <= 3
             and not self._children_of.get(r["uuid"])
         ]
-        self._tier2_residual(residual, candidates)
+        self._tier2_residual(residual, candidates, entity_root_uuid)
 
     # ------------------------------------------------------------------ load
     def _load_type_layer(self) -> list[dict]:
@@ -243,7 +249,7 @@ class TypeRollupHandler:
                 parent, 0
             ):
                 continue
-            self._reparent_one(child, parent, p_row["ancestors"], p_row["name"])
+            self._reparent_one(child, parent)
             explicit_children.add(child)
         if explicit_children:
             logger.info(
@@ -253,6 +259,7 @@ class TypeRollupHandler:
         return explicit_children
 
     def _type_uuid_map(self, node_uuids: list[str]) -> dict[str, str]:
+        # TODO #35: read still infers membership from property; convert to IS_A walk
         # Resolve in chunks: a single get_nodes_batch over every member uuid can
         # exceed query-size/timeout limits on a large graph (gemini #161).
         out: dict[str, str] = {}
@@ -272,7 +279,9 @@ class TypeRollupHandler:
         return out
 
     # ------------------------------------------------------------ tier 2
-    def _tier2_residual(self, residual: list[dict], candidates: list[str]) -> None:
+    def _tier2_residual(
+        self, residual: list[dict], candidates: list[str], entity_root_uuid: str
+    ) -> None:
         if len(residual) < self._config.rollup_min_supercluster_size:
             logger.info(
                 "type_rollup: %d residual types, below supercluster floor",
@@ -304,16 +313,12 @@ class TypeRollupHandler:
             )
             return
         for node in hierarchy:
-            self._reparent_subtree(
-                node, "type_entity", _ENTITY_ANCESTORS, _BASE_TYPE, candidates
-            )
+            self._reparent_subtree(node, entity_root_uuid, candidates)
 
     def _reparent_subtree(
         self,
         node: Any,
         parent_type_uuid: str,
-        parent_ancestors: list[str],
-        parent_name: str,
         candidates: list[str],
     ) -> None:
         """Internal nodes => mint/reuse a super-type; leaves => re-parent the
@@ -322,9 +327,7 @@ class TypeRollupHandler:
             if not node.children:
                 # Leaf: each member is an existing type-def; re-parent it directly.
                 for m in node.members:
-                    self._reparent_one(
-                        m.uuid, parent_type_uuid, parent_ancestors, parent_name
-                    )
+                    self._reparent_one(m.uuid, parent_type_uuid)
                 return
             # Internal node => a super-type over its children.
             name = self._name_fn(
@@ -355,13 +358,7 @@ class TypeRollupHandler:
                     name.label,
                 )
                 for child in node.children:
-                    self._reparent_subtree(
-                        child,
-                        parent_type_uuid,
-                        parent_ancestors,
-                        parent_name,
-                        candidates,
-                    )
+                    self._reparent_subtree(child, parent_type_uuid, candidates)
                 return
             # Root a TOP-LEVEL super-type under the CLOSEST covering type Hermes
             # named -- a realm root (concept / process) OR a deeper existing
@@ -379,14 +376,14 @@ class TypeRollupHandler:
                 rooted = self._resolve_parent(name.parent)
                 if (
                     rooted is not None
-                    and rooted[0] not in member_uuids
-                    and rooted[0] != self._uuid_by_name.get(clean_label)
+                    and rooted not in member_uuids
+                    and rooted != self._uuid_by_name.get(clean_label)
                 ):
-                    parent_type_uuid, parent_ancestors, parent_name = rooted
+                    parent_type_uuid = rooted
                     logger.info(
-                        "type_rollup: rooting super-type %r under %r",
+                        "type_rollup: rooting super-type %r under %s",
                         name.label,
-                        parent_name,
+                        parent_type_uuid,
                     )
             super_uuid = self._match_existing_type(
                 node.centroid, parent_type_uuid, exclude=member_uuids
@@ -427,9 +424,6 @@ class TypeRollupHandler:
                     milvus=self._milvus,
                     source_cluster_id=cid,
                     parent_type_uuid=parent_type_uuid,
-                    parent_ancestors=parent_ancestors,
-                    parent_name=parent_name,
-                    retype_members=False,  # super-type owns no instances
                 )
                 if name.label not in candidates:
                     candidates.append(name.label)
@@ -444,7 +438,6 @@ class TypeRollupHandler:
                             {
                                 "type_uuid": super_uuid,
                                 "name": super_name,
-                                "ancestors": list(parent_ancestors) + [parent_name],
                             },
                         )
                     except Exception:
@@ -460,161 +453,32 @@ class TypeRollupHandler:
                 if super_uuid not in self._children_of[parent_type_uuid]:
                     self._children_of[parent_type_uuid].append(super_uuid)
             else:
-                super_name = (self._hcg.get_node(super_uuid) or {}).get(
-                    "name"
-                ) or _type_name(super_uuid)
                 # The super was REUSED (centroid- or name-match), not minted, so
                 # nothing has placed it under this parent. mint_fn does that for
-                # fresh supers; the reuse paths must do it explicitly or the
-                # super keeps its old position while its new children get
-                # ancestors for the intended one (divergence). Idempotent no-op
-                # when already correct; cycle-guarded if it would loop.
-                self._reparent_one(
-                    super_uuid, parent_type_uuid, parent_ancestors, parent_name
-                )
-            super_ancestors = list(parent_ancestors) + [parent_name]
+                # fresh supers; the reuse paths must do it explicitly or the super
+                # keeps its old position (divergence). Idempotent no-op when
+                # already correct; cycle-guarded if it would loop.
+                self._reparent_one(super_uuid, parent_type_uuid)
             for child in node.children:
-                self._reparent_subtree(
-                    child, super_uuid, super_ancestors, super_name, candidates
-                )
+                self._reparent_subtree(child, super_uuid, candidates)
         except Exception:
             logger.exception("type_rollup: subtree failed, skipping")
 
-    # ----------------------------------------------------- reparent + cascade
-    def _reparent_one(
-        self,
-        child_uuid: str,
-        new_parent_uuid: str,
-        new_parent_ancestors: list[str],
-        new_parent_name: str,
-    ) -> None:
-        """Idempotent re-parent of one type-def + ancestor cascade. No-op when the
-        type already has the right parent and ancestors (the convergence anchor)."""
-        if child_uuid == new_parent_uuid:
-            return
-        if self._creates_cycle(child_uuid, new_parent_uuid):
-            # A cycle means we've claimed subsumption in both directions: the two
-            # types are too alike to order into parent/child. Don't force a
-            # (false) IS_A -- record the pair as a misunderstood, unresolved
-            # relationship so Sophia keeps the signal instead of dropping it.
-            self._record_ambiguous(child_uuid, new_parent_uuid)
-            return
-        target_ancestors = list(new_parent_ancestors) + [new_parent_name]
-        cur = self._hcg.get_node(child_uuid) or {}
-        cur_anc = list((cur.get("properties") or {}).get("ancestors") or [])
-        cur_parent, cur_edge = self._current_is_a(child_uuid)
-        if cur_parent == new_parent_uuid and cur_anc == target_ancestors:
-            return  # already correct -> true no-op
-        # 1. swing the IS_A edge
-        if cur_parent is not None and cur_parent != new_parent_uuid:
-            try:
-                # Drop the stale parent edge by its own id when we have one;
-                # fall back to a (source, target, relation) match when the edge
-                # was persisted without an id/uuid. delete_edge(None) would
-                # silently no-op and leave the old IS_A in place, so the child
-                # would end up with two IS_A parents (greptile #161).
-                if cur_edge:
-                    self._hcg.delete_edge(cur_edge)
-                else:
-                    self._hcg.delete_edges_between(child_uuid, cur_parent, "IS_A")
-                siblings = self._children_of.get(cur_parent)
-                if siblings and child_uuid in siblings:
-                    siblings.remove(child_uuid)
-            except Exception:
-                logger.exception(
-                    "type_rollup: delete stale IS_A failed for %s", child_uuid
-                )
-        if cur_parent != new_parent_uuid:
-            try:
-                self._hcg.add_edge(
-                    child_uuid, new_parent_uuid, "IS_A"
-                )  # MERGE -> idempotent
-                self._children_of.setdefault(new_parent_uuid, [])
-                if child_uuid not in self._children_of[new_parent_uuid]:
-                    self._children_of[new_parent_uuid].append(child_uuid)
-            except Exception:
-                logger.exception("type_rollup: add IS_A failed for %s", child_uuid)
-        # 2. set ancestors
-        if cur_anc != target_ancestors:
-            try:
-                self._hcg.update_node(child_uuid, {"ancestors": target_ancestors})
-            except Exception:
-                logger.exception(
-                    "type_rollup: update ancestors failed for %s", child_uuid
-                )
-        # 3. cascade to descendants
-        child_name = (
-            cur.get("name") or self._name_of.get(child_uuid) or _type_name(child_uuid)
+    # --------------------------------------------------------------- reparent
+    def _reparent_one(self, child_uuid: str, new_parent_uuid: str) -> None:
+        """Re-point one type-def's single upward IS_A edge onto a new parent via
+        the shared placement module (cycle-safe, idempotent). Membership/ancestry
+        is the edge, walked on demand -- nothing below the moved node changes and
+        no `ancestors` property is written (DESIGN sec 3)."""
+        placement.reparent(
+            child_uuid,
+            new_parent_uuid,
+            hcg=self._hcg,
+            children_of=self._children_of,
+            placed_by="parent_resolution",
         )
-        self._cascade_descendants(child_uuid, target_ancestors + [child_name], set())
-
-    def _cascade_descendants(
-        self, node_uuid: str, childrens_ancestors: list[str], seen: set[str]
-    ) -> None:
-        """Top-down recompute of each descendant's ancestors. `childrens_ancestors`
-        is what a direct child of `node_uuid` must have."""
-        if node_uuid in seen:
-            return
-        seen.add(node_uuid)
-        for child in list(self._children_of.get(node_uuid, [])):
-            cn = self._hcg.get_node(child) or {}
-            cur = list((cn.get("properties") or {}).get("ancestors") or [])
-            if cur != childrens_ancestors:
-                try:
-                    self._hcg.update_node(child, {"ancestors": childrens_ancestors})
-                except Exception:
-                    logger.exception("type_rollup: cascade update failed for %s", child)
-            cname = cn.get("name") or self._name_of.get(child) or _type_name(child)
-            self._cascade_descendants(child, childrens_ancestors + [cname], seen)
 
     # ----------------------------------------------------------- helpers
-    def _creates_cycle(self, child_uuid: str, new_parent_uuid: str) -> bool:
-        """True if ``new_parent_uuid`` already sits in ``child_uuid``'s descendant
-        subtree -- making it the parent would close an IS_A loop. Walks the live
-        ``_children_of`` adjacency with a visited guard so it terminates even if
-        the adjacency is already corrupt."""
-        stack = [child_uuid]
-        seen: set[str] = set()
-        while stack:
-            node = stack.pop()
-            if node == new_parent_uuid:
-                return True
-            if node in seen:
-                continue
-            seen.add(node)
-            stack.extend(self._children_of.get(node, []))
-        return False
-
-    def _record_ambiguous(self, a_uuid: str, b_uuid: str) -> None:
-        """Record a would-be-cyclic subsumption as an unresolved relationship.
-
-        A 2-cycle (A IS_A B *and* B IS_A A) is the rollup telling us the two
-        types are too similar to order -- a *misunderstood* relationship, not a
-        hierarchy. We persist a single bidirectional ``AMBIGUOUS_SUBSUMPTION``
-        edge (MERGEd on source/target/relation, with a canonical endpoint order
-        -> idempotent) so the signal survives for later resolution, rather than
-        silently dropping it. tier 1 ignores this relation, so it never feeds
-        back into IS_A."""
-        lo, hi = sorted((a_uuid, b_uuid))
-        try:
-            self._hcg.add_edge(
-                lo,
-                hi,
-                "AMBIGUOUS_SUBSUMPTION",
-                bidirectional=True,
-                properties={"reason": "is_a_cycle", "detected_by": "type_rollup"},
-            )
-            logger.info(
-                "type_rollup: ambiguous subsumption recorded %s <-> %s "
-                "(types too alike to order)",
-                lo,
-                hi,
-            )
-        except Exception:
-            logger.exception(
-                "type_rollup: failed to record ambiguity %s <-> %s", a_uuid, b_uuid
-            )
-
     def _build_is_a_adjacency(self) -> None:
         """parent_uuid -> [child_uuid], from all IS_A edges (child IS_A parent)."""
         self._children_of = defaultdict(list)
@@ -630,28 +494,20 @@ class TypeRollupHandler:
         except Exception:
             logger.exception("type_rollup: build IS_A adjacency failed")
 
-    def _current_is_a(self, child_uuid: str) -> tuple[str | None, str | None]:
-        try:
-            for e in self._hcg.query_edges_from(child_uuid) or []:
-                if e.get("relation") == "IS_A":
-                    return e.get("target"), (e.get("id") or e.get("uuid"))
-        except Exception:
-            logger.exception("type_rollup: query_edges_from failed for %s", child_uuid)
-        return None, None
+    def _resolve_parent(self, parent_name: str) -> str | None:
+        """Resolve a Hermes-named graft parent to a type uuid, or None.
 
-    def _resolve_parent(self, parent_name: str) -> tuple[str, list[str], str] | None:
-        """Resolve a Hermes-named graft parent to ``(type_uuid, ancestors, name)``.
         The parent is the CLOSEST covering type Hermes named -- a realm root OR a
         deeper existing domain type-def -- so a super-type roots as near the
-        cluster as possible ("create the group as close as you can to the cluster
-        name") instead of flat under `entity`. Realm roots are the top-of-chain
-        fallback, not the only allowed parents.
+        cluster as possible instead of flat under `entity`. Realm roots are the
+        top-of-chain fallback, not the only allowed parents.
 
         Returns None for an unresolvable name or a forbidden target, so the caller
         degrades to the default `entity` parent. Forbidden: `cognition` (reserved
         for metacognitive schema induction) and the pure structural roots
         `root`/`node`. The caller adds the cycle guards (member / self / IS_A
-        descendant)."""
+        descendant).
+        """
         target = (parent_name or "").strip().lower()
         if not target:
             return None
@@ -679,27 +535,14 @@ class TypeRollupHandler:
             return None
         if not node:
             return None
-        ancestors = list((node.get("properties") or {}).get("ancestors") or [])
-        if not ancestors:
-            # A seeded realm root's canonical ancestors are [root, node]; for
-            # anything else with no chain, fail closed (degrade to the default
-            # parent) rather than fabricate a truncated chain (review).
-            if uuid in _PROTECTED_ROOT_UUIDS:
-                ancestors = list(_ENTITY_ANCESTORS)
-            else:
-                return None
-        # Invariant: the parent must live within a DOMAIN realm -- a graftable
-        # realm root itself (entity / concept / process) or a descendant of one.
-        # `_is_rollup_candidate` (the source of `_uuid_by_name`) does NOT require a
-        # domain ancestry, so a non-reserved type-def under `cognition` could
-        # otherwise resolve here. Reject anything not rooted in a domain so a
-        # domain super never grafts into the metacognitive (`cognition`) subtree
-        # or onto bare structure.
-        if target not in _GRAFTABLE_REALMS and not (
-            _GRAFTABLE_REALMS & {a.strip().lower() for a in ancestors}
-        ):
+        # Domain-rootedness guard: the resolved type must root in a graftable realm
+        # (entity / concept / process), computed by WALKING IS_A edges upward via
+        # placement.realm_of -- never by reading a forbidden `ancestors` property.
+        # This stops a domain super from grafting into the `cognition` subtree or
+        # onto bare structure.
+        if placement.realm_of(uuid, hcg=self._hcg) is None:
             return None
-        return uuid, ancestors, node.get("name") or target
+        return uuid
 
     def _match_existing_type(
         self,

@@ -9,8 +9,7 @@ Membership is the instance->type IS_A edge now, NOT a `type_uuid` property
 (B2/B3, DESIGN §3): minting does NOT touch the members. The draining caller
 (`EmergenceHandler._place_cluster`) owns member placement -- it re-points each
 fitting member's single upward IS_A edge onto this type through
-`placement.reparent`. The `retype_members` flag is therefore a no-op, kept only
-so the gated-off rollup tier's `retype_members=False` call site still resolves.
+`placement.reparent`.
 
 HCGClient encodes nested properties (name_history) transparently. No `ancestors`
 property is stored: structure (the IS_A edges) is the membership/typing fact,
@@ -62,19 +61,8 @@ def mint_type(
     hcg: Any,
     milvus: Any,
     source_cluster_id: str,
+    # Last-resort default only -- drainage callers always pass a real parent uuid.
     parent_type_uuid: str = "type_entity",
-    # DEPRECATED, unused since the `ancestors` property was removed (B1 T3): kept
-    # only so the gated-off rollup tier's call site still resolves. Removed when
-    # rollup is converted onto placement.py. The `parent_type_uuid="type_entity"`
-    # default is likewise a legacy slug slated for that cleanup -- drainage callers
-    # always pass a real uuid.
-    parent_ancestors: list[str] | None = None,
-    parent_name: str | None = None,
-    # NO-OP since B2/B3: membership is the instance->type IS_A edge, re-pointed by
-    # the draining caller via placement.reparent -- mint_type no longer retypes
-    # members. Kept only so the gated-off rollup tier's `retype_members=False`
-    # call site still resolves; removed when rollup is converted onto placement.py.
-    retype_members: bool = True,
     placed_by: str | None = None,
 ) -> str:
     """Create the type-definition node, seed its centroid, and wire its IS_A edge.
