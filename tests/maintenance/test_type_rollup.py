@@ -130,23 +130,17 @@ def _handler(hcg, milvus, mint_calls=None, name_label="mathematics"):
         milvus,
         source_cluster_id,
         parent_type_uuid,
-        parent_ancestors,
-        parent_name,
-        retype_members,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
             "uuid": uuid,
             "name": name.label,
-            "properties": {
-                "type": "type_definition",
-                "ancestors": list(parent_ancestors) + [parent_name],
-            },
+            "properties": {"type": "type_definition"},
         }
         hcg.add_edge(uuid, parent_type_uuid, "IS_A")
         milvus.update_centroid(uuid, cluster.embeddings[0], "m")
         if mint_calls is not None:
-            mint_calls.append((name.label, parent_type_uuid, retype_members))
+            mint_calls.append((name.label, parent_type_uuid))
         return uuid
 
     return TypeRollupHandler(
@@ -302,12 +296,6 @@ def test_tier1_lifts_explicit_subsumption(monkeypatch):
         and e["relation"] == "IS_A"
         for e in hcg.edges
     )
-    assert hcg.nodes["type_insect_part_bb"]["properties"]["ancestors"] == [
-        "root",
-        "node",
-        "entity",
-        "anatomy",
-    ]
 
 
 def test_tier2_mints_supertype_and_reparents(monkeypatch):
@@ -382,7 +370,7 @@ def test_tier2_mints_supertype_and_reparents(monkeypatch):
     mint_calls = []
     _handler(hcg, milvus, mint_calls=mint_calls).run()
     # a super-type was minted (type-only) and both leaves now sit under it
-    assert mint_calls == [("mathematics", "type_entity", False)]
+    assert mint_calls == [("mathematics", "type_entity")]
     super_uuid = "type_mathematics_super01"
     for leaf_uuid in ("type_calculus_aa", "type_algebra_bb"):
         assert any(
@@ -391,12 +379,6 @@ def test_tier2_mints_supertype_and_reparents(monkeypatch):
             and e["relation"] == "IS_A"
             for e in hcg.edges
         )
-        assert hcg.nodes[leaf_uuid]["properties"]["ancestors"] == [
-            "root",
-            "node",
-            "entity",
-            "mathematics",
-        ]
 
 
 def test_rollup_is_idempotent(monkeypatch):
@@ -497,7 +479,7 @@ def test_cycle_is_recorded_as_ambiguous_not_minted_as_edge():
     h = _handler(hcg, milvus)
     h._build_is_a_adjacency()
     # Try to make b the parent of a -> would close the 2-cycle a->b->a.
-    h._reparent_one("type_a_aa", "type_b_bb", ["root", "node", "entity"], "b")
+    h._reparent_one("type_a_aa", "type_b_bb")
     # No cyclic IS_A edge a->b was created.
     assert not any(
         e["source"] == "type_a_aa"
@@ -688,18 +670,12 @@ def test_reused_super_is_reparented_to_intended_parent(monkeypatch):
         milvus,
         source_cluster_id,
         parent_type_uuid,
-        parent_ancestors,
-        parent_name,
-        retype_members,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
             "uuid": uuid,
             "name": name.label,
-            "properties": {
-                "type": "type_definition",
-                "ancestors": list(parent_ancestors) + [parent_name],
-            },
+            "properties": {"type": "type_definition"},
         }
         hcg.add_edge(uuid, parent_type_uuid, "IS_A")
         milvus.update_centroid(uuid, cluster.embeddings[0], "m")
@@ -727,20 +703,13 @@ def test_reused_super_is_reparented_to_intended_parent(monkeypatch):
         and e["relation"] == "IS_A"
         for e in hcg.edges
     )
-    assert hcg.nodes["type_geometry_existing"]["properties"]["ancestors"] == [
-        "root",
-        "node",
-        "entity",
-        "mathematics",
-    ]
-    # and trig sits under geometry with the full chain
-    assert hcg.nodes["type_trig_aa"]["properties"]["ancestors"] == [
-        "root",
-        "node",
-        "entity",
-        "mathematics",
-        "geometry",
-    ]
+    # and trig sits under the reused geometry super
+    assert any(
+        e["source"] == "type_trig_aa"
+        and e["target"] == "type_geometry_existing"
+        and e["relation"] == "IS_A"
+        for e in hcg.edges
+    )
 
 
 def test_centroid_match_never_selects_a_cluster_member_as_its_own_super(monkeypatch):
@@ -826,7 +795,7 @@ def test_centroid_match_never_selects_a_cluster_member_as_its_own_super(monkeypa
     _handler(hcg, milvus, mint_calls=mint_calls).run()
 
     # A fresh super-type was minted (the member was NOT reused as the parent).
-    assert mint_calls == [("mathematics", "type_entity", False)]
+    assert mint_calls == [("mathematics", "type_entity")]
     super_uuid = "type_mathematics_super01"
     # No peer-as-parent edge: a member must never become its sibling's parent.
     assert not any(
@@ -863,9 +832,7 @@ def test_reparent_drops_stale_is_a_even_without_edge_id():
     handler._children_of = {"type_oldparent_xx": ["type_child_aa"]}
     handler._name_of = {"type_child_aa": "child"}
 
-    handler._reparent_one(
-        "type_child_aa", "type_newparent_bb", ["root", "node", "entity"], "newparent"
-    )
+    handler._reparent_one("type_child_aa", "type_newparent_bb")
 
     is_a_targets = [
         e["target"]
@@ -935,22 +902,16 @@ def test_top_level_super_grafts_under_realm_root(monkeypatch):
         milvus,
         source_cluster_id,
         parent_type_uuid,
-        parent_ancestors,
-        parent_name,
-        retype_members,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
             "uuid": uuid,
             "name": name.label,
-            "properties": {
-                "type": "type_definition",
-                "ancestors": list(parent_ancestors) + [parent_name],
-            },
+            "properties": {"type": "type_definition"},
         }
         hcg.add_edge(uuid, parent_type_uuid, "IS_A")
         milvus.update_centroid(uuid, cluster.embeddings[0], "m")
-        mint_calls.append((name.label, parent_type_uuid, retype_members))
+        mint_calls.append((name.label, parent_type_uuid))
         return uuid
 
     TypeRollupHandler(
@@ -965,7 +926,7 @@ def test_top_level_super_grafts_under_realm_root(monkeypatch):
     ).run()
 
     # The super-type was rooted under `concept`, not `entity`.
-    assert mint_calls == [("mathematics", "type_concept", False)]
+    assert mint_calls == [("mathematics", "type_concept")]
     super_uuid = "type_mathematics_super01"
     assert any(
         e["source"] == super_uuid
@@ -973,19 +934,14 @@ def test_top_level_super_grafts_under_realm_root(monkeypatch):
         and e["relation"] == "IS_A"
         for e in hcg.edges
     )
-    assert hcg.nodes[super_uuid]["properties"]["ancestors"] == [
-        "root",
-        "node",
-        "concept",
-    ]
     # The realm chain flows down to the leaves.
     for leaf_uuid in ("type_calculus_aa", "type_algebra_bb"):
-        assert hcg.nodes[leaf_uuid]["properties"]["ancestors"] == [
-            "root",
-            "node",
-            "concept",
-            "mathematics",
-        ]
+        assert any(
+            e["source"] == leaf_uuid
+            and e["target"] == super_uuid
+            and e["relation"] == "IS_A"
+            for e in hcg.edges
+        )
 
 
 def test_centroid_match_never_reparents_a_seeded_realm_root(monkeypatch):
@@ -1044,9 +1000,8 @@ def test_centroid_match_never_reparents_a_seeded_realm_root(monkeypatch):
     assert not any(
         e["source"] == "type_concept" and e["relation"] == "IS_A" for e in hcg.edges
     )
-    assert hcg.nodes["type_concept"]["properties"]["ancestors"] == ["root", "node"]
     # A fresh super was minted under entity instead.
-    assert mint_calls == [("mathematics", "type_entity", False)]
+    assert mint_calls == [("mathematics", "type_entity")]
 
 
 def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
@@ -1067,7 +1022,23 @@ def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
             "type_metaschema", "metaschema", ["root", "node", "cognition"]
         ),  # under cognition -- NOT domain-rooted
     ]
-    hcg = FakeHCG(tds)
+    # Domain-rootedness is now read by walking IS_A edges (placement.realm_of),
+    # not the stored `ancestors` property: wire each non-root type to its parent.
+    is_a = [
+        {
+            "id": "i1",
+            "source": "type_mathematics",
+            "target": "type_concept",
+            "relation": "IS_A",
+        },
+        {
+            "id": "i2",
+            "source": "type_metaschema",
+            "target": "type_cognition",
+            "relation": "IS_A",
+        },
+    ]
+    hcg = FakeHCG(tds, is_a=is_a)
     handler = _handler(hcg, FakeMilvus({}))
     handler._uuid_by_name = {
         "concept": "type_concept",
@@ -1078,26 +1049,14 @@ def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
     }
 
     # Realm roots resolve to their canonical seeded uuid + ancestors.
-    assert handler._resolve_parent("concept") == (
-        "type_concept",
-        ["root", "node"],
-        "concept",
-    )
-    assert handler._resolve_parent("process") == (
-        "type_process",
-        ["root", "node"],
-        "process",
-    )
+    assert handler._resolve_parent("concept") == "type_concept"
+    assert handler._resolve_parent("process") == "type_process"
     # A DEEPER domain type Hermes names as the closest cover resolves to that
     # type-def -- the whole point: graft close, not flat under a realm.
-    assert handler._resolve_parent("mathematics") == (
-        "type_mathematics",
-        ["root", "node", "concept"],
-        "mathematics",
-    )
+    assert handler._resolve_parent("mathematics") == "type_mathematics"
     # Casing / whitespace from the LLM does not bypass resolution.
-    assert handler._resolve_parent("  Mathematics ")[0] == "type_mathematics"
-    assert handler._resolve_parent("Concept")[0] == "type_concept"
+    assert handler._resolve_parent("  Mathematics ") == "type_mathematics"
+    assert handler._resolve_parent("Concept") == "type_concept"
 
     # Forbidden: `cognition` is reserved for metacognition, not domain rollup --
     # rejected even though the node exists.
@@ -1189,8 +1148,8 @@ def test_resolve_parent_ignores_shadowing_domain_type():
         "concept": "type_concept_shadow01",  # shadow owns the realm key
         "process": "type_process",
     }
-    assert handler._resolve_parent("concept")[0] == "type_concept"
-    assert handler._resolve_parent("process")[0] == "type_process"
+    assert handler._resolve_parent("concept") == "type_concept"
+    assert handler._resolve_parent("process") == "type_process"
 
 
 def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
@@ -1207,7 +1166,16 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
         _td("type_calculus_aa", "calculus", ["root", "node", "entity"]),
         _td("type_algebra_bb", "algebra", ["root", "node", "entity"]),
     ]
-    hcg = FakeHCG(tds)
+    # science roots under concept via an IS_A edge so realm_of walks to a realm.
+    is_a = [
+        {
+            "id": "i1",
+            "source": "type_science_xx",
+            "target": "type_concept",
+            "relation": "IS_A",
+        },
+    ]
+    hcg = FakeHCG(tds, is_a=is_a)
     milvus = FakeMilvus({"type_calculus_aa": [1.0, 0.0], "type_algebra_bb": [0.9, 0.1]})
 
     def _m(uuid, name, vec):
@@ -1249,22 +1217,16 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
         milvus,
         source_cluster_id,
         parent_type_uuid,
-        parent_ancestors,
-        parent_name,
-        retype_members,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
             "uuid": uuid,
             "name": name.label,
-            "properties": {
-                "type": "type_definition",
-                "ancestors": list(parent_ancestors) + [parent_name],
-            },
+            "properties": {"type": "type_definition"},
         }
         hcg.add_edge(uuid, parent_type_uuid, "IS_A")
         milvus.update_centroid(uuid, cluster.embeddings[0], "m")
-        mint_calls.append((name.label, parent_type_uuid, retype_members))
+        mint_calls.append((name.label, parent_type_uuid))
         return uuid
 
     TypeRollupHandler(
@@ -1280,7 +1242,7 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
 
     # The super rooted under the DEEPER domain type `science`, not `entity`,
     # and not lifted only as far as the `concept` realm root.
-    assert mint_calls == [("mathematics", "type_science_xx", False)]
+    assert mint_calls == [("mathematics", "type_science_xx")]
     super_uuid = "type_mathematics_super01"
     assert any(
         e["source"] == super_uuid
@@ -1288,9 +1250,3 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
         and e["relation"] == "IS_A"
         for e in hcg.edges
     )
-    assert hcg.nodes[super_uuid]["properties"]["ancestors"] == [
-        "root",
-        "node",
-        "concept",
-        "science",
-    ]

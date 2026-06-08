@@ -112,8 +112,8 @@ def test_mint_creates_type_node_and_centroid_without_touching_members():
     assert centroid == [1.0, 1.0]
     assert model == "all-MiniLM-L6-v2"
 
-    # Members are NOT touched: no `type_uuid`/`type` stamp (the default
-    # retype_members=True is now a no-op) and no member->type IS_A edge.
+    # Members are NOT touched: no `type_uuid`/`type` stamp and no member->type
+    # IS_A edge (mint owns only the type node, its centroid and its parent edge).
     assert hcg.updated == []
     assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
 
@@ -213,31 +213,6 @@ def test_mint_does_not_touch_member_is_a_edges():
     # Human-readable label preserved for display/lineage.
     tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
     assert tdef[0]["properties"]["name_history"][0]["name"] == "hammer"
-
-
-def test_retype_members_flag_is_a_noop_for_the_gated_rollup_caller():
-    """retype_members is a no-op since B2/B3 (membership moved to the IS_A edge);
-    it is kept only so the gated-off rollup tier's retype_members=False call site
-    still resolves. Either value mints the type node, centroid and IS_A edge and
-    leaves members untouched."""
-    hcg, milvus = FakeHCG(), FakeMilvus()
-    name = NameResult(label="mathematics", description="", confidence=0.8)
-
-    type_uuid = mint_type(
-        _cluster(),
-        name,
-        hcg=hcg,
-        milvus=milvus,
-        source_cluster_id="cl",
-        retype_members=False,
-    )
-
-    # No members were touched.
-    assert hcg.updated == []
-    # The type node, its centroid and the taxonomy IS_A edge still exist.
-    assert any(n["uuid"] == type_uuid for n in hcg.added_nodes)
-    assert type_uuid in milvus.centroids
-    assert (type_uuid, "type_entity", "IS_A") in hcg.edges
 
 
 def test_mint_writes_no_ancestors_property():

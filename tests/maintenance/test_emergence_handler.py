@@ -172,9 +172,9 @@ def test_parent_drives_placement_not_centroid(monkeypatch):
     # The LLM-named parent drives placement; the graph asserts via that parent.
     assert kwargs["parent_type_uuid"] == "vehicle_uuid"
     assert kwargs["placed_by"] == "parent_resolution"
-    # mint no longer retypes; drainage owns member placement via placement.reparent.
-    assert kwargs["retype_members"] is False
-    # Each fitting member's instance->type IS_A edge is re-pointed to the minted
+    # mint no longer retypes; drainage owns member placement via placement.reparent
+    # (the retype_members param is gone). Each fitting member's instance->type
+    # IS_A edge is re-pointed to the minted
     # type, carrying the type's placed_by; no type_uuid property is stamped.
     assert set(hcg.membership_edges()) == {
         ("b0", "boat_uuid"),

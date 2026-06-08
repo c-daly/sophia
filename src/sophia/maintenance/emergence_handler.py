@@ -313,7 +313,7 @@ class EmergenceHandler:
 
         # Mint a new type under the chosen parent. mint_type writes the type's
         # own type->parent IS_A edge (carrying placed_by) but does NOT touch the
-        # members -- drainage owns member placement (retype_members is a no-op).
+        # members -- drainage owns member placement.
         name_obj = NameResult(
             label=tc.name, description="", confidence=1.0, removed=[], parent=tc.parent
         )
@@ -325,7 +325,6 @@ class EmergenceHandler:
             source_cluster_id=uuid_lib.uuid4().hex[:8],
             parent_type_uuid=parent_uuid,
             placed_by=placed_by,
-            retype_members=False,
         )
         # Re-point each fitting member's instance->type IS_A edge onto the
         # freshly-minted type, carrying the SAME placed_by the type was placed by
