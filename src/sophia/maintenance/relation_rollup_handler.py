@@ -96,7 +96,20 @@ class RelationRollupHandler:
             logger.exception("relation rollup: embedding failed; skipping run")
             return {"groups_applied": 0, "edges_renamed": 0, "clusters": 0}
 
-        clusters = _greedy_cluster(labels, vectors, self._cluster_threshold)
+        # embed_fn may return None for labels it failed to embed (resilient
+        # default impl); drop those so zip never misaligns labels/vectors.
+        paired = [
+            (lab, vec) for lab, vec in zip(labels, vectors) if vec is not None
+        ]
+        if len(paired) < len(labels):
+            logger.warning(
+                "relation rollup: %d/%d labels had no embedding; skipped",
+                len(labels) - len(paired),
+                len(labels),
+            )
+        kept_labels = [lab for lab, _ in paired]
+        kept_vectors = [vec for _, vec in paired]
+        clusters = _greedy_cluster(kept_labels, kept_vectors, self._cluster_threshold)
         # only multi-member clusters can contain synonyms worth a Hermes call
         batches = [c[: self._max_cluster_size] for c in clusters if len(c) >= 2]
 
@@ -116,8 +129,7 @@ class RelationRollupHandler:
                     if member == g.canonical:
                         continue
                     try:
-                        edges_renamed += self._hcg.rename_relation(member, g.canonical)
-                        applied = True
+                        affected = self._hcg.rename_relation(member, g.canonical)
                     except ValueError:
                         # reserved relation slipped through -- never consolidate it
                         logger.warning(
@@ -125,6 +137,20 @@ class RelationRollupHandler:
                             member,
                             g.canonical,
                         )
+                        continue
+                    except Exception:
+                        # an unexpected DB error on one member must not abort
+                        # the other independent synonym groups
+                        logger.exception(
+                            "relation rollup: rename %s -> %s failed; continuing",
+                            member,
+                            g.canonical,
+                        )
+                        continue
+                    edges_renamed += affected
+                    # only count the group as applied if something changed
+                    if affected:
+                        applied = True
                 if applied:
                     groups_applied += 1
                     logger.info(
@@ -173,14 +199,20 @@ def build_relation_rollup_handler(
     auth = {"Authorization": f"Bearer {token}"}
 
     def embed_fn(labels: list[str]):
+        # Per-label resilience: a transient failure on one label yields None
+        # (the handler drops it) instead of aborting the whole rollup.
         vectors = []
         with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
             for label in labels:
-                resp = client.post(
-                    f"{base}/embed_text", json={"text": label}, headers=auth
-                )
-                resp.raise_for_status()
-                vectors.append(resp.json()["embedding"])
+                try:
+                    resp = client.post(
+                        f"{base}/embed_text", json={"text": label}, headers=auth
+                    )
+                    resp.raise_for_status()
+                    vectors.append(resp.json()["embedding"])
+                except (httpx.HTTPError, KeyError, ValueError):
+                    logger.warning("relation rollup: embed failed for %r", label)
+                    vectors.append(None)
         return vectors
 
     def synonym_fn(predicates, context=None):

@@ -518,16 +518,22 @@ def test_rename_relation_renames_and_dedups(
 
     def fake_exec(query, params=None):
         calls.append((query, params or {}))
-        return [{"renamed": 3}] if "SET edge.relation" in query else []
+        if "SET edge.relation" in query:
+            return [{"renamed": 3}]
+        if "DETACH DELETE" in query:
+            return [{"deleted": 2}]
+        return []
 
     monkeypatch.setattr(client, "_execute_query", fake_exec)
 
     n = client.rename_relation("HAULS", "CARRIES")
 
-    assert n == 3
+    # total affected = renamed (3) + dedup-deleted (2)
+    assert n == 5
     assert len(calls) == 2  # dedup-delete, then rename
     dedup_q, dedup_p = calls[0]
     assert "DETACH DELETE" in dedup_q
+    assert ":FROM" in dedup_q and ":TO" in dedup_q  # structural, not property scan
     assert dedup_p["old"] == "HAULS" and dedup_p["new"] == "CARRIES"
     assert "SET edge.relation = $new" in calls[1][0]
 

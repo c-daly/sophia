@@ -373,17 +373,24 @@ class HCGClient(LogosHCGClient):
                 f"refusing to rename a reserved typing relation ({old!r} -> {new!r}); "
                 "IS_A/INSTANCE_OF/SUBTYPE_OF are structural and never consolidated"
             )
-        # Phase 1: drop old edges that would collide with an existing new edge.
-        self._execute_query(
+        # Phase 1: drop old edges that would collide with an existing new
+        # edge between the same endpoints. Match via the structural :FROM/:TO
+        # relationships (indexed traversal) rather than scanning source/target
+        # PROPERTIES on every node -- the property lookup had no index and
+        # scaled as a full edge scan per old edge.
+        del_records = self._execute_query(
             """
-            MATCH (edge:Node {type: 'edge', relation: $old})
-            OPTIONAL MATCH (dup:Node {type: 'edge', relation: $new,
-                                      source: edge.source, target: edge.target})
-            WITH edge, dup WHERE dup IS NOT NULL
-            DETACH DELETE edge
+            MATCH (src)<-[:FROM]-(edge:Node {type: 'edge', relation: $old})
+                  -[:TO]->(tgt),
+                  (src)<-[:FROM]-(:Node {type: 'edge', relation: $new})-[:TO]->(tgt)
+            WITH DISTINCT edge
+            WITH count(edge) AS deleted, collect(edge) AS edges
+            FOREACH (e IN edges | DETACH DELETE e)
+            RETURN deleted
             """,
             {"old": old, "new": new},
         )
+        deleted = int(del_records[0]["deleted"]) if del_records else 0
         # Phase 2: rewrite the remaining old edges (+ keep the name consistent).
         records = self._execute_query(
             """
@@ -394,7 +401,10 @@ class HCGClient(LogosHCGClient):
             """,
             {"old": old, "new": new},
         )
-        return int(records[0]["renamed"]) if records else 0
+        renamed = int(records[0]["renamed"]) if records else 0
+        # Total edges affected -- includes dedup-deletes so callers can tell
+        # a consolidation happened even when Phase 2 rewrote nothing.
+        return renamed + deleted
 
     def get_relation_vocabulary(self) -> List[Dict[str, Any]]:
         """Distinct DESCRIPTIVE relation labels with edge counts.

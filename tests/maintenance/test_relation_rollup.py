@@ -128,3 +128,54 @@ def test_embed_failure_aborts_cleanly():
     summary = handler.run()  # must not raise
     assert summary["edges_renamed"] == 0
     hcg.rename_relation.assert_not_called()
+
+
+def test_label_with_none_embedding_is_dropped_no_misalignment():
+    # CARRIES fails to embed (None); HAULS/DRAGS still cluster together
+    hcg = _hcg([("HAULS", 1), ("DRAGS", 1), ("CARRIES", 5)])
+    seen = []
+
+    def embed(labels):
+        return [([1.0, 0.0] if l != "CARRIES" else None) for l in labels]
+
+    def synonym_fn(preds, context=None):
+        seen.append(set(preds))
+        return []
+
+    RelationRollupHandler(
+        hcg, embed_fn=embed, synonym_fn=synonym_fn, cluster_threshold=0.5
+    ).run()
+    # CARRIES (no embedding) must not appear in any batch
+    assert all("CARRIES" not in b for b in seen)
+    assert {"HAULS", "DRAGS"} in seen
+
+
+def test_rename_db_error_does_not_abort_other_groups():
+    hcg = _hcg([("HAULS", 1), ("CARRIES", 5)])
+    hcg.rename_relation.side_effect = [RuntimeError("deadlock"), 3]
+
+    def synonym_fn(preds, context=None):
+        return [
+            RelationSynonymGroup("CARRIES", ["HAULS", "DUMMY", "CARRIES"], 0.9)
+        ]
+
+    handler = RelationRollupHandler(
+        hcg, embed_fn=lambda ls: [[1.0, 0.0]] * len(ls), synonym_fn=synonym_fn
+    )
+    summary = handler.run()  # must not raise despite the first rename failing
+    assert summary["edges_renamed"] == 3  # second member still consolidated
+
+
+def test_group_with_zero_affected_not_counted_applied():
+    # rename_relation returns 0 (nothing actually changed) -> group not applied
+    hcg = _hcg([("HAULS", 1), ("CARRIES", 5)])
+    hcg.rename_relation.return_value = 0
+
+    def synonym_fn(preds, context=None):
+        return [RelationSynonymGroup("CARRIES", ["HAULS", "CARRIES"], 0.9)]
+
+    handler = RelationRollupHandler(
+        hcg, embed_fn=lambda ls: [[1.0, 0.0]] * len(ls), synonym_fn=synonym_fn
+    )
+    summary = handler.run()
+    assert summary["groups_applied"] == 0 and summary["edges_renamed"] == 0

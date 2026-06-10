@@ -190,7 +190,7 @@ class RelationSynonymGroup:
     """One descriptive-relation synonym group proposed by Hermes."""
 
     canonical: str
-    members: list[str]
+    members: tuple[str, ...]  # tuple so the frozen group is genuinely immutable
     confidence: float
 
 
@@ -229,17 +229,18 @@ def relation_synonyms(
         groups = resp.json().get("groups") or []
         out: list[RelationSynonymGroup] = []
         for g in groups:
-            members = [str(m) for m in (g.get("members") or []) if m]
+            members = tuple(str(m) for m in (g.get("members") or []) if m)
             canonical = str(g.get("canonical", "")).strip()
             if canonical and len(members) >= 2:
+                # `confidence: null` -> 0.0 (float(None) would raise TypeError)
                 out.append(
                     RelationSynonymGroup(
                         canonical=canonical,
                         members=members,
-                        confidence=float(g.get("confidence", 0.0)),
+                        confidence=float(g.get("confidence") or 0.0),
                     )
                 )
         return out
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
         logger.warning("relation_synonyms failed: %s", exc)
         return []

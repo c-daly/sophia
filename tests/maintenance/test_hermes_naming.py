@@ -423,7 +423,7 @@ def test_relation_synonyms_posts_and_parses(monkeypatch):
     )
     assert len(groups) == 1
     assert groups[0].canonical == "CARRIES"
-    assert groups[0].members == ["HAULS", "CARRIES"]
+    assert groups[0].members == ("HAULS", "CARRIES")
     assert captured["url"].endswith("/relation-synonyms")
     assert captured["headers"]["Authorization"] == "Bearer t"
 
