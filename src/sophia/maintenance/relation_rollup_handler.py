@@ -23,12 +23,14 @@ wiring uses Hermes /embed_text and /relation-synonyms.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 logger = logging.getLogger(__name__)
 
 EmbedFn = Callable[[list[str]], Sequence[Sequence[float]]]
-SynonymFn = Callable[..., list]  # (predicates, context=None) -> list[RelationSynonymGroup]
+SynonymFn = Callable[
+    ..., list
+]  # (predicates, context=None) -> list[RelationSynonymGroup]
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -37,7 +39,7 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     nb = sum(y * y for y in b) ** 0.5
     if na == 0.0 or nb == 0.0:
         return 0.0
-    return num / (na * nb)
+    return float(num / (na * nb))
 
 
 def _greedy_cluster(
@@ -66,7 +68,7 @@ class RelationRollupHandler:
 
     def __init__(
         self,
-        hcg,
+        hcg: Any,
         *,
         embed_fn: EmbedFn,
         synonym_fn: SynonymFn,
@@ -98,9 +100,7 @@ class RelationRollupHandler:
 
         # embed_fn may return None for labels it failed to embed (resilient
         # default impl); drop those so zip never misaligns labels/vectors.
-        paired = [
-            (lab, vec) for lab, vec in zip(labels, vectors) if vec is not None
-        ]
+        paired = [(lab, vec) for lab, vec in zip(labels, vectors) if vec is not None]
         if len(paired) < len(labels):
             logger.warning(
                 "relation rollup: %d/%d labels had no embedding; skipped",
@@ -175,10 +175,10 @@ class RelationRollupHandler:
 
 def build_relation_rollup_handler(
     *,
-    hcg,
+    hcg: Any,
     hermes_url: str,
     token: str,
-    redis_client=None,
+    redis_client: Any = None,
     min_confidence: float = 0.6,
     cluster_threshold: float = 0.7,
 ) -> RelationRollupHandler:
@@ -198,10 +198,10 @@ def build_relation_rollup_handler(
     base = hermes_url.rstrip("/")
     auth = {"Authorization": f"Bearer {token}"}
 
-    def embed_fn(labels: list[str]):
+    def embed_fn(labels: list[str]) -> list:
         # Per-label resilience: a transient failure on one label yields None
         # (the handler drops it) instead of aborting the whole rollup.
-        vectors = []
+        vectors: list = []
         with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
             for label in labels:
                 try:
@@ -215,12 +215,12 @@ def build_relation_rollup_handler(
                     vectors.append(None)
         return vectors
 
-    def synonym_fn(predicates, context=None):
+    def synonym_fn(predicates: list[str], context: str | None = None) -> list:
         return relation_synonyms(
             predicates, hermes_url=hermes_url, token=token, context=context
         )
 
-    def refresh_snapshot():
+    def refresh_snapshot() -> None:
         if redis_client is None:
             return
         records = hcg.get_relation_vocabulary()
