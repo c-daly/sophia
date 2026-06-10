@@ -1318,6 +1318,58 @@ class TestProposalProcessorRedisSnapshot:
         assert value["concept"]["uuid"] == "type_concept"
         assert value["concept"]["member_count"] == 3
 
+    def test_write_relation_snapshot_writes_descriptive_relations(self):
+        """_write_relation_snapshot writes the descriptive-relation vocabulary
+        to logos:ontology:relations (sophia#190 / hermes#131)."""
+        import json
+
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+        mock_hcg.get_relation_vocabulary.return_value = [
+            {"relation": "LOCATED_IN", "edge_count": 12},
+            {"relation": "PRODUCES", "edge_count": 5},
+        ]
+
+        processor._write_relation_snapshot()
+
+        mock_redis.set.assert_called_once()
+        key = mock_redis.set.call_args[0][0]
+        assert key == "logos:ontology:relations"
+        value = json.loads(mock_redis.set.call_args[0][1])
+        assert value["LOCATED_IN"]["edge_count"] == 12
+        assert value["PRODUCES"]["edge_count"] == 5
+
+    def test_write_relation_snapshot_skips_without_redis(self):
+        """No Redis client -> no relation snapshot, no HCG query."""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        processor = ProposalProcessor(mock_hcg, MagicMock())
+        processor._write_relation_snapshot()
+        mock_hcg.get_relation_vocabulary.assert_not_called()
+
+    def test_write_relation_snapshot_survives_redis_failure(self):
+        """A Redis failure during the relation snapshot is swallowed."""
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+        mock_hcg.get_relation_vocabulary.return_value = [
+            {"relation": "LOCATED_IN", "edge_count": 1}
+        ]
+        mock_redis.set.side_effect = RuntimeError("Redis down")
+        # must not raise
+        processor._write_relation_snapshot()
+
+    def test_relation_snapshot_drops_blank_relations(self):
+        """Defensive: a record with an empty relation name is skipped."""
+        import json
+
+        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+        mock_hcg.get_relation_vocabulary.return_value = [
+            {"relation": "", "edge_count": 9},
+            {"relation": "USED_IN", "edge_count": 2},
+        ]
+        processor._write_relation_snapshot()
+        value = json.loads(mock_redis.set.call_args[0][1])
+        assert "USED_IN" in value and "" not in value
+
     def test_process_no_redis_client_skips_snapshot(self):
         """process() skips type snapshot when redis_client is None."""
         from sophia.ingestion.proposal_processor import ProposalProcessor
