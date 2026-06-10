@@ -216,6 +216,28 @@ class ProposalProcessor:
         except Exception:
             logger.exception("Failed to write type snapshot to Redis")
 
+    def _write_relation_snapshot(self) -> None:
+        """Write the descriptive-relation vocabulary to Redis for Hermes sync.
+
+        Edge-axis analog of _write_type_snapshot: publishes the distinct
+        descriptive relations (reserved typing relations excluded by the HCG
+        query) to ``logos:ontology:relations`` so Hermes can seed
+        match-before-mint cross-process (sophia#190 / hermes#137). Fail-soft.
+        """
+        if self._redis is None:
+            return
+        try:
+            records = self._hcg.get_relation_vocabulary()
+            snapshot: dict[str, dict[str, Any]] = {}
+            for record in records:
+                relation = record.get("relation", "")
+                if not relation:
+                    continue
+                snapshot[relation] = {"edge_count": record.get("edge_count", 0)}
+            self._redis.set("logos:ontology:relations", json.dumps(snapshot))
+        except Exception:
+            logger.exception("Failed to write relation snapshot to Redis")
+
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
         stored_ids: list[str] = []
@@ -640,10 +662,14 @@ class ProposalProcessor:
                     failures=embedding_failures,
                 )
 
-            # Write type snapshot BEFORE publishing event so subscribers
-            # see up-to-date data when they react to the event.
+            # Write type + relation snapshots BEFORE publishing event so
+            # subscribers see up-to-date data when they react to the event.
             if new_types or updated_types:
                 self._write_type_snapshot()
+            # New edges may introduce new descriptive relations -> refresh the
+            # relation vocabulary snapshot Hermes seeds from (sophia#190).
+            if stored_edge_ids:
+                self._write_relation_snapshot()
 
             # Publish batch event summarising what changed.
             if stored_ids or stored_edge_ids or new_types or updated_types:

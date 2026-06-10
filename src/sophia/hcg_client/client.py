@@ -349,6 +349,31 @@ class HCGClient(LogosHCGClient):
             return str(result[0]["uuid"])
         return edge_id
 
+    # Reserved typing relations: structural type-system scaffolding, never
+    # part of the descriptive-relation vocabulary that Hermes consolidates
+    # (hermes#131 hard constraint).
+    _RESERVED_RELATIONS = ["IS_A", "INSTANCE_OF", "SUBTYPE_OF"]
+
+    def get_relation_vocabulary(self) -> List[Dict[str, Any]]:
+        """Distinct DESCRIPTIVE relation labels with edge counts.
+
+        Reads the reified edge layer (edge nodes carry a ``relation``
+        property) and excludes the reserved typing relations. Powers the
+        ``logos:ontology:relations`` Redis snapshot consumed by Hermes for
+        cross-process match-before-mint (sophia#190 / hermes#137).
+        """
+        query = """
+        MATCH (e:Node)
+        WHERE e.relation IS NOT NULL AND NOT e.relation IN $reserved
+        RETURN e.relation AS relation, count(*) AS edge_count
+        ORDER BY edge_count DESC
+        """
+        records = self._execute_read(query, {"reserved": self._RESERVED_RELATIONS})
+        return [
+            {"relation": r["relation"], "edge_count": r["edge_count"]}
+            for r in records
+        ]
+
     def get_node(self, uuid: str) -> Optional[Dict[str, Any]]:
         """Fetch a content node by uuid.
 

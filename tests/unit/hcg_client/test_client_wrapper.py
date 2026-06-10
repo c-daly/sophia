@@ -474,3 +474,36 @@ def test_delete_edges_between_returns_zero_when_no_match(
     """No matching edge -> zero removed (empty result is handled)."""
     monkeypatch.setattr(client, "_execute_query", MagicMock(return_value=[]))
     assert client.delete_edges_between("src", "tgt", "IS_A") == 0
+
+
+def test_get_relation_vocabulary_excludes_reserved_and_returns_counts(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """get_relation_vocabulary queries descriptive relations with counts and
+    excludes the reserved typing relations (sophia#190 / hermes#137)."""
+    read = MagicMock(
+        return_value=[
+            {"relation": "LOCATED_IN", "edge_count": 12},
+            {"relation": "PRODUCES", "edge_count": 5},
+        ]
+    )
+    monkeypatch.setattr(client, "_execute_read", read)
+
+    vocab = client.get_relation_vocabulary()
+
+    assert vocab == [
+        {"relation": "LOCATED_IN", "edge_count": 12},
+        {"relation": "PRODUCES", "edge_count": 5},
+    ]
+    query, params = read.call_args[0][0], read.call_args[0][1]
+    assert "e.relation IS NOT NULL" in query
+    assert "NOT e.relation IN $reserved" in query
+    assert params["reserved"] == ["IS_A", "INSTANCE_OF", "SUBTYPE_OF"]
+
+
+def test_get_relation_vocabulary_handles_empty(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """No descriptive edges -> empty list, no error."""
+    monkeypatch.setattr(client, "_execute_read", MagicMock(return_value=[]))
+    assert client.get_relation_vocabulary() == []
