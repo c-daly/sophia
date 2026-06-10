@@ -496,6 +496,7 @@ def test_get_relation_vocabulary_excludes_reserved_and_returns_counts(
         {"relation": "PRODUCES", "edge_count": 5},
     ]
     query, params = read.call_args[0][0], read.call_args[0][1]
+    assert "e.type = 'edge'" in query
     assert "e.relation IS NOT NULL" in query
     assert "NOT e.relation IN $reserved" in query
     assert params["reserved"] == ["IS_A", "INSTANCE_OF", "SUBTYPE_OF"]

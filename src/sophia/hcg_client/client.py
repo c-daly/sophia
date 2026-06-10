@@ -362,9 +362,13 @@ class HCGClient(LogosHCGClient):
         ``logos:ontology:relations`` Redis snapshot consumed by Hermes for
         cross-process match-before-mint (sophia#190 / hermes#137).
         """
+        # e.type = 'edge' is redundant with `relation IS NOT NULL` (the
+        # codebase convention) but makes the intent explicit and guards
+        # against a content node ever acquiring a `relation` property.
         query = """
         MATCH (e:Node)
-        WHERE e.relation IS NOT NULL AND NOT e.relation IN $reserved
+        WHERE e.type = 'edge' AND e.relation IS NOT NULL
+              AND NOT e.relation IN $reserved
         RETURN e.relation AS relation, count(*) AS edge_count
         ORDER BY edge_count DESC
         """
