@@ -413,8 +413,15 @@ def test_relation_synonyms_posts_and_parses(monkeypatch):
     def fake_post(url, json=None, headers=None, timeout=None):
         captured.update(url=url, json=json, headers=headers)
         return _FakeResp(
-            {"groups": [{"canonical": "CARRIES", "members": ["HAULS", "CARRIES"],
-                         "confidence": 0.9}]}
+            {
+                "groups": [
+                    {
+                        "canonical": "CARRIES",
+                        "members": ["HAULS", "CARRIES"],
+                        "confidence": 0.9,
+                    }
+                ]
+            }
         )
 
     monkeypatch.setattr(hn.httpx, "post", fake_post)

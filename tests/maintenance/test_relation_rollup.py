@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from sophia.maintenance.hermes_naming import RelationSynonymGroup
 from sophia.maintenance.relation_rollup_handler import RelationRollupHandler
@@ -29,7 +28,7 @@ def _hcg(vocab):
 def _embed_two_clusters(labels):
     # HAULS/DRAGS/CARRIES -> cluster A (x-axis); FAST/QUICK -> cluster B (y-axis)
     A = {"HAULS", "DRAGS", "CARRIES"}
-    return [([1.0, 0.0] if l in A else [0.0, 1.0]) for l in labels]
+    return [([1.0, 0.0] if lab in A else [0.0, 1.0]) for lab in labels]
 
 
 def test_consolidates_synonym_group_via_rename():
@@ -99,7 +98,7 @@ def test_singleton_clusters_are_not_sent():
     # ALONE sits on its own axis -> its own cluster of 1, never sent
     def embed(ls):
         m = {"ALONE": [0, 0, 1], "HAULS": [1, 0, 0], "CARRIES": [1, 0, 0]}
-        return [m[l] for l in ls]
+        return [m[lab] for lab in ls]
 
     RelationRollupHandler(
         hcg, embed_fn=embed, synonym_fn=synonym_fn, cluster_threshold=0.5
@@ -136,7 +135,7 @@ def test_label_with_none_embedding_is_dropped_no_misalignment():
     seen = []
 
     def embed(labels):
-        return [([1.0, 0.0] if l != "CARRIES" else None) for l in labels]
+        return [([1.0, 0.0] if lab != "CARRIES" else None) for lab in labels]
 
     def synonym_fn(preds, context=None):
         seen.append(set(preds))
@@ -155,9 +154,7 @@ def test_rename_db_error_does_not_abort_other_groups():
     hcg.rename_relation.side_effect = [RuntimeError("deadlock"), 3]
 
     def synonym_fn(preds, context=None):
-        return [
-            RelationSynonymGroup("CARRIES", ["HAULS", "DUMMY", "CARRIES"], 0.9)
-        ]
+        return [RelationSynonymGroup("CARRIES", ["HAULS", "DUMMY", "CARRIES"], 0.9)]
 
     handler = RelationRollupHandler(
         hcg, embed_fn=lambda ls: [[1.0, 0.0]] * len(ls), synonym_fn=synonym_fn
