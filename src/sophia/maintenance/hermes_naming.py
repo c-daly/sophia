@@ -10,6 +10,7 @@ import logging
 import random
 
 import httpx
+from dataclasses import dataclass
 
 from sophia.maintenance.emergence_types import (
     EmergentCluster,
@@ -182,3 +183,60 @@ def type_cluster(
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         logger.warning("type_cluster failed: %s", exc)
         return None
+
+
+@dataclass(frozen=True)
+class RelationSynonymGroup:
+    """One descriptive-relation synonym group proposed by Hermes."""
+
+    canonical: str
+    members: list[str]
+    confidence: float
+
+
+def relation_synonyms(
+    predicates: list[str],
+    *,
+    hermes_url: str,
+    token: str,
+    context: str | None = None,
+    timeout: float = 60.0,
+) -> list[RelationSynonymGroup]:
+    """Ask Hermes (/relation-synonyms) to group descriptive-relation synonyms.
+
+    The Sophia-side client for the relation-vocabulary rollup (sophia#192).
+    Hermes is the codec: it proposes synonym groups + a canonical label and
+    validates fail-closed (reserved typing relations rejected). Returns [] on
+    any failure -- the rollup simply consolidates nothing this pass.
+    """
+    if len(predicates) < 2:
+        return []
+    url = f"{hermes_url.rstrip('/')}/relation-synonyms"
+    payload: dict = {"predicates": predicates}
+    if context:
+        payload["context"] = context
+    try:
+        resp = httpx.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=httpx.Timeout(timeout),
+        )
+        resp.raise_for_status()
+        groups = resp.json().get("groups") or []
+        out: list[RelationSynonymGroup] = []
+        for g in groups:
+            members = [str(m) for m in (g.get("members") or []) if m]
+            canonical = str(g.get("canonical", "")).strip()
+            if canonical and len(members) >= 2:
+                out.append(
+                    RelationSynonymGroup(
+                        canonical=canonical,
+                        members=members,
+                        confidence=float(g.get("confidence", 0.0)),
+                    )
+                )
+        return out
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        logger.warning("relation_synonyms failed: %s", exc)
+        return []

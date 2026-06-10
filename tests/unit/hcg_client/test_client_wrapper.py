@@ -508,3 +508,35 @@ def test_get_relation_vocabulary_handles_empty(
     """No descriptive edges -> empty list, no error."""
     monkeypatch.setattr(client, "_execute_read", MagicMock(return_value=[]))
     assert client.get_relation_vocabulary() == []
+
+
+def test_rename_relation_renames_and_dedups(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """rename_relation dedups colliding edges then rewrites the rest (sophia#192)."""
+    calls = []
+
+    def fake_exec(query, params=None):
+        calls.append((query, params or {}))
+        return [{"renamed": 3}] if "SET edge.relation" in query else []
+
+    monkeypatch.setattr(client, "_execute_query", fake_exec)
+
+    n = client.rename_relation("HAULS", "CARRIES")
+
+    assert n == 3
+    assert len(calls) == 2  # dedup-delete, then rename
+    dedup_q, dedup_p = calls[0]
+    assert "DETACH DELETE" in dedup_q
+    assert dedup_p["old"] == "HAULS" and dedup_p["new"] == "CARRIES"
+    assert "SET edge.relation = $new" in calls[1][0]
+
+
+def test_rename_relation_noop_when_same(client: HCGClient) -> None:
+    assert client.rename_relation("CARRIES", "CARRIES") == 0
+
+
+def test_rename_relation_refuses_reserved(client: HCGClient) -> None:
+    for old, new in [("IS_A", "PART_OF"), ("PART_OF", "IS_A"), ("INSTANCE_OF", "X")]:
+        with pytest.raises(ValueError, match="reserved"):
+            client.rename_relation(old, new)

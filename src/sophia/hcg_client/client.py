@@ -354,6 +354,48 @@ class HCGClient(LogosHCGClient):
     # (hermes#131 hard constraint).
     _RESERVED_RELATIONS = ["IS_A", "INSTANCE_OF", "SUBTYPE_OF"]
 
+    def rename_relation(self, old: str, new: str) -> int:
+        """Rewrite every descriptive edge with relation ``old`` to ``new``.
+
+        The consolidation primitive for the relation-vocabulary rollup
+        (sophia#192). Dedup-safe: an old edge whose (source, target, ``new``)
+        triple already exists is deleted rather than duplicating the
+        (source, target, relation) MERGE key; the rest are rewritten.
+        Idempotent (a second call finds no ``old`` edges). Reserved typing
+        relations can never be renamed (hard constraint).
+
+        Returns the number of edges rewritten (excludes dedup-deleted).
+        """
+        if old == new:
+            return 0
+        if old in self._RESERVED_RELATIONS or new in self._RESERVED_RELATIONS:
+            raise ValueError(
+                f"refusing to rename a reserved typing relation ({old!r} -> {new!r}); "
+                "IS_A/INSTANCE_OF/SUBTYPE_OF are structural and never consolidated"
+            )
+        # Phase 1: drop old edges that would collide with an existing new edge.
+        self._execute_query(
+            """
+            MATCH (edge:Node {type: 'edge', relation: $old})
+            OPTIONAL MATCH (dup:Node {type: 'edge', relation: $new,
+                                      source: edge.source, target: edge.target})
+            WITH edge, dup WHERE dup IS NOT NULL
+            DETACH DELETE edge
+            """,
+            {"old": old, "new": new},
+        )
+        # Phase 2: rewrite the remaining old edges (+ keep the name consistent).
+        records = self._execute_query(
+            """
+            MATCH (edge:Node {type: 'edge', relation: $old})
+            SET edge.relation = $new,
+                edge.name = replace(edge.name, '_' + $old + '_', '_' + $new + '_')
+            RETURN count(edge) AS renamed
+            """,
+            {"old": old, "new": new},
+        )
+        return int(records[0]["renamed"]) if records else 0
+
     def get_relation_vocabulary(self) -> List[Dict[str, Any]]:
         """Distinct DESCRIPTIVE relation labels with edge counts.
 
