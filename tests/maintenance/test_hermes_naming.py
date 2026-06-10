@@ -405,3 +405,49 @@ def test_type_cluster_multiple_groups_uses_first_and_warns(monkeypatch):
     result = hn.type_cluster(_cluster(), hermes_url="http://h", token="t")
     assert result == TypeClusterResult(name="vehicle", parent="object", residual_ids=[])
     assert warnings  # the >1-group contract violation was logged
+
+
+def test_relation_synonyms_posts_and_parses(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(url=url, json=json, headers=headers)
+        return _FakeResp(
+            {"groups": [{"canonical": "CARRIES", "members": ["HAULS", "CARRIES"],
+                         "confidence": 0.9}]}
+        )
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    groups = hn.relation_synonyms(
+        ["HAULS", "CARRIES"], hermes_url="http://hermes:17000", token="t"
+    )
+    assert len(groups) == 1
+    assert groups[0].canonical == "CARRIES"
+    assert groups[0].members == ["HAULS", "CARRIES"]
+    assert captured["url"].endswith("/relation-synonyms")
+    assert captured["headers"]["Authorization"] == "Bearer t"
+
+
+def test_relation_synonyms_omits_auth_when_token_empty(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update(headers=headers)
+        return _FakeResp({"groups": []})
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    hn.relation_synonyms(["A", "B"], hermes_url="http://h", token="")
+    # empty token must not produce an illegal "Bearer " header
+    assert "Authorization" not in captured["headers"]
+
+
+def test_relation_synonyms_under_two_predicates_is_noop():
+    assert hn.relation_synonyms(["ONLY_ONE"], hermes_url="http://h", token="t") == []
+
+
+def test_relation_synonyms_returns_empty_on_error(monkeypatch):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(hn.httpx, "post", fake_post)
+    assert hn.relation_synonyms(["A", "B"], hermes_url="http://h", token="t") == []

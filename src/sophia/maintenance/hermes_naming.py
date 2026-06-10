@@ -215,11 +215,14 @@ def relation_synonyms(
     payload: dict = {"predicates": predicates}
     if context:
         payload["context"] = context
+    # Omit the auth header when there is no token -- an empty "Bearer " is an
+    # illegal header value (and Hermes does not require auth locally).
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         resp = httpx.post(
             url,
             json=payload,
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
             timeout=httpx.Timeout(timeout),
         )
         resp.raise_for_status()
