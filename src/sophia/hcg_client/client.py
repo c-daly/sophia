@@ -374,8 +374,7 @@ class HCGClient(LogosHCGClient):
         """
         records = self._execute_read(query, {"reserved": self._RESERVED_RELATIONS})
         return [
-            {"relation": r["relation"], "edge_count": r["edge_count"]}
-            for r in records
+            {"relation": r["relation"], "edge_count": r["edge_count"]} for r in records
         ]
 
     def get_node(self, uuid: str) -> Optional[Dict[str, Any]]:
