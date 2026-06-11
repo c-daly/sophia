@@ -1302,7 +1302,10 @@ class TestProposalProcessorRedisSnapshot:
         ]
 
         # Ingest no longer mints types, so the snapshot is exercised directly
-        # rather than through process() (#505).
+        # rather than through process() (#505). Construction already published
+        # once with the then-unconfigured mock (sophia#195) — reset so the
+        # assertion sees only the call under test.
+        mock_redis.set.reset_mock()
         processor._write_type_snapshot()
 
         # Verify Redis write
@@ -1340,9 +1343,15 @@ class TestProposalProcessorRedisSnapshot:
         mock_hcg.get_all_type_definitions.assert_not_called()
 
     def test_process_redis_write_failure_does_not_break_processing(self):
-        """If Redis write fails, process() still returns results."""
-        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+        """If the Redis snapshot write fails, neither construction nor
+        process() breaks.
 
+        The failing ``set`` is wired *before* construction so the init-time
+        publish (sophia#195) genuinely hits it — the per-batch publish gate
+        in process() is dead in production since ingest stopped minting
+        types (#505).
+        """
+        mock_hcg = MagicMock()
         mock_hcg.get_all_type_definitions.return_value = [
             {
                 "uuid": "type_entity",
@@ -1350,7 +1359,14 @@ class TestProposalProcessorRedisSnapshot:
                 "properties": {"member_count": 1},
             },
         ]
+        mock_redis = MagicMock()
         mock_redis.set.side_effect = RuntimeError("Redis connection lost")
+
+        # Construction publishes the snapshot and must swallow the failure.
+        processor, _, _, _, _ = self._make_processor_with_redis(
+            mock_hcg=mock_hcg, mock_redis=mock_redis
+        )
+        mock_redis.set.assert_called_once()
 
         result = processor.process(self._make_proposal())
         assert "stored_node_ids" in result
@@ -1361,6 +1377,9 @@ class TestProposalProcessorRedisSnapshot:
         processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
 
         mock_hcg.get_all_type_definitions.side_effect = RuntimeError("Neo4j down")
+        # Construction already published once before the failure was wired
+        # (sophia#195) — reset so the assertion covers only process().
+        mock_redis.set.reset_mock()
 
         result = processor.process(self._make_proposal())
         assert "stored_node_ids" in result
@@ -1493,3 +1512,49 @@ class TestRealmTriage:
         assert batch_calls
         assert batch_calls[0].kwargs.get("node_type") == "Entity"
         assert batch_calls[0].kwargs["embeddings"][0]["uuid"] == "node-1"
+
+
+class TestSnapshotPublishOnInit:
+    def test_init_publishes_type_snapshot(self):
+        """Constructing the processor publishes the type snapshot (sophia#195).
+
+        Ingest stopped minting types in #505, so the `if new_types or
+        updated_types` per-batch gate never fires in production — without an
+        init-time publish, logos:ontology:types never exists after a
+        wipe+reseed and hermes's TypeRegistry stays empty.
+        """
+        import json
+
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.get_all_type_definitions.return_value = [
+            {
+                "uuid": "type_entity",
+                "name": "entity",
+                "properties": {"member_count": 5},
+            },
+        ]
+        mock_redis = MagicMock()
+
+        ProposalProcessor(
+            hcg_client=mock_hcg,
+            milvus_sync=MagicMock(),
+            event_bus=MagicMock(),
+            redis_client=mock_redis,
+        )
+
+        mock_redis.set.assert_called_once()
+        key, raw = mock_redis.set.call_args[0]
+        assert key == "logos:ontology:types"
+        assert json.loads(raw)["entity"]["uuid"] == "type_entity"
+
+    def test_init_without_redis_does_not_publish_or_raise(self):
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        ProposalProcessor(
+            hcg_client=MagicMock(),
+            milvus_sync=MagicMock(),
+            event_bus=None,
+            redis_client=None,
+        )
