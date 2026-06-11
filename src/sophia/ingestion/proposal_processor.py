@@ -162,6 +162,12 @@ class ProposalProcessor:
         self._milvus = milvus_sync
         self._event_bus = event_bus
         self._redis = redis_client
+        # Publish the current type snapshot immediately: ingest stopped
+        # minting types (#505), so the per-batch `new_types` gate below never
+        # fires in production and a freshly reseeded stack would leave
+        # logos:ontology:types absent — hermes's TypeRegistry then boots
+        # empty (sophia#195). Fail-soft inside _write_type_snapshot.
+        self._write_type_snapshot()
 
     def _publish_batch_event(
         self,
