@@ -1343,9 +1343,15 @@ class TestProposalProcessorRedisSnapshot:
         mock_hcg.get_all_type_definitions.assert_not_called()
 
     def test_process_redis_write_failure_does_not_break_processing(self):
-        """If Redis write fails, process() still returns results."""
-        processor, mock_hcg, _, _, mock_redis = self._make_processor_with_redis()
+        """If the Redis snapshot write fails, neither construction nor
+        process() breaks.
 
+        The failing ``set`` is wired *before* construction so the init-time
+        publish (sophia#195) genuinely hits it — the per-batch publish gate
+        in process() is dead in production since ingest stopped minting
+        types (#505).
+        """
+        mock_hcg = MagicMock()
         mock_hcg.get_all_type_definitions.return_value = [
             {
                 "uuid": "type_entity",
@@ -1353,7 +1359,14 @@ class TestProposalProcessorRedisSnapshot:
                 "properties": {"member_count": 1},
             },
         ]
+        mock_redis = MagicMock()
         mock_redis.set.side_effect = RuntimeError("Redis connection lost")
+
+        # Construction publishes the snapshot and must swallow the failure.
+        processor, _, _, _, _ = self._make_processor_with_redis(
+            mock_hcg=mock_hcg, mock_redis=mock_redis
+        )
+        mock_redis.set.assert_called_once()
 
         result = processor.process(self._make_proposal())
         assert "stored_node_ids" in result
