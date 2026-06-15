@@ -143,10 +143,11 @@ def type_cluster(
             logger.warning("type_cluster returned no name; treating as failure")
             return None
         parent_raw = data.get("parent")
-        # parent may be JSON null (reuse) or a name; coerce so a whitespace-only
-        # or non-string value collapses to None rather than a bogus parent name.
+        # parent may be JSON null (reuse) or a name; a whitespace-only or
+        # non-string value collapses to None rather than a bogus parent name
+        # (do NOT str() a non-string -- 123 must not become the parent "123").
         parent: str | None = (
-            None if parent_raw is None else (str(parent_raw).strip() or None)
+            parent_raw.strip() or None if isinstance(parent_raw, str) else None
         )
         residual = data.get("residual_ids")
         if not isinstance(residual, list):

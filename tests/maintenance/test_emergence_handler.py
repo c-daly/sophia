@@ -306,14 +306,19 @@ def test_cross_realm_name_match_is_reused(monkeypatch):
     assert hcg.updated == []  # no type_uuid/type stamp on members
 
 
-def test_novel_name_no_parent_left_in_pool(monkeypatch):
-    """A new name with NO parent has no existing type to attach to and nothing to
-    mint under (mint requires name AND parent, #200): the cohort is HELD in the
-    pool, never minted as a root-named duplicate (the old root_fallback bug)."""
+def test_novel_name_no_parent_mints_under_realm_root(monkeypatch):
+    """A new name with NO parent must NOT be held: every emergent type roots under
+    a domain, so it mints under the SOURCE pool's realm root (the domain floor).
+    The attach-first check means only genuinely-novel names reach here, so no root
+    is duplicated."""
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
     hcg = _park(_entity_pool_hcg(), "a0", "a1")
-    minted = []
+    mint_calls = []
+
+    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
+        mint_calls.append(kwargs)
+        return "gadget_uuid"
 
     handler = _handler(
         hcg,
@@ -321,15 +326,18 @@ def test_novel_name_no_parent_left_in_pool(monkeypatch):
         name_fn=lambda c: TypeClusterResult(
             name="gadget", parent=None, residual_ids=[]
         ),
-        mint_fn=lambda *a, **k: minted.append(1),
+        mint_fn=fake_mint,
     )
     handler.run(type_uuid="entity_root")
 
-    # Nothing minted; members untouched and left in the pool for the next pass.
-    assert minted == []
-    assert hcg.membership_edges() == []
-    assert hcg.updated == []
-    assert hcg.deleted_edges == []
+    # Minted under the realm root (no parent -> domain floor); members placed.
+    assert len(mint_calls) == 1
+    assert mint_calls[0]["parent_type_uuid"] == "entity_root"
+    assert mint_calls[0]["placed_by"] == "root_fallback"
+    assert set(hcg.membership_edges()) == {
+        ("a0", "gadget_uuid"),
+        ("a1", "gadget_uuid"),
+    }
 
 
 def test_unresolvable_parent_falls_back_to_realm_root(monkeypatch):
@@ -549,7 +557,9 @@ def test_mint_publishes_event_without_ancestors(monkeypatch):
         "type_uuid": "gadget_uuid",
         "name": "gadget",
         "parent_uuid": "entity_root",
-        "placed_by": "root_fallback",
+        # parent="entity" resolved (it is the realm root) -> parent_resolution,
+        # distinct from an unresolvable-parent root_fallback (greptile #201).
+        "placed_by": "parent_resolution",
     }
     assert "ancestors" not in msg  # structure is the only membership (B1)
 

@@ -306,26 +306,28 @@ class EmergenceHandler:
             )
             return
 
-        if not tc.parent:
-            # A new name with no parent to mint under: nothing to point at. Hold
-            # the cohort in the pool for the next pass rather than minting a
-            # root-named duplicate (the old root_fallback bug, #200).
-            logger.info("emergence: new name %r has no parent; left in pool", tc.name)
-            return
-
-        # MINT (name + parent, name not already a type). Resolve the proposed
-        # parent closed-world; minting under a realm root is always legal, so we
-        # fall back to the realm root only when the parent does not resolve (a
-        # placement target for the freshly-minted type -- NOT a silent reparent of
-        # an existing type, which the attach path above already handled).
-        parent_uuid = (
+        # MINT a new type (the name is not an existing type). Every emergent type
+        # MUST root under a domain: resolve the proposed parent closed-world, and
+        # if Hermes gave no usable parent fall back to the SOURCE pool's realm root
+        # (entity/concept/process) -- never hold it unparented. The attach path
+        # above already handled existing names, so this never duplicates a root.
+        # Minting under a realm root is always legal.
+        resolved_parent = (
             placement.resolve_parent(
                 tc.parent, uuid_by_name=uuid_by_name, hcg=self._hcg, realm=realm
             )
-            or realm_root_uuid
+            if tc.parent
+            else None
         )
+        parent_uuid = resolved_parent or realm_root_uuid
+        # parent_resolution: Hermes named a parent that RESOLVED (even if it is a
+        # realm root, e.g. "entity"). root_fallback: no usable parent was given /
+        # it did not resolve, so we defaulted to the source realm root. Keeping
+        # these distinct preserves event-bus traceability -- an explicit-root
+        # graft and an unresolvable-parent fallback are different stories
+        # (greptile #201).
         placed_by = (
-            "parent_resolution" if parent_uuid != realm_root_uuid else "root_fallback"
+            "parent_resolution" if resolved_parent is not None else "root_fallback"
         )
 
         # Mint a new type under the chosen parent. mint_type writes the type's
