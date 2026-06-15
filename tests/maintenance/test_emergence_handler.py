@@ -68,6 +68,19 @@ class _FakeHCG:
             return list(self._type_defs)
         return []
 
+    def get_all_type_definitions(self):
+        # Positional type catalog (the rework's canonical gather). The fake's
+        # type layer is `_type_defs`; reshape to the client's
+        # {uuid, name, properties} contract.
+        return [
+            {
+                "uuid": td["uuid"],
+                "name": td["name"],
+                "properties": dict(td.get("properties", {})),
+            }
+            for td in self._type_defs
+        ]
+
     def get_node(self, uuid):
         return self._nodes.get(uuid)
 

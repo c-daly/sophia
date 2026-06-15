@@ -25,6 +25,16 @@ class _FakeHCG:
             return list(self._type_defs)
         return []
 
+    def get_all_type_definitions(self):
+        return [
+            {
+                "uuid": td.get("uuid", ""),
+                "name": td.get("name"),
+                "properties": dict(td.get("properties", {})),
+            }
+            for td in self._type_defs
+        ]
+
     def query_edges_from(self, uuid):
         return self._edges.get(uuid, [])
 

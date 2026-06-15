@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from sophia.maintenance.config import MaintenanceConfig
+from sophia.maintenance.emergence_handler import ONTOLOGY_CHANGED_CHANNEL
 from sophia.maintenance.job_queue import MaintenanceJob, MaintenanceQueue
 from sophia.maintenance.scheduler import MaintenanceScheduler
 
@@ -107,6 +108,33 @@ class TestMaintenanceSchedulerInit:
         subscribe_calls = self.mock_event_bus.subscribe.call_args_list
         channels = [c[0][0] for c in subscribe_calls]
         assert "logos:sophia:threshold_crossed" in channels
+
+    def test_subscribes_to_ontology_type_created_when_redis_present(self) -> None:
+        """With a Redis handle, subscribe to ontology.type_created for sync."""
+        config = MaintenanceConfig(enabled=True)
+        MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+            redis_client=MagicMock(),
+        )
+        subscribe_calls = self.mock_event_bus.subscribe.call_args_list
+        channels = [c[0][0] for c in subscribe_calls]
+        assert ONTOLOGY_CHANGED_CHANNEL in channels
+
+    def test_no_ontology_subscription_without_redis(self) -> None:
+        """Without a Redis handle, the snapshot-sync subscription is skipped."""
+        config = MaintenanceConfig(enabled=True)
+        MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers=self.handlers,
+        )
+        subscribe_calls = self.mock_event_bus.subscribe.call_args_list
+        channels = [c[0][0] for c in subscribe_calls]
+        assert ONTOLOGY_CHANGED_CHANNEL not in channels
 
 
 class TestEventHandlers:
@@ -265,3 +293,47 @@ class TestStartStop:
         await scheduler.stop()
         assert not scheduler._running
         self.mock_event_bus.stop.assert_called_once()
+
+
+class TestTypeSnapshotSync:
+    """The ontology.type_created handler keeps the Redis snapshot in sync."""
+
+    def setup_method(self) -> None:
+        self.mock_queue = MagicMock(spec=MaintenanceQueue)
+        self.mock_event_bus = MagicMock()
+        self.mock_redis = MagicMock()
+        self.mock_hcg = MagicMock()
+        self.mock_hcg.get_all_type_definitions.return_value = [
+            {"uuid": "u-engine", "name": "engine",
+             "properties": {"member_count": 5}},
+        ]
+        config = MaintenanceConfig(enabled=True)
+        self.scheduler = MaintenanceScheduler(
+            queue=self.mock_queue,
+            event_bus=self.mock_event_bus,
+            config=config,
+            handlers={},
+            hcg_client=self.mock_hcg,
+            redis_client=self.mock_redis,
+        )
+
+    def test_event_republishes_positional_snapshot(self) -> None:
+        """On ontology.type_created, re-gather and write the full snapshot."""
+        import json
+
+        self.scheduler._on_ontology_type_created({"type_uuid": "u-engine"})
+
+        self.mock_hcg.get_all_type_definitions.assert_called_once()
+        self.mock_redis.set.assert_called_once()
+        key, payload = self.mock_redis.set.call_args[0]
+        assert key == "logos:ontology:types"
+        assert json.loads(payload) == {
+            "engine": {"uuid": "u-engine", "member_count": 5}
+        }
+
+    def test_event_handler_is_fail_soft(self) -> None:
+        """A graph error in the handler must not propagate (listener thread)."""
+        self.mock_hcg.get_all_type_definitions.side_effect = RuntimeError("boom")
+        # Should not raise.
+        self.scheduler._on_ontology_type_created({})
+        self.mock_redis.set.assert_not_called()

@@ -21,6 +21,17 @@ class FakeHCG:
         self.nodes = {td["uuid"]: td for td in type_defs}
         for m in members or []:  # entity members carry a type_uuid
             self.nodes[m["uuid"]] = m
+        # The seeder always creates the structural/realm roots; inject any not
+        # explicitly provided so the rollup can resolve root parents by name
+        # positionally (name -> real uuid), mirroring the live graph. Roots are
+        # protected names, so they never become rollup candidates.
+        for _rn in ("root", "node", "entity", "concept", "process", "cognition"):
+            if not any(n.get("name") == _rn for n in self.nodes.values()):
+                self.nodes[f"type_{_rn}"] = {
+                    "uuid": f"type_{_rn}",
+                    "name": _rn,
+                    "properties": {"type": "type_definition"},
+                }
         # edges: list of {id, source, target, relation}
         self.edges = list(is_a or []) + list(other_edges or [])
         self._eid = 0
@@ -130,6 +141,7 @@ def _handler(hcg, milvus, mint_calls=None, name_label="mathematics"):
         milvus,
         source_cluster_id,
         parent_type_uuid,
+        realm,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
@@ -187,50 +199,34 @@ def test_candidate_minted_type_shape_detected():
     assert _is_rollup_candidate(td)
 
 
-def test_candidate_requires_nested_properties_type():
-    """The ONE canonical record shape is the full node map nested under
-    `properties` (what get_all_type_definitions returns). A top-level `type`
-    is never consulted -- neither to admit a flattened record nor to shadow
-    the nested value (PR #173 review)."""
-    flattened = {
-        "uuid": "type_location",
-        "name": "location",
-        "type": "type_definition",
-        "properties": {},
-    }
-    assert not _is_rollup_candidate(flattened)
-    shadowed = {
-        "uuid": "type_location",
-        "name": "location",
-        "type": "Node",
-        "properties": {"type": "type_definition"},
-    }
-    assert _is_rollup_candidate(shadowed)
+def test_candidate_is_label_agnostic():
+    """Candidacy is purely structural now (positional rework): a type_-prefixed
+    uuid + non-reserved name qualifies regardless of the node `type` label /
+    properties (which `mint_type` will set to the realm, not "type_definition")."""
+    for props in ({"type": "type_definition"}, {"type": "entity"}, {}):
+        td = {"uuid": "type_location", "name": "location", "properties": props}
+        assert _is_rollup_candidate(td), props
 
 
-def test_candidate_rejects_non_type_definition_nodes():
-    """Instance/entity nodes are not type-defs, whatever their uuid shape."""
-    # type_ uuid prefix but a non-type node type: structure says no.
-    odd = {"uuid": "type_oddball", "name": "oddball", "properties": {"type": "entity"}}
-    assert not _is_rollup_candidate(odd)
-    # plain instance: uuid4, domain type.
-    inst = {
+def test_candidate_accepts_opaque_uuid_positional_type():
+    """Candidacy no longer keys on a `type_` uuid scheme. Records reaching this
+    predicate come from get_all_type_definitions() -- i.e. they are already
+    types POSITIONALLY (a node with incoming IS_A) -- so an opaque-uuid type
+    qualifies. Only an empty uuid (or a reserved/protected name) is rejected."""
+    opaque = {
         "uuid": "9be07f63-2f6a-4f8e-9c1d-0a1b2c3d4e5f",
-        "name": "rex",
-        "properties": {"type": "dog"},
+        "name": "dog",
+        "properties": {"type": "entity"},
     }
-    assert not _is_rollup_candidate(inst)
+    assert _is_rollup_candidate(opaque)
+    assert not _is_rollup_candidate({"uuid": "", "name": "x", "properties": {}})
 
 
-def test_candidate_rejects_legacy_flag_without_structure():
-    """The legacy flag alone no longer qualifies a record (structure, not
-    flags; dev DBs are wiped/reseeded, so no migration path is needed)."""
-    td = {
-        "uuid": "type_legacy",
-        "name": "legacy",
-        "properties": {"is_type_definition": True},
-    }
-    assert not _is_rollup_candidate(td)
+def test_candidate_ignores_legacy_flag_and_missing_type():
+    """A minted type qualifies with no `type` label and no legacy flag -- the
+    type_ uuid + name is the structure (dev DBs are wiped/reseeded; no flags)."""
+    td = {"uuid": "type_legacy", "name": "legacy", "properties": {}}
+    assert _is_rollup_candidate(td)
 
 
 def test_candidate_protected_and_reserved_exclusions_hold():
@@ -477,6 +473,7 @@ def test_cycle_is_recorded_as_ambiguous_not_minted_as_edge():
     hcg = FakeHCG(tds, is_a=is_a)
     milvus = FakeMilvus({"type_a_aa": [1.0, 0.0], "type_b_bb": [0.9, 0.1]})
     h = _handler(hcg, milvus)
+    h._load_type_layer()  # populates _type_uuids (run() does this before adjacency)
     h._build_is_a_adjacency()
     # Try to make b the parent of a -> would close the 2-cycle a->b->a.
     h._reparent_one("type_a_aa", "type_b_bb")
@@ -518,6 +515,7 @@ def test_adjacency_ignores_instance_taxonomy():
     ]
     hcg = FakeHCG(tds, is_a=is_a)
     h = _handler(hcg, FakeMilvus({}))
+    h._load_type_layer()  # populates _type_uuids (run() does this before adjacency)
     h._build_is_a_adjacency()
     assert h._children_of.get("type_entity") == ["type_x_aa"]
     assert "natural_resource_inst" not in h._children_of  # instance edge excluded
@@ -670,6 +668,7 @@ def test_reused_super_is_reparented_to_intended_parent(monkeypatch):
         milvus,
         source_cluster_id,
         parent_type_uuid,
+        realm,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
@@ -902,6 +901,7 @@ def test_top_level_super_grafts_under_realm_root(monkeypatch):
         milvus,
         source_cluster_id,
         parent_type_uuid,
+        realm,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {
@@ -1047,6 +1047,14 @@ def test_resolve_parent_accepts_covering_types_and_rejects_forbidden():
         "mathematics": "type_mathematics",
         "metaschema": "type_metaschema",
     }
+    # Realm/protected roots resolve positionally via the canonical root map
+    # (name -> real uuid), built from the full type layer in run().
+    handler._root_uuid_by_name = {
+        "concept": "type_concept",
+        "process": "type_process",
+        "cognition": "type_cognition",
+        "entity": "type_entity",
+    }
 
     # Realm roots resolve to their canonical seeded uuid + ancestors.
     assert handler._resolve_parent("concept") == "type_concept"
@@ -1144,8 +1152,16 @@ def test_resolve_parent_ignores_shadowing_domain_type():
     ]
     hcg = FakeHCG(tds)
     handler = _handler(hcg, FakeMilvus({}))
+    # The candidate map (deeper types) can be shadowed by a case-variant
+    # "Concept"; realm roots, however, resolve via the canonical positional root
+    # map (`_root_uuid_by_name`, built from the full type layer), so the shadow
+    # in `_uuid_by_name` can never win for a realm root.
     handler._uuid_by_name = {
-        "concept": "type_concept_shadow01",  # shadow owns the realm key
+        "concept": "type_concept_shadow01",  # shadow owns the realm key HERE
+        "process": "type_process",
+    }
+    handler._root_uuid_by_name = {
+        "concept": "type_concept",  # canonical seeded root wins
         "process": "type_process",
     }
     assert handler._resolve_parent("concept") == "type_concept"
@@ -1217,6 +1233,7 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
         milvus,
         source_cluster_id,
         parent_type_uuid,
+        realm,
     ):
         uuid = f"type_{name.label}_super01"
         hcg.nodes[uuid] = {

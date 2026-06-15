@@ -9,7 +9,9 @@ import threading
 from typing import Any, Callable
 
 from sophia.maintenance.config import MaintenanceConfig
+from sophia.maintenance.emergence_handler import ONTOLOGY_CHANGED_CHANNEL
 from sophia.maintenance.job_queue import MaintenanceJob, MaintenanceQueue
+from sophia.maintenance.type_snapshot import publish_type_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ class MaintenanceScheduler:
         config: MaintenanceConfig,
         handlers: dict[str, Callable],
         hcg_client: Any | None = None,
+        redis_client: Any | None = None,
     ) -> None:
         """Initialize the scheduler.
 
@@ -43,12 +46,16 @@ class MaintenanceScheduler:
             config: Maintenance scheduler configuration.
             handlers: Mapping of job_type -> callable handler.
             hcg_client: Optional HCG client for graph operations.
+            redis_client: Optional Redis client for keeping the
+                ``logos:ontology:types`` snapshot in sync (incremental on
+                ``ontology.type_created``, reconcile in the periodic loop).
         """
         self._queue = queue
         self._event_bus = event_bus
         self._config = config
         self._handlers = handlers
         self._hcg = hcg_client
+        self._redis = redis_client
         self._running = False
         self._semaphore: asyncio.Semaphore | None = None
         self._listener_thread: threading.Thread | None = None
@@ -72,6 +79,17 @@ class MaintenanceScheduler:
                 self._on_threshold_crossed,
             )
             logger.info("Subscribed to logos:sophia:threshold_crossed")
+
+        # Keep the Redis type snapshot in sync incrementally: emergence
+        # publishes ONTOLOGY_CHANGED_CHANNEL on every mint, and we re-publish
+        # the full positional snapshot in response. The periodic loop reconciles
+        # against drift. Only worth subscribing if we have a Redis handle.
+        if self._redis is not None:
+            self._event_bus.subscribe(
+                ONTOLOGY_CHANGED_CHANNEL,
+                self._on_ontology_type_created,
+            )
+            logger.info("Subscribed to %s", ONTOLOGY_CHANGED_CHANNEL)
 
     def _on_proposal_processed(self, event: dict) -> None:
         """Handle proposal_processed events by enqueuing discovery jobs.
@@ -144,6 +162,28 @@ class MaintenanceScheduler:
                 )
         except Exception:
             logger.exception("Error handling threshold_crossed event")
+
+    def _on_ontology_type_created(self, event: dict) -> None:
+        """Re-publish the Redis type snapshot when emergence mints a type.
+
+        Incremental sync (the user's ask): the snapshot stays current as Sophia
+        adds types, without waiting for the next ingest batch or periodic
+        reconcile. We re-gather the full positional type layer rather than
+        patching the single new entry, because grafting one node shifts the
+        member_count of its ancestor types too -- a full re-publish is the only
+        drift-free option, and the positional query is cheap.
+
+        Note: Called from the EventBus listener thread. Must remain synchronous.
+        ``publish_type_snapshot`` is itself fail-soft; the extra guard keeps a
+        bad event from killing the listener thread.
+
+        Args:
+            event: The ``ontology.type_created`` payload (unused -- we re-gather).
+        """
+        try:
+            publish_type_snapshot(self._hcg, self._redis)
+        except Exception:
+            logger.exception("Error handling ontology.type_created event")
 
     def _check_thresholds(self, type_uuids: list[str]) -> None:
         """Check if any types cross the member count threshold."""
@@ -265,6 +305,15 @@ class MaintenanceScheduler:
                                 priority="low",
                                 params={"type_uuid": type_uuid},
                             )
+
+                # Reconcile the Redis type snapshot against the graph. The
+                # incremental ontology.type_created path keeps it current in the
+                # common case; this is the periodic safety net that repairs any
+                # drift (missed events, out-of-band graph edits).
+                if self._redis is not None and self._hcg is not None:
+                    await asyncio.to_thread(
+                        publish_type_snapshot, self._hcg, self._redis
+                    )
             except Exception:
                 if self._running:
                     logger.exception("Error in periodic loop")

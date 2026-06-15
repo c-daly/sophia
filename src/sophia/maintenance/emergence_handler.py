@@ -54,19 +54,22 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def _type_name(type_uuid: str) -> str:
-    """Best-effort label from a type-definition uuid.
+    """Best-effort display handle for a type uuid.
 
-    Minted uuids are ``type_<label>_<hex8>`` and base/legacy ones ``type_<name>``.
-    Used only as the ``current_type`` display fallback in :func:`_build_member`;
-    membership itself is the IS_A edge, never this slug (B2/B3, DESIGN §3).
+    Type uuids are now opaque (``uuid4``) and carry no embedded name -- the name
+    lives on the node, and membership is the IS_A edge, never the uuid (B2/B3,
+    DESIGN §3). Used only as the ``current_type`` display fallback in
+    :func:`_build_member`, so returning the uuid verbatim is sufficient; the
+    legacy ``type_<name>`` prefix is no longer parsed.
     """
-    return type_uuid[len("type_") :] if type_uuid.startswith("type_") else type_uuid
+    return type_uuid
 
 
 def current_categories(hcg: Any) -> list[str]:
-    """Existing type-definition labels, excluding `entity` and reserved_* types."""
+    """Existing type names (positional: nodes with incoming IS_A), excluding
+    `entity` and reserved_* types."""
     out: list[str] = []
-    for node in hcg.list_all_nodes(node_type="type_definition"):
+    for node in hcg.get_all_type_definitions():
         name = node.get("name")
         if not name or name == "entity" or name.startswith("reserved_"):
             continue
@@ -200,7 +203,7 @@ class EmergenceHandler:
         # `type_<name>` slug (DESIGN sec 3).
         uuid_by_name = {
             n["name"].strip().lower(): n["uuid"]
-            for n in self._hcg.list_all_nodes(node_type="type_definition")
+            for n in self._hcg.get_all_type_definitions()
             if n.get("name") and n.get("uuid")
         }
 
@@ -343,6 +346,7 @@ class EmergenceHandler:
             milvus=self._milvus,
             source_cluster_id=uuid_lib.uuid4().hex[:8],
             parent_type_uuid=parent_uuid,
+            realm=realm,
             placed_by=placed_by,
         )
         # Re-point each fitting member's instance->type IS_A edge onto the

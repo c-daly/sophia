@@ -38,6 +38,13 @@ class FakeHCG:
             if node_type is None or n.get("type") == node_type
         ]
 
+    def get_all_type_definitions(self):
+        return [
+            {"uuid": n["uuid"], "name": n.get("name"), "properties": dict(n)}
+            for n in self.nodes.values()
+            if n.get("type") == "type_definition"
+        ]
+
     def list_all_edges(self, relation_type=None, limit=1000):
         return [
             e

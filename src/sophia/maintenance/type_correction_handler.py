@@ -135,7 +135,7 @@ class TypeCorrectionHandler:
         """
         if self._entity_uuid is None:
             try:
-                for n in self._hcg.list_all_nodes(node_type="type_definition"):
+                for n in self._hcg.get_all_type_definitions():
                     if n.get("name") == "entity":
                         self._entity_uuid = n.get("uuid")
                         break
