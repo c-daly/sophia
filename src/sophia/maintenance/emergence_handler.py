@@ -20,6 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 from sophia.maintenance import placement
+from sophia.maintenance.centroid import bump_centroid
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_clusters
 from sophia.maintenance.emergence_types import EmergentCluster, Member, NameResult
@@ -389,6 +390,14 @@ class EmergenceHandler:
         is stamped. Members are leaves, so the cycle guard is trivially false and
         the type-layer hierarchy in ``children_of`` is unaffected.
         """
+        # Incremental centroid maintenance fires ONLY on the attach path
+        # (placed_by == "name_reuse"): we add members to a PRE-EXISTING type, so
+        # its centroid must fold them in. On the mint path mint_type already
+        # built the centroid from these same founding members -> bumping would
+        # double-count. Members are leaves, so a member's embedding IS its
+        # representation (no subtree walk). n = direct-member count BEFORE attach.
+        attach = placed_by == "name_reuse"
+        n_before = self._member_count(type_uuid) if attach else 0
         for member in members:
             placement.reparent(
                 member.uuid,
@@ -397,6 +406,26 @@ class EmergenceHandler:
                 children_of=children_of,
                 placed_by=placed_by,
             )
+        if attach:
+            embs = [m.embedding for m in members if getattr(m, "embedding", None)]
+            if embs:
+                model = next(
+                    (m.model for m in members if getattr(m, "model", None)), None
+                )
+                bump_centroid(self._milvus, type_uuid, embs, n_before, model=model)
+
+    def _member_count(self, type_uuid: str) -> int:
+        """Direct-member in-degree of a type (cheap); 0 on any failure."""
+        try:
+            rows = self._hcg._execute_read(
+                'MATCH (:Node {relation: "IS_A"})-[:TO]->(t:Node {uuid: $u}) '
+                "RETURN count(*) AS n",
+                {"u": type_uuid},
+            )
+            return int(rows[0]["n"]) if rows else 0
+        except Exception:
+            logger.exception("emergence: member count failed for %s", type_uuid)
+            return 0
 
 
 def build_emergence_handler(
