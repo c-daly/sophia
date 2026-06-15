@@ -1946,6 +1946,13 @@ def create_app() -> FastAPI:
             default=False,
             description="Attach each entity's stored vector (for semantic layout)",
         ),
+        embedding_projection: Optional[str] = Query(
+            default=None,
+            pattern="^pca2d$",
+            description="Project entity vectors server-side and attach "
+            "embedding_2d=[x, y] per node INSTEAD of raw vectors (overrides "
+            "include_embeddings). 'pca2d' is the only mode (sophia#197).",
+        ),
     ) -> HCGGraphSnapshotResponse:
         """Get a snapshot of the entire HCG graph for visualization.
 
@@ -1978,7 +1985,7 @@ def create_app() -> FastAPI:
             # which would throw and (via the except) null *everything*. uuid is
             # a VARCHAR primary key, so each value is double-quoted.
             emb_by_uuid: Dict[str, Any] = {}
-            if include_embeddings and nodes:
+            if (include_embeddings or embedding_projection) and nodes:
                 try:
                     # Default Milvus connection is established at startup.
                     from pymilvus import Collection
@@ -2004,6 +2011,21 @@ def create_app() -> FastAPI:
                 except Exception as _e:
                     logger.warning(f"snapshot embeddings unavailable: {_e}")
 
+            # Server-side projection (sophia#197): two floats per node instead
+            # of the raw vector. Centered thin SVD == PCA; fine at 10k x 3072.
+            coords_by_uuid: Dict[str, List[float]] = {}
+            if embedding_projection and emb_by_uuid:
+                import numpy as _np
+
+                _ids = list(emb_by_uuid)
+                _X = _np.asarray([emb_by_uuid[u] for u in _ids], dtype=_np.float32)
+                _X = _X - _X.mean(axis=0, keepdims=True)
+                _vt = _np.linalg.svd(_X, full_matrices=False)[2]
+                _xy = _X @ _vt[: min(2, _vt.shape[0])].T
+                coords_by_uuid = {
+                    u: [float(c) for c in row] for u, row in zip(_ids, _xy)
+                }
+
             # Convert to response format
             entities: List[HCGEntityResponse] = []
             for node in nodes:
@@ -2016,7 +2038,14 @@ def create_app() -> FastAPI:
                         properties=props,
                         labels=[],
                         created_at=props.get("created"),
-                        embedding=emb_by_uuid.get(node["uuid"]),
+                        # Projection mode never ships raw vectors — shipping
+                        # both would defeat the point (sophia#197).
+                        embedding=(
+                            None
+                            if embedding_projection
+                            else emb_by_uuid.get(node["uuid"])
+                        ),
+                        embedding_2d=coords_by_uuid.get(node["uuid"]),
                     )
                 )
 

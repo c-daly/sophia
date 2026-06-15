@@ -621,6 +621,13 @@ class HCGEntityResponse(BaseModel):
         description="Entity vector; populated only when include_embeddings=true, "
         "for semantic (embedding-positioned) layout in the explorer",
     )
+    embedding_2d: Optional[List[float]] = Field(
+        default=None,
+        description="Server-side 2D projection of the entity vector "
+        "(embedding_projection=pca2d): two floats per node instead of the "
+        "raw vector — raw 3072-dim JSON reached 343MB/28s on a 5.5k-node "
+        "graph and broke the explorer's fetch (sophia#197)",
+    )
 
 
 class HCGEdgeResponse(BaseModel):

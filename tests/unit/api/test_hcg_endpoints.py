@@ -359,3 +359,104 @@ class TestHCGHealthEndpoint:
 
         data = response.json()
         assert data["neo4j_connected"] is False
+
+
+class TestSnapshotEmbeddingProjection:
+    @patch("sophia.api.app._hcg_client")
+    def test_pca2d_ships_coords_not_vectors(self, mock_hcg, client, auth_headers):
+        """embedding_projection=pca2d projects server-side: each entity gets a
+        2-float embedding_2d and NO raw vector (sophia#197 — raw 3072-dim
+        vectors as JSON hit 343MB/28s on a 5.5k-node graph and killed the
+        explorer's fetch)."""
+        import re
+
+        mock_hcg.list_all_nodes.return_value = [
+            {"uuid": "e1", "type": "entity", "name": "e1", "properties": {}},
+            {"uuid": "e2", "type": "entity", "name": "e2", "properties": {}},
+            {"uuid": "e3", "type": "entity", "name": "e3", "properties": {}},
+        ]
+        mock_hcg.list_all_edges.return_value = []
+
+        store = {
+            "hcg_entity_embeddings": {
+                "e1": [1.0, 0.0, 0.0, 0.0],
+                "e2": [0.0, 1.0, 0.0, 0.0],
+                "e3": [0.0, 0.0, 1.0, 0.0],
+            },
+        }
+
+        class FakeCollection:
+            def __init__(self, name):
+                self.name = name
+
+            def load(self):
+                pass
+
+            def query(self, expr, output_fields, limit):
+                uuids = re.findall(r'"([^"]+)"', expr)
+                col = store.get(self.name, {})
+                return [{"uuid": u, "embedding": col[u]} for u in uuids if u in col]
+
+        with patch("pymilvus.Collection", FakeCollection):
+            response = client.get(
+                "/hcg/snapshot",
+                params={"embedding_projection": "pca2d"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        ents = response.json()["entities"]
+        assert len(ents) == 3
+        for e in ents:
+            assert e["embedding"] is None  # raw vectors never serialized
+            assert e["embedding_2d"] is not None
+            assert len(e["embedding_2d"]) == 2
+
+    @patch("sophia.api.app._hcg_client")
+    def test_pca2d_overrides_include_embeddings(self, mock_hcg, client, auth_headers):
+        """Even with include_embeddings=true, projection mode must not ship
+        raw vectors — shipping both would defeat the point."""
+        import re
+
+        mock_hcg.list_all_nodes.return_value = [
+            {"uuid": "e1", "type": "entity", "name": "e1", "properties": {}},
+            {"uuid": "e2", "type": "entity", "name": "e2", "properties": {}},
+        ]
+        mock_hcg.list_all_edges.return_value = []
+        store = {"hcg_entity_embeddings": {"e1": [1.0, 0.0], "e2": [0.0, 1.0]}}
+
+        class FakeCollection:
+            def __init__(self, name):
+                self.name = name
+
+            def load(self):
+                pass
+
+            def query(self, expr, output_fields, limit):
+                uuids = re.findall(r'"([^"]+)"', expr)
+                col = store.get(self.name, {})
+                return [{"uuid": u, "embedding": col[u]} for u in uuids if u in col]
+
+        with patch("pymilvus.Collection", FakeCollection):
+            response = client.get(
+                "/hcg/snapshot",
+                params={
+                    "include_embeddings": "true",
+                    "embedding_projection": "pca2d",
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        for e in response.json()["entities"]:
+            assert e["embedding"] is None
+            assert len(e["embedding_2d"]) == 2
+
+    @patch("sophia.api.app._hcg_client")
+    def test_unknown_projection_rejected(self, mock_hcg, client, auth_headers):
+        response = client.get(
+            "/hcg/snapshot",
+            params={"embedding_projection": "umap9000"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
