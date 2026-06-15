@@ -886,8 +886,8 @@ uvicorn = {version = "^0.32.0", extras = ["standard"]}
 [package.source]
 type = "git"
 url = "https://github.com/c-daly/logos.git"
-reference = "v0.7.3"
-resolved_reference = "df52348fc1c393c3401ecbdd98198aaaff560147"
+reference = "v0.7.4"
+resolved_reference = "0931309ee1c47ebb4c6a4d29ef81ba1775b00daf"
 
 [[package]]
 name = "markupsafe"
@@ -3516,4 +3516,4 @@ otel = ["opentelemetry-api", "opentelemetry-exporter-otlp", "opentelemetry-instr
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "a1f30de884e433d242ebf124fbd8764dffa4a73c1b1a09cdaf1934f4190a2651"
+content-hash = "748a68b7551e516645fbe217fb552b5cf05f1ab4e99245d52bcf1896a4f09faa"
