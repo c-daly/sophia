@@ -131,44 +131,24 @@ def type_cluster(
         if not isinstance(data, dict):
             logger.warning("type_cluster returned non-dict JSON: %r", data)
             return None
-        # Hermes v2 returns exactly ONE group (the most-specific type it can form
-        # for the cluster; members that blur it are excluded as residuals) under
-        # `groups`, NOT a top-level `name`. The group's IS_A `chain` runs
-        # specific->general with chain[0]==name, so the proposed parent is
-        # chain[1] -- and it is guaranteed to already exist. `parent` is None only
-        # when the group reuses an existing type (assign_to != "NEW"); the handler
-        # then re-points members onto the existing same-name type rather than
-        # minting.
-        groups = data.get("groups")
-        if not isinstance(groups, list) or not groups:
-            logger.warning("type_cluster returned no groups; treating as failure")
-            return None
-        group = groups[0]
-        if len(groups) > 1:
-            # Hermes v2 guarantees exactly one group; surface a contract
-            # violation (e.g. a partial batch) rather than silently dropping the
-            # rest.
-            logger.warning(
-                "type_cluster returned %d groups; using only the first",
-                len(groups),
-            )
-        if not isinstance(group, dict):
-            logger.warning("type_cluster group is not an object; treating as failure")
-            return None
-        name = str(group.get("name") or "").strip()
+        # Hermes /type-cluster (#127) returns a FLAT verdict, not `groups`: a
+        # single top-level `name` (the most-specific type binding the WHOLE
+        # cluster), an optional `parent` (None => reuse the existing type named
+        # `name`; set => mint `name` under this existing parent, which may be a
+        # realm root), and `residual_ids` -- the members that don't fit, already
+        # mapped back to caller ids by Hermes. There is no `chain`/`assign_to`:
+        # the placement cascade asserts the full IS_A chain from name + parent.
+        name = str(data.get("name") or "").strip()
         if not name:
-            logger.warning("type_cluster group has no name; treating as failure")
+            logger.warning("type_cluster returned no name; treating as failure")
             return None
-        # Coerce to str + strip BEFORE defaulting, so a whitespace-only or
-        # non-string assign_to falls back to "NEW" instead of slipping through
-        # as a falsy value on the existing-type-reuse path.
-        assign_to = str(group.get("assign_to") or "").strip() or "NEW"
-        chain = group.get("chain")
-        parent: str | None = None
-        if assign_to == "NEW" and isinstance(chain, list) and len(chain) > 1:
-            # chain[1] may be JSON null; guard so it never becomes the literal
-            # string "None" used as a parent name.
-            parent = None if chain[1] is None else (str(chain[1]).strip() or None)
+        parent_raw = data.get("parent")
+        # parent may be JSON null (reuse) or a name; a whitespace-only or
+        # non-string value collapses to None rather than a bogus parent name
+        # (do NOT str() a non-string -- 123 must not become the parent "123").
+        parent: str | None = (
+            parent_raw.strip() or None if isinstance(parent_raw, str) else None
+        )
         residual = data.get("residual_ids")
         if not isinstance(residual, list):
             # A non-list residual_ids (string/int from a serialisation glitch)

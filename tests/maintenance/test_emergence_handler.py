@@ -207,13 +207,14 @@ def test_one_cluster_one_flat_placement(monkeypatch):
         hcg,
         _RecordingMilvus(),
         name_fn=lambda c: TypeClusterResult(
-            name="gadget", parent=None, residual_ids=[]
+            name="gadget", parent="entity", residual_ids=[]
         ),
         mint_fn=fake_mint,
     )
     handler.run(type_uuid="entity_root")
 
-    # One cluster -> exactly one mint; no recursive sub-tree minting.
+    # name + parent (a novel name under the realm root) -> exactly one mint; no
+    # recursive sub-tree minting.
     assert mint_calls == ["gadget"]
     # Both members are re-pointed onto the minted type; no type_uuid stamp.
     assert set(hcg.membership_edges()) == {("a0", "x_uuid"), ("a1", "x_uuid")}
@@ -256,11 +257,12 @@ def test_reuse_on_in_realm_name_match(monkeypatch):
     assert hcg.updated == []
 
 
-def test_cross_realm_name_match_not_reused(monkeypatch):
+def test_cross_realm_name_match_is_reused(monkeypatch):
     cluster = EmergentCluster(members=[_m("x0"), _m("x1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
-    # "vehicle" exists but is rooted in the CONCEPT realm -- not reusable for an
-    # entity-realm pool.
+    # "vehicle" exists in the CONCEPT realm. An entity-pool cohort Hermes names
+    # "vehicle" (parent=null => reuse) is ATTACHED onto that existing type: reuse
+    # is realm-agnostic (#200), a cross-realm correction, never a duplicate.
     hcg = _entity_pool_hcg(
         extra_type_defs=[
             {"name": "concept", "uuid": "concept_root"},
@@ -278,11 +280,7 @@ def test_cross_realm_name_match_not_reused(monkeypatch):
         },
     )
     _park(hcg, "x0", "x1")
-    mint_calls = []
-
-    def fake_mint(cluster, name, hcg, milvus, source_cluster_id, **kwargs):
-        mint_calls.append(kwargs)
-        return "vehicle_entity_uuid"
+    minted = []
 
     handler = _handler(
         hcg,
@@ -290,24 +288,29 @@ def test_cross_realm_name_match_not_reused(monkeypatch):
         name_fn=lambda c: TypeClusterResult(
             name="vehicle", parent=None, residual_ids=[]
         ),
-        mint_fn=fake_mint,
+        mint_fn=lambda *a, **k: minted.append(1),
     )
     handler.run(type_uuid="entity_root")
 
-    # The cross-realm name is NOT reused -> mint fresh under the entity realm root.
-    assert len(mint_calls) == 1
-    assert mint_calls[0]["parent_type_uuid"] == "entity_root"
-    assert mint_calls[0]["placed_by"] == "root_fallback"
-    # Members are placed onto the freshly-minted entity-realm type, NOT the
-    # cross-realm same-name type.
+    # No mint: the cohort is attached onto the existing (cross-realm) vehicle type.
+    assert minted == []
     assert set(hcg.membership_edges()) == {
-        ("x0", "vehicle_entity_uuid"),
-        ("x1", "vehicle_entity_uuid"),
+        ("x0", "vehicle_concept_uuid"),
+        ("x1", "vehicle_concept_uuid"),
     }
+    assert all(
+        props == {"placed_by": "name_reuse"}
+        for _s, _t, rel, props in hcg.added_edges
+        if rel == "IS_A"
+    )
     assert hcg.updated == []  # no type_uuid/type stamp on members
 
 
-def test_mint_under_realm_root_fallback(monkeypatch):
+def test_novel_name_no_parent_mints_under_realm_root(monkeypatch):
+    """A new name with NO parent must NOT be held: every emergent type roots under
+    a domain, so it mints under the SOURCE pool's realm root (the domain floor).
+    The attach-first check means only genuinely-novel names reach here, so no root
+    is duplicated."""
     cluster = EmergentCluster(members=[_m("a0"), _m("a1")])
     monkeypatch.setattr(eh, "find_emergent_clusters", lambda *a, **k: [cluster])
     hcg = _park(_entity_pool_hcg(), "a0", "a1")
@@ -327,20 +330,14 @@ def test_mint_under_realm_root_fallback(monkeypatch):
     )
     handler.run(type_uuid="entity_root")
 
-    # Null parent + name absent from the catalog -> mint under the realm root.
+    # Minted under the realm root (no parent -> domain floor); members placed.
     assert len(mint_calls) == 1
     assert mint_calls[0]["parent_type_uuid"] == "entity_root"
     assert mint_calls[0]["placed_by"] == "root_fallback"
-    # Members re-pointed onto the minted type, carrying root_fallback.
     assert set(hcg.membership_edges()) == {
         ("a0", "gadget_uuid"),
         ("a1", "gadget_uuid"),
     }
-    assert all(
-        props == {"placed_by": "root_fallback"}
-        for _s, _t, rel, props in hcg.added_edges
-        if rel == "IS_A"
-    )
 
 
 def test_unresolvable_parent_falls_back_to_realm_root(monkeypatch):
@@ -387,7 +384,7 @@ def test_outliers_stay_in_pool(monkeypatch):
         hcg,
         _RecordingMilvus(),
         name_fn=lambda c: TypeClusterResult(
-            name="thing", parent=None, residual_ids=["out"]
+            name="thing", parent="entity", residual_ids=["out"]
         ),
         mint_fn=fake_mint,
     )
@@ -464,7 +461,7 @@ def test_in_pass_dedup_reuses_fresh_mint(monkeypatch):
         hcg,
         _RecordingMilvus(),
         name_fn=lambda c: TypeClusterResult(
-            name="widget", parent=None, residual_ids=[]
+            name="widget", parent="entity", residual_ids=[]
         ),
         mint_fn=fake_mint,
     )
@@ -546,7 +543,7 @@ def test_mint_publishes_event_without_ancestors(monkeypatch):
         hcg,
         _RecordingMilvus(),
         name_fn=lambda c: TypeClusterResult(
-            name="gadget", parent=None, residual_ids=[]
+            name="gadget", parent="entity", residual_ids=[]
         ),
         mint_fn=lambda *a, **k: "gadget_uuid",
         event_bus=EB(),
@@ -560,7 +557,9 @@ def test_mint_publishes_event_without_ancestors(monkeypatch):
         "type_uuid": "gadget_uuid",
         "name": "gadget",
         "parent_uuid": "entity_root",
-        "placed_by": "root_fallback",
+        # parent="entity" resolved (it is the realm root) -> parent_resolution,
+        # distinct from an unresolvable-parent root_fallback (greptile #201).
+        "placed_by": "parent_resolution",
     }
     assert "ancestors" not in msg  # structure is the only membership (B1)
 
@@ -583,7 +582,7 @@ def test_handler_isolates_failing_cluster(monkeypatch):
         _RecordingMilvus(),
         name_fn=lambda c: TypeClusterResult(
             name="a" if c.members[0].uuid == "a0" else "b",
-            parent=None,
+            parent="entity",
             residual_ids=[],
         ),
         mint_fn=flaky_mint,

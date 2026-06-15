@@ -273,47 +273,62 @@ class EmergenceHandler:
             logger.info("emergence: cluster all outliers, leaving in pool")
             return
 
-        # Cascade (DESIGN sec 6). Dedup FIRST: a same-named type already in this
-        # realm IS this type (identity = name + realm; IS_A defines type), so reuse
-        # it -- route members onto it, never mint a second node. This must run
-        # whether or not Hermes proposed a parent; otherwise a name minted by an
-        # earlier cluster (the uuid_by_name map is updated on each mint) or a prior
-        # pass gets duplicated (#38). Only when no same-name type exists do we
-        # resolve the proposed parent, falling back to the realm root.
-        parent_uuid: str | None = None
-        placed_by: str | None = None
-        reuse_target: str | None = None
+        # Cascade (DESIGN sec 6) as a single MINT-OR-ATTACH invariant (#200):
+        # Hermes points at the placement (centroids never decide). We MINT a new
+        # type ONLY when it hands us BOTH a new name AND a parent to hang it under.
+        # Every other placeable answer points at an EXISTING type -- it named one
+        # that already exists -- so we ATTACH the cohort to that node and mint
+        # nothing. This makes same-name dedup implicit (#38: a name an earlier
+        # cluster/prior pass minted resolves through uuid_by_name and is reused,
+        # never re-minted) and, crucially, makes reuse REALM-AGNOSTIC: a cohort
+        # Hermes names after another realm's root (e.g. processes pooled under
+        # `entity`) is corrected onto that real root rather than spawning a
+        # duplicate root-named type. (A no-name answer is already held above; a
+        # new name with no parent has nothing to point at, so it is held too.)
         existing = uuid_by_name.get(tc.name.strip().lower())
-        if (
-            existing
-            and existing != source_type_uuid
-            and placement.realm_of(existing, hcg=self._hcg) == realm
-        ):
-            reuse_target, placed_by = existing, "name_reuse"
-        elif tc.parent:
-            pu = placement.resolve_parent(
-                tc.parent, uuid_by_name=uuid_by_name, hcg=self._hcg, realm=realm
-            )
-            if pu:
-                parent_uuid, placed_by = pu, "parent_resolution"
-        if reuse_target is None and parent_uuid is None:
-            parent_uuid, placed_by = realm_root_uuid, "root_fallback"
-
-        # The cascade above always settles on a placement reason.
-        assert placed_by is not None
-
-        if reuse_target is not None:
-            # Reuse: re-point the cohort's instance->type IS_A edges onto the
-            # existing same-name type (membership is the edge -- no mint, no
-            # type_uuid stamp). Members inherit the type's placed_by (name_reuse).
-            self._place_members(fitting, reuse_target, placed_by, children_of)
+        if existing is not None:
+            if existing == source_type_uuid:
+                # The name resolves to the cohort's own pool root: a no-op. Leave
+                # the members where they are rather than re-pointing onto
+                # themselves (and never mint a duplicate of the root).
+                logger.info(
+                    "emergence: cluster maps to its own pool root; left in pool"
+                )
+                return
+            # Attach: re-point the cohort's instance->type IS_A edges onto the
+            # existing type (membership is the edge -- no mint, no type_uuid
+            # stamp), regardless of realm.
+            self._place_members(fitting, existing, "name_reuse", children_of)
             logger.info(
-                "emergence: reused %s for %d members (%s)",
-                reuse_target,
+                "emergence: attached %d members to %s (name_reuse)",
                 len(fitting),
-                placed_by,
+                existing,
             )
             return
+
+        # MINT a new type (the name is not an existing type). Every emergent type
+        # MUST root under a domain: resolve the proposed parent closed-world, and
+        # if Hermes gave no usable parent fall back to the SOURCE pool's realm root
+        # (entity/concept/process) -- never hold it unparented. The attach path
+        # above already handled existing names, so this never duplicates a root.
+        # Minting under a realm root is always legal.
+        resolved_parent = (
+            placement.resolve_parent(
+                tc.parent, uuid_by_name=uuid_by_name, hcg=self._hcg, realm=realm
+            )
+            if tc.parent
+            else None
+        )
+        parent_uuid = resolved_parent or realm_root_uuid
+        # parent_resolution: Hermes named a parent that RESOLVED (even if it is a
+        # realm root, e.g. "entity"). root_fallback: no usable parent was given /
+        # it did not resolve, so we defaulted to the source realm root. Keeping
+        # these distinct preserves event-bus traceability -- an explicit-root
+        # graft and an unresolvable-parent fallback are different stories
+        # (greptile #201).
+        placed_by = (
+            "parent_resolution" if resolved_parent is not None else "root_fallback"
+        )
 
         # Mint a new type under the chosen parent. mint_type writes the type's
         # own type->parent IS_A edge (carrying placed_by) but does NOT touch the
