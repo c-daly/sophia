@@ -19,9 +19,8 @@ class TestMaintenanceConfig:
         assert config.threshold_enabled is True
         assert config.type_member_count_threshold == 100
         assert config.max_concurrent_jobs == 2
-        # Rollup (revision) tier is deferred for naming-driven-typing B1 and
-        # gated OFF by default until it is converted onto placement.py.
-        assert config.rollup_enabled is False
+        # Rollup is fully edge-based after #209; enabled by default.
+        assert config.rollup_enabled is True
 
     def test_env_override(self):
         with mock.patch.dict(

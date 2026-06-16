@@ -314,23 +314,42 @@ class TypeRollupHandler:
         return explicit_children
 
     def _type_uuid_map(self, node_uuids: list[str]) -> dict[str, str]:
-        # TODO #35: read still infers membership from property; convert to IS_A walk
-        # Resolve in chunks: a single get_nodes_batch over every member uuid can
-        # exceed query-size/timeout limits on a large graph (gemini #161).
+        # Derive each node's type-uuid from the TARGET of its outgoing IS_A edge
+        # (#209). On a positional/reseeded graph there is no `type_uuid` property;
+        # the IS_A edge is the sole membership fact (placement.py L198). This aligns
+        # the rollup READ path with the placement WRITE path.
+        #
+        # Chunk the loop to stay within query-size/timeout limits on a large graph
+        # (same 500-chunk guard retained from the old get_nodes_batch path, gemini
+        # #161). Each uuid gets at most one IS_A edge under the single-upward-pointer
+        # invariant; if multiple edges exist we prefer a non-protected-root target
+        # (avoiding realm roots as the type identity of members), then take the first
+        # deterministically.
         out: dict[str, str] = {}
         chunk = 500
         for i in range(0, len(node_uuids), chunk):
-            try:
-                nodes = self._hcg.get_nodes_batch(node_uuids[i : i + chunk]) or []
-            except Exception:
-                logger.exception("type_rollup: get_nodes_batch failed")
-                continue
-            for n in nodes:
-                if not n or "uuid" not in n:
+            for uuid in node_uuids[i : i + chunk]:
+                try:
+                    edges = self._hcg.query_edges_from(uuid) or []
+                except Exception:
+                    logger.exception(
+                        "type_rollup: query_edges_from failed for %s", uuid
+                    )
                     continue
-                tu = n.get("type_uuid") or (n.get("properties") or {}).get("type_uuid")
-                if tu:
-                    out[n["uuid"]] = tu
+                is_a_targets = [
+                    e["target"]
+                    for e in edges
+                    if e.get("relation") == "IS_A" and e.get("target")
+                ]
+                if not is_a_targets:
+                    continue
+                # Prefer a non-realm-root target so realm-root membership doesn't
+                # mask the type identity of a leaf instance; fall back to first.
+                chosen = next(
+                    (t for t in is_a_targets if t not in self._protected_root_uuids),
+                    is_a_targets[0],
+                )
+                out[uuid] = chosen
         return out
 
     # ------------------------------------------------------------ tier 2
