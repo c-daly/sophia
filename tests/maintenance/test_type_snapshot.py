@@ -86,3 +86,25 @@ def test_fail_soft_on_graph_error() -> None:
     hcg.get_all_type_definitions.side_effect = RuntimeError("neo4j down")
     assert publish_type_snapshot(hcg, redis) == 0
     redis.set.assert_not_called()
+
+def test_name_collision_logs_warning(caplog) -> None:
+    """Same-name types produce a warning; the second clobbers the first."""
+    import logging
+    redis = MagicMock()
+    hcg = _hcg(
+        [
+            {"uuid": "u-alpha", "name": "engine", "properties": {"member_count": 2}},
+            {"uuid": "u-beta", "name": "engine", "properties": {"member_count": 7}},
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="sophia.maintenance.type_snapshot"):
+        count = publish_type_snapshot(hcg, redis)
+
+    # Only one key written (collision); last wins
+    assert count == 1
+    _, payload = redis.set.call_args[0]
+    written = json.loads(payload)
+    assert written["engine"]["uuid"] == "u-beta"
+    # Warning was emitted
+    assert any("collision" in r.message for r in caplog.records)

@@ -53,6 +53,10 @@ def online_mean_add(
     sums = [sum(e[i] for e in vecs) for i in range(dim)]
     if not centroid or n <= 0:
         return [s / k for s in sums]
+    assert len(centroid) == dim, (
+        f"online_mean_add: centroid dim {len(centroid)} != new-vec dim {dim}; "
+        "dimension mismatch should be caught at Milvus write time"
+    )
     return [(centroid[i] * n + sums[i]) / (n + k) for i in range(dim)]
 
 

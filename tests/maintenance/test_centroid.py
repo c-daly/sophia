@@ -141,3 +141,9 @@ def test_reconcile_skips_mixed_model():
 
 def test_reconcile_fail_soft_on_none():
     assert reconcile_centroids(None, None)["written"] == 0
+
+def test_online_mean_add_raises_on_dim_mismatch():
+    """online_mean_add raises AssertionError when existing centroid dim != new-vec dim."""
+    import pytest
+    with pytest.raises(AssertionError, match="dimension mismatch"):
+        online_mean_add([1.0, 2.0], 3, [[1.0, 2.0, 3.0]])  # centroid dim=2, vec dim=3

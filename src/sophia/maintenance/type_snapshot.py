@@ -41,6 +41,14 @@ def publish_type_snapshot(hcg: Any, redis: Any) -> int:
             member_count = (
                 props.get("member_count", 0) if isinstance(props, dict) else 0
             )
+            if name in snapshot:
+                logger.warning(
+                    "publish_type_snapshot: name collision %r (uuid %s clobbers %s); "
+                    "only the last will be visible to TypeRegistry",
+                    name,
+                    record.get("uuid", ""),
+                    snapshot[name].get("uuid", ""),
+                )
             snapshot[name] = {
                 "uuid": record.get("uuid", ""),
                 "member_count": member_count,

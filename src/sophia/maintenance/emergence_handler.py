@@ -415,10 +415,16 @@ class EmergenceHandler:
                 bump_centroid(self._milvus, type_uuid, embs, n_before, model=model)
 
     def _member_count(self, type_uuid: str) -> int:
-        """Direct-member in-degree of a type (cheap); 0 on any failure."""
+        """Direct content-member in-degree of a type (cheap); 0 on any failure.
+
+        Uses the :FROM leg to reach the source node, matching only content-node
+        members (the same pattern as ``_member_uuids`` in centroid.py). Without
+        the :FROM leg, child-type taxonomy edges (child_type IS_A parent_type)
+        would also be counted, inflating n_before for ``online_mean_add``.
+        """
         try:
             rows = self._hcg._execute_read(
-                'MATCH (:Node {relation: "IS_A"})-[:TO]->(t:Node {uuid: $u}) '
+                'MATCH (:Node)<-[:FROM]-(:Node {relation: "IS_A"})-[:TO]->(t:Node {uuid: $u}) '
                 "RETURN count(*) AS n",
                 {"u": type_uuid},
             )
