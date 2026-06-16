@@ -1267,3 +1267,50 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
         and e["relation"] == "IS_A"
         for e in hcg.edges
     )
+
+
+def test_accreted_content_node_cannot_shadow_protected_root_in_root_uuid_by_name():
+    """An accreted content node named 'entity' must not overwrite the seeded
+    realm-root uuid in _root_uuid_by_name / _entity_root_uuid.
+
+    In the original last-wins dict comprehension, if get_all_type_definitions()
+    returned the content node AFTER the seeded root, the content node's uuid
+    would win, causing every domain graft to land under the wrong parent.
+
+    The fix: for protected root names, the candidate with the fewest ancestors
+    (i.e. structurally highest -- the seeded root) always wins, regardless of
+    iteration order.
+    """
+    # Seeded entity root: no ancestors (typical seeded root shape).
+    seeded_entity = {
+        "uuid": "type_entity_seeded",
+        "name": "entity",
+        "properties": {"type": "type_definition"},  # no 'ancestors' key
+    }
+    # Accreted content node that shares the protected name "entity".
+    # It sits deeper: ancestors = ["root", "node", "entity", "thing"].
+    accreted_entity = {
+        "uuid": "accreted_entity_node",
+        "name": "entity",
+        "properties": {
+            "type": "type_definition",
+            "ancestors": ["root", "node", "entity", "thing"],
+        },
+    }
+    # Build with accreted node listed LAST so last-wins would give the wrong uuid.
+    tds = [seeded_entity, accreted_entity]
+    hcg = FakeHCG(tds)
+    handler = _handler(hcg, FakeMilvus({}))
+    handler._load_type_layer()
+
+    # The seeded root (zero ancestors depth) must win the "entity" slot.
+    assert handler._root_uuid_by_name.get("entity") == "type_entity_seeded", (
+        "_root_uuid_by_name['entity'] was shadowed by the accreted content node"
+    )
+    # _entity_root_uuid is derived directly from _root_uuid_by_name in run();
+    # set it the same way to verify the derivation produces the right uuid.
+    from sophia.maintenance.type_rollup_handler import _BASE_TYPE
+    entity_uuid = handler._root_uuid_by_name.get(_BASE_TYPE)
+    assert entity_uuid == "type_entity_seeded", (
+        "_entity_root_uuid would resolve to the wrong (accreted) node"
+    )

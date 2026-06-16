@@ -189,10 +189,35 @@ class TypeRollupHandler:
         # Full positional name -> uuid (incl. the seeded realm/protected roots,
         # which are NOT rollup candidates). This is how root parents resolve to
         # their REAL uuids by name, replacing the old `type_<name>` slug.
+        #
+        # Protected-root precedence: an accreted content node that happens to
+        # share a protected realm-root name (e.g. a minted "entity" or "concept"
+        # type-def) must NEVER overwrite the seeded realm-root uuid in this map.
+        # If it did, _entity_root_uuid / _protected_root_uuids would point at the
+        # accreted node and every subsequent graft would land under the wrong
+        # parent, silently corrupting the ontology hierarchy.
+        #
+        # The seeded structural root sits structurally higher than any accreted
+        # node of the same name: it has a shorter ancestors chain (["root","node"]
+        # vs. ["root","node","entity",...]).  We therefore resolve protected names
+        # by picking the candidate with the FEWEST ancestors -- ties go to the
+        # first entry (stable under repeated graph scans).  Non-protected names
+        # keep last-wins behaviour as before.
+        _all: dict[str, str] = {}
+        _protected_best: dict[str, tuple[int, str]] = {}  # name -> (depth, uuid)
+        for td in type_defs or []:
+            if not td.get("name") or not td.get("uuid"):
+                continue
+            key = td["name"].strip().lower()
+            _all[key] = td["uuid"]
+            if key in _PROTECTED_ROOT_NAMES:
+                depth = len((td.get("properties") or {}).get("ancestors") or [])
+                prev = _protected_best.get(key)
+                if prev is None or depth < prev[0]:
+                    _protected_best[key] = (depth, td["uuid"])
         self._root_uuid_by_name = {
-            (td.get("name") or "").strip().lower(): td["uuid"]
-            for td in (type_defs or [])
-            if td.get("name") and td.get("uuid")
+            **_all,
+            **{k: v for k, (_, v) in _protected_best.items()},
         }
         # Every node returned here is a type positionally; keep the uuid set so
         # `_build_is_a_adjacency` can keep to type-level IS_A edges.
