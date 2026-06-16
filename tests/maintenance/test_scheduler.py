@@ -304,8 +304,7 @@ class TestTypeSnapshotSync:
         self.mock_redis = MagicMock()
         self.mock_hcg = MagicMock()
         self.mock_hcg.get_all_type_definitions.return_value = [
-            {"uuid": "u-engine", "name": "engine",
-             "properties": {"member_count": 5}},
+            {"uuid": "u-engine", "name": "engine", "properties": {"member_count": 5}},
         ]
         config = MaintenanceConfig(enabled=True)
         self.scheduler = MaintenanceScheduler(

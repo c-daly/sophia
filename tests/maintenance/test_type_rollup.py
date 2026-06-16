@@ -1304,13 +1304,14 @@ def test_accreted_content_node_cannot_shadow_protected_root_in_root_uuid_by_name
     handler._load_type_layer()
 
     # The seeded root (zero ancestors depth) must win the "entity" slot.
-    assert handler._root_uuid_by_name.get("entity") == "type_entity_seeded", (
-        "_root_uuid_by_name['entity'] was shadowed by the accreted content node"
-    )
+    assert (
+        handler._root_uuid_by_name.get("entity") == "type_entity_seeded"
+    ), "_root_uuid_by_name['entity'] was shadowed by the accreted content node"
     # _entity_root_uuid is derived directly from _root_uuid_by_name in run();
     # set it the same way to verify the derivation produces the right uuid.
     from sophia.maintenance.type_rollup_handler import _BASE_TYPE
+
     entity_uuid = handler._root_uuid_by_name.get(_BASE_TYPE)
-    assert entity_uuid == "type_entity_seeded", (
-        "_entity_root_uuid would resolve to the wrong (accreted) node"
-    )
+    assert (
+        entity_uuid == "type_entity_seeded"
+    ), "_entity_root_uuid would resolve to the wrong (accreted) node"

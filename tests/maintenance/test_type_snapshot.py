@@ -19,10 +19,8 @@ def test_writes_name_keyed_snapshot() -> None:
     redis = MagicMock()
     hcg = _hcg(
         [
-            {"uuid": "u-engine", "name": "engine",
-             "properties": {"member_count": 5}},
-            {"uuid": "u-protein", "name": "protein",
-             "properties": {"member_count": 3}},
+            {"uuid": "u-engine", "name": "engine", "properties": {"member_count": 5}},
+            {"uuid": "u-protein", "name": "protein", "properties": {"member_count": 3}},
         ]
     )
 
@@ -87,9 +85,11 @@ def test_fail_soft_on_graph_error() -> None:
     assert publish_type_snapshot(hcg, redis) == 0
     redis.set.assert_not_called()
 
+
 def test_name_collision_logs_warning(caplog) -> None:
     """Same-name types produce a warning; the second clobbers the first."""
     import logging
+
     redis = MagicMock()
     hcg = _hcg(
         [

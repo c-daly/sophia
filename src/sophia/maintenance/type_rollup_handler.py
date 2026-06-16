@@ -221,9 +221,7 @@ class TypeRollupHandler:
         }
         # Every node returned here is a type positionally; keep the uuid set so
         # `_build_is_a_adjacency` can keep to type-level IS_A edges.
-        self._type_uuids = {
-            td["uuid"] for td in (type_defs or []) if td.get("uuid")
-        }
+        self._type_uuids = {td["uuid"] for td in (type_defs or []) if td.get("uuid")}
         rows: list[dict] = []
         for td in type_defs or []:
             if not _is_rollup_candidate(td):

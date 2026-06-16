@@ -11,6 +11,7 @@ Driven from three places so it stays in sync:
   - the maintenance scheduler's periodic loop (reconcile / safety net);
   - the ``ontology.type_created`` event (incremental, on emergence mint).
 """
+
 from __future__ import annotations
 
 import json

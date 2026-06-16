@@ -93,8 +93,8 @@ def test_bump_is_fail_soft():
 # ------------------------------------------------------------- reconcile_centroids
 class FakeHCG:
     def __init__(self, types, members):
-        self._types = types          # list of {uuid,name,...}
-        self._members = members      # {type_uuid: [member_uuid,...]}
+        self._types = types  # list of {uuid,name,...}
+        self._members = members  # {type_uuid: [member_uuid,...]}
 
     def get_all_type_definitions(self):
         return self._types
@@ -106,8 +106,8 @@ class FakeHCG:
 def test_reconcile_writes_content_types_skips_roots_and_nodata():
     types = [
         {"uuid": "engine", "name": "engine"},
-        {"uuid": "type_entity", "name": "entity"},      # protected root
-        {"uuid": "ghost", "name": "ghost"},             # members lack embeddings
+        {"uuid": "type_entity", "name": "entity"},  # protected root
+        {"uuid": "ghost", "name": "ghost"},  # members lack embeddings
     ]
     members = {"engine": ["m1", "m2"], "type_entity": ["e1"], "ghost": ["g1"]}
     content = {
@@ -122,7 +122,7 @@ def test_reconcile_writes_content_types_skips_roots_and_nodata():
 
     assert mv.centroids["engine"] == ([1.0, 1.0], "text-embedding-3-large")
     assert "type_entity" not in mv.centroids  # protected, skipped
-    assert "ghost" not in mv.centroids         # no member embeddings, skipped
+    assert "ghost" not in mv.centroids  # no member embeddings, skipped
     assert stats["written"] == 1
     assert stats["skipped_protected"] == 1
     assert stats["skipped_no_embeddings"] == 1
@@ -142,8 +142,10 @@ def test_reconcile_skips_mixed_model():
 def test_reconcile_fail_soft_on_none():
     assert reconcile_centroids(None, None)["written"] == 0
 
+
 def test_online_mean_add_raises_on_dim_mismatch():
     """online_mean_add raises AssertionError when existing centroid dim != new-vec dim."""
     import pytest
+
     with pytest.raises(AssertionError, match="dimension mismatch"):
         online_mean_add([1.0, 2.0], 3, [[1.0, 2.0, 3.0]])  # centroid dim=2, vec dim=3

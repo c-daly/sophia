@@ -157,12 +157,22 @@ def test_same_label_mints_are_distinct_no_overwrite():
     name = NameResult(label="concept", description="", confidence=0.8)
 
     uuid_a = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus,
-        source_cluster_id="a", parent_type_uuid="entity-uuid", realm="entity",
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="a",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
     uuid_b = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus,
-        source_cluster_id="b", parent_type_uuid="entity-uuid", realm="entity",
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="b",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
 
     assert uuid_a != uuid_b
@@ -186,8 +196,13 @@ def test_messy_label_is_not_encoded_in_the_opaque_uuid():
     name = NameResult(label="Living Thing!", description="", confidence=0.7)
 
     type_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus,
-        source_cluster_id="cl1", parent_type_uuid="entity-uuid", realm="entity",
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
 
     assert not type_uuid.startswith("type_")
@@ -218,8 +233,13 @@ def test_mint_does_not_touch_member_is_a_edges():
     name = NameResult(label="hammer", description="", confidence=0.8)
 
     new_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=FakeMilvus(),
-        source_cluster_id="cl", parent_type_uuid=parent, realm="entity",
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=FakeMilvus(),
+        source_cluster_id="cl",
+        parent_type_uuid=parent,
+        realm="entity",
     )
 
     # mint touches no member: no edge created/deleted, no property stamped.
@@ -291,8 +311,13 @@ def test_mint_omits_placed_by_property_when_absent():
     name = NameResult(label="boat", description="", confidence=0.8)
 
     type_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus,
-        source_cluster_id="cl1", parent_type_uuid="entity-uuid", realm="entity",
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
 
     idx = hcg.edges.index((type_uuid, "entity-uuid", "IS_A"))

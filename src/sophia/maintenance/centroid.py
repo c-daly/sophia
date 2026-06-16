@@ -18,6 +18,7 @@ centroid is their mean, and the ``embedding_model`` label is read off the
 existing vectors (the vector's dimension is the real invariant -- sophia rejects
 a dim mismatch at write time -- so the label is metadata, never fabricated).
 """
+
 from __future__ import annotations
 
 import logging
@@ -108,8 +109,13 @@ def reconcile_centroids(hcg: Any, milvus: Any) -> dict[str, int]:
     protected/reserved roots and any type whose members lack embeddings or carry
     more than one model (no fabrication). Returns a small stats dict; fail-soft.
     """
-    stats = {"written": 0, "skipped_protected": 0, "skipped_no_embeddings": 0,
-             "skipped_mixed_model": 0, "errors": 0}
+    stats = {
+        "written": 0,
+        "skipped_protected": 0,
+        "skipped_no_embeddings": 0,
+        "skipped_mixed_model": 0,
+        "errors": 0,
+    }
     if hcg is None or milvus is None:
         return stats
     try:
@@ -123,8 +129,10 @@ def reconcile_centroids(hcg: Any, milvus: Any) -> dict[str, int]:
         name = (t.get("name") or "").strip().lower()
         if not tu:
             continue
-        if name in _PROTECTED_ROOT_NAMES or name.startswith("_") or name.startswith(
-            "reserved_"
+        if (
+            name in _PROTECTED_ROOT_NAMES
+            or name.startswith("_")
+            or name.startswith("reserved_")
         ):
             stats["skipped_protected"] += 1
             continue
