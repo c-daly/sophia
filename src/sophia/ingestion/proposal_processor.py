@@ -290,11 +290,21 @@ class ProposalProcessor:
             # the type-definition catalog so each new instance can be parked under
             # its realm via an IS_A edge (#505). Mirrors the maintenance tier's
             # name->uuid resolution (emergence_handler); built once per batch.
-            uuid_by_name = {
-                n["name"].strip().lower(): n["uuid"]
-                for n in self._hcg.get_all_type_definitions()
-                if n.get("name") and n.get("uuid")
-            }
+            # Fail-soft: if the catalog query fails (e.g. Neo4j transient error),
+            # proceed with an empty map -- nodes are created but left unparked
+            # (the maintenance reconcile loop re-parks them later).
+            try:
+                uuid_by_name = {
+                    n["name"].strip().lower(): n["uuid"]
+                    for n in self._hcg.get_all_type_definitions()
+                    if n.get("name") and n.get("uuid")
+                }
+            except Exception:
+                logger.exception(
+                    "ingest: failed to fetch realm-root catalog; nodes will be "
+                    "created unparked and re-parked by the reconcile loop"
+                )
+                uuid_by_name = {}
 
             with tracer.start_as_current_span("proposal_processor.ingest_nodes"):
                 for proposed in proposal.get("proposed_nodes", []):

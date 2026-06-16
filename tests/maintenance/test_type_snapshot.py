@@ -86,9 +86,14 @@ def test_fail_soft_on_graph_error() -> None:
     redis.set.assert_not_called()
 
 
-def test_name_collision_logs_warning(caplog) -> None:
-    """Same-name types produce a warning; the second clobbers the first."""
-    import logging
+def test_name_collision_logs_warning() -> None:
+    """Same-name types produce a warning; the second clobbers the first.
+
+    Uses unittest.mock to capture the warning directly on the module logger so
+    the test is not sensitive to whether a parent logger (e.g. "sophia") has
+    propagate=False (which breaks caplog when API tests run in the same session).
+    """
+    from unittest.mock import patch
 
     redis = MagicMock()
     hcg = _hcg(
@@ -98,7 +103,7 @@ def test_name_collision_logs_warning(caplog) -> None:
         ]
     )
 
-    with caplog.at_level(logging.WARNING, logger="sophia.maintenance.type_snapshot"):
+    with patch("sophia.maintenance.type_snapshot.logger") as mock_logger:
         count = publish_type_snapshot(hcg, redis)
 
     # Only one key written (collision); last wins
@@ -107,4 +112,6 @@ def test_name_collision_logs_warning(caplog) -> None:
     written = json.loads(payload)
     assert written["engine"]["uuid"] == "u-beta"
     # Warning was emitted
-    assert any("collision" in r.message for r in caplog.records)
+    mock_logger.warning.assert_called_once()
+    warning_args = mock_logger.warning.call_args[0]
+    assert "collision" in warning_args[0]

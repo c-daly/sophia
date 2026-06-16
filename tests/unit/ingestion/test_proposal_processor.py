@@ -1339,8 +1339,12 @@ class TestProposalProcessorRedisSnapshot:
         # Should not raise even without redis_client
         result = processor.process(self._make_proposal())
         assert "stored_node_ids" in result
-        # get_all_type_definitions should NOT be called for type snapshot when no redis
-        mock_hcg.get_all_type_definitions.assert_not_called()
+        # With the positional model, get_all_type_definitions is called during
+        # ingest to build the realm-root catalog (uuid_by_name) regardless of
+        # whether redis is configured -- it is NOT a snapshot-only call. The
+        # snapshot write is skipped because publish_type_snapshot short-circuits
+        # when redis is None. Verify processing succeeded without raising.
+        assert isinstance(result["stored_node_ids"], list)
 
     def test_process_redis_write_failure_does_not_break_processing(self):
         """If the Redis snapshot write fails, neither construction nor
@@ -1462,11 +1466,20 @@ class TestRealmTriage:
 
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "node-1"
-        mock_hcg.list_all_nodes.return_value = [
-            {"name": "entity", "uuid": "realm-entity", "type": "type_definition"},
-            {"name": "concept", "uuid": "realm-concept", "type": "type_definition"},
-            {"name": "process", "uuid": "realm-process", "type": "type_definition"},
+        # Positional model: realm roots are discovered via get_all_type_definitions,
+        # not list_all_nodes. Provide uuid+name so uuid_by_name is populated.
+        mock_hcg.get_all_type_definitions.return_value = [
+            {"name": "entity", "uuid": "realm-entity"},
+            {"name": "concept", "uuid": "realm-concept"},
+            {"name": "process", "uuid": "realm-process"},
         ]
+        # placement._walk_to_realm calls get_node to confirm a node is a realm root.
+        _realm_nodes = {
+            "realm-entity": {"name": "entity", "uuid": "realm-entity"},
+            "realm-concept": {"name": "concept", "uuid": "realm-concept"},
+            "realm-process": {"name": "process", "uuid": "realm-process"},
+        }
+        mock_hcg.get_node.side_effect = lambda uuid: _realm_nodes.get(uuid, {})
         mock_hcg.query_edges_from.return_value = []
         mock_hcg.add_edge.return_value = "edge-1"
 
