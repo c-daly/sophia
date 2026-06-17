@@ -621,6 +621,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 config=_maintenance_config,
                 handlers=_handlers,
                 hcg_client=_hcg_client,
+                redis_client=_maint_redis,
             )
             _maintenance_task = asyncio.create_task(_maintenance_scheduler.start())
             logger.info("Maintenance scheduler started")

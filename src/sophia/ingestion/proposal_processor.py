@@ -8,12 +8,12 @@ Sophia operates on embeddings, not text. Text properties exist on nodes
 for Hermes's benefit when context is returned.
 """
 
-import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal, Tuple
 
 from sophia.maintenance import placement
+from sophia.maintenance.type_snapshot import publish_type_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -199,28 +199,13 @@ class ProposalProcessor:
             logger.exception("Failed to publish proposal_processed event")
 
     def _write_type_snapshot(self) -> None:
-        """Write full type list to Redis for Hermes initial sync."""
-        if self._redis is None:
-            return
-        try:
-            records = self._hcg.get_all_type_definitions()
-            snapshot: dict[str, dict[str, Any]] = {}
-            for record in records:
-                name = record.get("name", "")
-                if not name:
-                    continue
-                props = record.get("properties")
-                if isinstance(props, dict):
-                    member_count = props.get("member_count", 0)
-                else:
-                    member_count = 0
-                snapshot[name] = {
-                    "uuid": record.get("uuid", ""),
-                    "member_count": member_count,
-                }
-            self._redis.set("logos:ontology:types", json.dumps(snapshot))
-        except Exception:
-            logger.exception("Failed to write type snapshot to Redis")
+        """Write full type list to Redis for Hermes initial sync.
+
+        Delegates to the shared positional snapshot writer so ingest, the
+        scheduler reconcile loop, and the emergence event all produce an
+        identical snapshot of the real (incoming-IS_A) type layer.
+        """
+        publish_type_snapshot(self._hcg, self._redis)
 
     def process(self, proposal: dict) -> dict:
         """Process a proposal: search for context, decide what to ingest."""
@@ -305,11 +290,21 @@ class ProposalProcessor:
             # the type-definition catalog so each new instance can be parked under
             # its realm via an IS_A edge (#505). Mirrors the maintenance tier's
             # name->uuid resolution (emergence_handler); built once per batch.
-            uuid_by_name = {
-                n["name"].strip().lower(): n["uuid"]
-                for n in self._hcg.list_all_nodes(node_type="type_definition")
-                if n.get("name") and n.get("uuid")
-            }
+            # Fail-soft: if the catalog query fails (e.g. Neo4j transient error),
+            # proceed with an empty map -- nodes are created but left unparked
+            # (the maintenance reconcile loop re-parks them later).
+            try:
+                uuid_by_name = {
+                    n["name"].strip().lower(): n["uuid"]
+                    for n in self._hcg.get_all_type_definitions()
+                    if n.get("name") and n.get("uuid")
+                }
+            except Exception:
+                logger.exception(
+                    "ingest: failed to fetch realm-root catalog; nodes will be "
+                    "created unparked and re-parked by the reconcile loop"
+                )
+                uuid_by_name = {}
 
             with tracer.start_as_current_span("proposal_processor.ingest_nodes"):
                 for proposed in proposal.get("proposed_nodes", []):

@@ -21,7 +21,6 @@ existing same-name type is the caller's job -- see
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -31,21 +30,6 @@ from sophia.maintenance.emergence_types import EmergentCluster, NameResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "all-MiniLM-L6-v2"
-
-
-def _slugify(label: str) -> str:
-    """Normalize a free-text Hermes label into a slug-safe identifier component.
-
-    ``name.label`` comes verbatim from Hermes' JSON response and flows into the
-    ``type_uuid``, the node ``type`` property, and event payloads. A multi-word
-    or punctuated label (e.g. ``"living thing"``, ``"sub-class"``) would inject
-    spaces/punctuation into the graph's type namespace and corrupt subsequent
-    lookups (greptile review #149). Lowercase and collapse any run of
-    non-alphanumeric characters to a single underscore; fall back to ``unnamed``
-    so the identifier is never empty (uniqueness still comes from the uuid suffix).
-    """
-    slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
-    return slug or "unnamed"
 
 
 def _mean_vector(vectors: list[list[float]]) -> list[float]:
@@ -61,21 +45,29 @@ def mint_type(
     hcg: Any,
     milvus: Any,
     source_cluster_id: str,
-    # Last-resort default only -- drainage callers always pass a real parent uuid.
-    parent_type_uuid: str = "type_entity",
+    # Required: drainage callers always resolve and pass a real parent uuid
+    # (a resolved parent or the source realm root). No `type_<name>` slug
+    # default -- type identity is an opaque uuid, never name-encoded.
+    parent_type_uuid: str,
+    # The realm this type roots into (entity/concept/process), stamped as the
+    # node `.type`. Type-ness itself is NOT stamped -- it is positional (the
+    # incoming IS_A edge); `.type` carries the realm, uniform with content nodes.
+    realm: str,
     placed_by: str | None = None,
 ) -> str:
-    """Create the type-definition node, seed its centroid, and wire its IS_A edge.
+    """Create the type node, seed its centroid, and wire its IS_A edge.
 
-    The type uuid carries a random suffix so that two clusters that Hermes
-    happens to name identically mint *distinct* type-definition nodes (and
-    distinct centroids) instead of overwriting each other. Members are NOT
-    touched here -- membership is the instance->type IS_A edge, re-pointed onto
-    this type by the draining caller through ``placement.reparent`` (B2/B3,
-    DESIGN §3).
+    The type uuid is an opaque ``uuid4`` -- type identity is positional (the
+    incoming IS_A edges), NOT encoded in the uuid. The node ``.type`` holds the
+    REALM (entity/concept/process), the same field content nodes use; "is this a
+    type?" is answered positionally (does anything IS_A it?), never by a stored
+    ``type_definition`` label. Two clusters Hermes happens to name identically
+    still mint *distinct* type nodes (distinct uuids, distinct centroids).
+    Members are NOT touched here -- membership is the instance->type IS_A edge,
+    re-pointed onto this type by the draining caller through
+    ``placement.reparent`` (B2/B3, DESIGN §3).
     """
-    slug = _slugify(name.label)
-    type_uuid = f"type_{slug}_{uuid4().hex[:8]}"
+    type_uuid = str(uuid4())
     now = datetime.now(timezone.utc).isoformat()
     name_history = [
         {
@@ -88,12 +80,13 @@ def mint_type(
     ]
     hcg.add_node(
         name=name.label,
-        node_type="type_definition",
+        node_type=realm,
         uuid=type_uuid,
         properties={
-            # No `is_type_definition` flag (#171): the type layer is detected
-            # structurally via node_type="type_definition" + the type_ uuid.
-            # No `ancestors` snapshot either: the IS_A edge below IS the
+            # No `is_type_definition` flag and no `type_`-encoded uuid: the type
+            # layer is detected POSITIONALLY (a node is a type iff it has an
+            # incoming IS_A edge), not from the uuid or a stored flag. No
+            # `ancestors` snapshot either: the IS_A edge below IS the
             # membership/typing structure, walked on demand (DESIGN §3).
             "name_history": name_history,
         },

@@ -20,6 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 from sophia.maintenance import placement
+from sophia.maintenance.centroid import bump_centroid
 from sophia.maintenance.config import MaintenanceConfig
 from sophia.maintenance.emergence_clustering import find_emergent_clusters
 from sophia.maintenance.emergence_types import EmergentCluster, Member, NameResult
@@ -54,19 +55,22 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def _type_name(type_uuid: str) -> str:
-    """Best-effort label from a type-definition uuid.
+    """Best-effort display handle for a type uuid.
 
-    Minted uuids are ``type_<label>_<hex8>`` and base/legacy ones ``type_<name>``.
-    Used only as the ``current_type`` display fallback in :func:`_build_member`;
-    membership itself is the IS_A edge, never this slug (B2/B3, DESIGN §3).
+    Type uuids are now opaque (``uuid4``) and carry no embedded name -- the name
+    lives on the node, and membership is the IS_A edge, never the uuid (B2/B3,
+    DESIGN §3). Used only as the ``current_type`` display fallback in
+    :func:`_build_member`, so returning the uuid verbatim is sufficient; the
+    legacy ``type_<name>`` prefix is no longer parsed.
     """
-    return type_uuid[len("type_") :] if type_uuid.startswith("type_") else type_uuid
+    return type_uuid
 
 
 def current_categories(hcg: Any) -> list[str]:
-    """Existing type-definition labels, excluding `entity` and reserved_* types."""
+    """Existing type names (positional: nodes with incoming IS_A), excluding
+    `entity` and reserved_* types."""
     out: list[str] = []
-    for node in hcg.list_all_nodes(node_type="type_definition"):
+    for node in hcg.get_all_type_definitions():
         name = node.get("name")
         if not name or name == "entity" or name.startswith("reserved_"):
             continue
@@ -200,7 +204,7 @@ class EmergenceHandler:
         # `type_<name>` slug (DESIGN sec 3).
         uuid_by_name = {
             n["name"].strip().lower(): n["uuid"]
-            for n in self._hcg.list_all_nodes(node_type="type_definition")
+            for n in self._hcg.get_all_type_definitions()
             if n.get("name") and n.get("uuid")
         }
 
@@ -343,6 +347,7 @@ class EmergenceHandler:
             milvus=self._milvus,
             source_cluster_id=uuid_lib.uuid4().hex[:8],
             parent_type_uuid=parent_uuid,
+            realm=realm,
             placed_by=placed_by,
         )
         # Re-point each fitting member's instance->type IS_A edge onto the
@@ -385,6 +390,14 @@ class EmergenceHandler:
         is stamped. Members are leaves, so the cycle guard is trivially false and
         the type-layer hierarchy in ``children_of`` is unaffected.
         """
+        # Incremental centroid maintenance fires ONLY on the attach path
+        # (placed_by == "name_reuse"): we add members to a PRE-EXISTING type, so
+        # its centroid must fold them in. On the mint path mint_type already
+        # built the centroid from these same founding members -> bumping would
+        # double-count. Members are leaves, so a member's embedding IS its
+        # representation (no subtree walk). n = direct-member count BEFORE attach.
+        attach = placed_by == "name_reuse"
+        n_before = self._member_count(type_uuid) if attach else 0
         for member in members:
             placement.reparent(
                 member.uuid,
@@ -393,6 +406,32 @@ class EmergenceHandler:
                 children_of=children_of,
                 placed_by=placed_by,
             )
+        if attach:
+            embs = [m.embedding for m in members if getattr(m, "embedding", None)]
+            if embs:
+                model = next(
+                    (m.model for m in members if getattr(m, "model", None)), None
+                )
+                bump_centroid(self._milvus, type_uuid, embs, n_before, model=model)
+
+    def _member_count(self, type_uuid: str) -> int:
+        """Direct content-member in-degree of a type (cheap); 0 on any failure.
+
+        Uses the :FROM leg to reach the source node, matching only content-node
+        members (the same pattern as ``_member_uuids`` in centroid.py). Without
+        the :FROM leg, child-type taxonomy edges (child_type IS_A parent_type)
+        would also be counted, inflating n_before for ``online_mean_add``.
+        """
+        try:
+            rows = self._hcg._execute_read(
+                'MATCH (:Node)<-[:FROM]-(:Node {relation: "IS_A"})-[:TO]->(t:Node {uuid: $u}) '
+                "RETURN count(*) AS n",
+                {"u": type_uuid},
+            )
+            return int(rows[0]["n"]) if rows else 0
+        except Exception:
+            logger.exception("emergence: member count failed for %s", type_uuid)
+            return 0
 
 
 def build_emergence_handler(

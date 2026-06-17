@@ -57,16 +57,17 @@ class MaintenanceConfig(BaseSettings):
         description="Discard Hermes cluster names below this confidence.",
     )
     rollup_enabled: bool = Field(
-        # The rollup (revision) tier's WRITE side is now on placement.py -- it
-        # re-points IS_A edges and writes no `ancestors` property (#24). It stays
-        # gated OFF because it still (a) resolves `type_<name>` slugs for realm
-        # roots, which dangle against the uuid5 seeder, and (b) infers membership
-        # by reading the `type`/`type_uuid` properties (#35). Both must go
-        # edge-based before it can run correctly on a reseeded graph.
-        default=False,
+        # The rollup is now fully edge-based (#209):
+        #   (a) realm roots are resolved by uuid positionally via _root_uuid_by_name
+        #       (landed in commit 5e8825b; no `type_<name>` slugs remain), and
+        #   (b) membership is derived from the IS_A edge target in _type_uuid_map,
+        #       not from the `type_uuid` / `type` property (which doesn't exist on
+        #       a reseeded graph).
+        # Both blockers are gone; the rollup can run on positional/reseeded graphs.
+        default=True,
         description="Run the periodic type-level rollup that groups the flat "
-        "layer of emergent types into super-types (#160). Disabled pending "
-        "realm-root uuid + read-path edge conversion (#35).",
+        "layer of emergent types into super-types (#160). Enabled after "
+        "edge-based realm-root resolution and IS_A-edge read-path (#209).",
     )
     rollup_interval_seconds: int = Field(
         default=600,

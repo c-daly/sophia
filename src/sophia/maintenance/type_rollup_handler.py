@@ -60,7 +60,9 @@ _GRAFTABLE_REALMS = frozenset({"entity", "concept", "process"})
 _PROTECTED_ROOT_NAMES = frozenset(
     {"root", "node", "entity", "concept", "cognition", "process"}
 )
-_PROTECTED_ROOT_UUIDS = frozenset(f"type_{n}" for n in _PROTECTED_ROOT_NAMES)
+# Their real uuids are resolved POSITIONALLY at run() time (name -> uuid from the
+# type layer), never assumed to be a `type_<name>` slug -- the seeder mints roots
+# with uuid5 ids and emergence mints opaque uuid4s, so a `type_` prefix is gone.
 
 # Member-relation labels that imply a type-level relationship.
 _PARENT_REL = {"HAS_PART", "INCLUDES", "COMPOSED_OF"}  # source-type is the PARENT
@@ -74,19 +76,17 @@ def _is_rollup_candidate(td: dict) -> bool:
     """A non-reserved entity-side type-def (seeded or minted) eligible for rollup."""
     name = (td.get("name") or "").strip()
     uuid = td.get("uuid") or ""
-    if not name or not uuid.startswith("type_"):
+    if not name or not uuid:
         return False
     if name in _PROTECTED_ROOT_NAMES or name.startswith("reserved_"):
         return False
-    props = td.get("properties") or {}
-    # Structural type-layer detection (#171). The foundry is structure-not-
-    # flags: add_node/the seeder never write an `is_type_definition` flag, so
-    # filtering on it dropped every seeded root. The node `type` is set to
-    # "type_definition" by BOTH the seeder and type_minting, and every record
-    # reaching this predicate comes through get_all_type_definitions(), which
-    # returns the full node map nested under `properties` -- that is the ONE
-    # canonical shape, so no flattened-record tolerance (PR #173 review).
-    return props.get("type") == "type_definition"
+    # Every record reaching here came from get_all_type_definitions(), i.e. it is
+    # already a type POSITIONALLY (a node with an incoming IS_A edge). Neither the
+    # `type_definition` label nor a `type_`-prefixed uuid is consulted -- the IS_A
+    # subgraph is the sole definition of "is a type". Non-reserved, non-protected
+    # types (whatever their uuid scheme: uuid5 seed roots, opaque uuid4 mints, or
+    # accreted content nodes like `engine`) are all eligible to roll up.
+    return True
 
 
 class TypeRollupHandler:
@@ -116,6 +116,14 @@ class TypeRollupHandler:
         self._children_of: dict[str, list[str]] = {}
         self._name_of: dict[str, str] = {}
         self._uuid_by_name: dict[str, str] = {}
+        # Positional root resolution (name -> real uuid for the seeded roots),
+        # built from the full type layer so we never assume a `type_<name>` slug.
+        self._root_uuid_by_name: dict[str, str] = {}
+        self._entity_root_uuid: str | None = None
+        self._protected_root_uuids: frozenset[str] = frozenset()
+        # All positional type uuids (nodes with an incoming IS_A), for telling
+        # type-level IS_A edges (type IS_A type) from instance-level ones.
+        self._type_uuids: set[str] = set()
 
     # ------------------------------------------------------------------ pass
     def run(self) -> None:
@@ -133,14 +141,21 @@ class TypeRollupHandler:
         # match a coined label and never bypass the reuse / protected-root guards
         # (review #165: case-insensitive lookup on the name->uuid map).
         self._uuid_by_name = {r["name"].strip().lower(): r["uuid"] for r in rows}
-        # Tier-2 fallback parent for residual types. Realm roots are NOT in
-        # `_uuid_by_name` (it holds rollup candidates only), so this resolves to
-        # the `type_entity` SLUG today -- which is exactly what the tier-2
-        # top-level check (`parent_type_uuid == f"type_{_BASE_TYPE}"`) keys on.
-        # Against the uuid5 seeder that slug is dangling; reconciling realm roots
-        # to their real uuids is part of un-gating this tier (#35) -- which is
-        # why the tier stays gated OFF (config.rollup_enabled).
-        entity_root_uuid = self._uuid_by_name.get("entity") or "type_entity"
+        # Resolve the seeded roots to their REAL uuids positionally (by name from
+        # the full type layer), not the dangling `type_<name>` slug. Roots are not
+        # rollup candidates, so they live in `_root_uuid_by_name`, not `_uuid_by_name`.
+        self._entity_root_uuid = self._root_uuid_by_name.get(_BASE_TYPE)
+        self._protected_root_uuids = frozenset(
+            self._root_uuid_by_name[n]
+            for n in _PROTECTED_ROOT_NAMES
+            if n in self._root_uuid_by_name
+        )
+        if not self._entity_root_uuid:
+            logger.warning(
+                "type_rollup: entity root not found positionally; skipping pass"
+            )
+            return
+        entity_root_uuid = self._entity_root_uuid
 
         # Include the realm roots so Hermes can name one as a super-type's
         # parent: the rollup is the single authority that roots types under
@@ -171,6 +186,42 @@ class TypeRollupHandler:
         except Exception:
             logger.exception("type_rollup: failed to list type definitions")
             return []
+        # Full positional name -> uuid (incl. the seeded realm/protected roots,
+        # which are NOT rollup candidates). This is how root parents resolve to
+        # their REAL uuids by name, replacing the old `type_<name>` slug.
+        #
+        # Protected-root precedence: an accreted content node that happens to
+        # share a protected realm-root name (e.g. a minted "entity" or "concept"
+        # type-def) must NEVER overwrite the seeded realm-root uuid in this map.
+        # If it did, _entity_root_uuid / _protected_root_uuids would point at the
+        # accreted node and every subsequent graft would land under the wrong
+        # parent, silently corrupting the ontology hierarchy.
+        #
+        # The seeded structural root sits structurally higher than any accreted
+        # node of the same name: it has a shorter ancestors chain (["root","node"]
+        # vs. ["root","node","entity",...]).  We therefore resolve protected names
+        # by picking the candidate with the FEWEST ancestors -- ties go to the
+        # first entry (stable under repeated graph scans).  Non-protected names
+        # keep last-wins behaviour as before.
+        _all: dict[str, str] = {}
+        _protected_best: dict[str, tuple[int, str]] = {}  # name -> (depth, uuid)
+        for td in type_defs or []:
+            if not td.get("name") or not td.get("uuid"):
+                continue
+            key = td["name"].strip().lower()
+            _all[key] = td["uuid"]
+            if key in _PROTECTED_ROOT_NAMES:
+                depth = len((td.get("properties") or {}).get("ancestors") or [])
+                prev = _protected_best.get(key)
+                if prev is None or depth < prev[0]:
+                    _protected_best[key] = (depth, td["uuid"])
+        self._root_uuid_by_name = {
+            **_all,
+            **{k: v for k, (_, v) in _protected_best.items()},
+        }
+        # Every node returned here is a type positionally; keep the uuid set so
+        # `_build_is_a_adjacency` can keep to type-level IS_A edges.
+        self._type_uuids = {td["uuid"] for td in (type_defs or []) if td.get("uuid")}
         rows: list[dict] = []
         for td in type_defs or []:
             if not _is_rollup_candidate(td):
@@ -263,23 +314,42 @@ class TypeRollupHandler:
         return explicit_children
 
     def _type_uuid_map(self, node_uuids: list[str]) -> dict[str, str]:
-        # TODO #35: read still infers membership from property; convert to IS_A walk
-        # Resolve in chunks: a single get_nodes_batch over every member uuid can
-        # exceed query-size/timeout limits on a large graph (gemini #161).
+        # Derive each node's type-uuid from the TARGET of its outgoing IS_A edge
+        # (#209). On a positional/reseeded graph there is no `type_uuid` property;
+        # the IS_A edge is the sole membership fact (placement.py L198). This aligns
+        # the rollup READ path with the placement WRITE path.
+        #
+        # Chunk the loop to stay within query-size/timeout limits on a large graph
+        # (same 500-chunk guard retained from the old get_nodes_batch path, gemini
+        # #161). Each uuid gets at most one IS_A edge under the single-upward-pointer
+        # invariant; if multiple edges exist we prefer a non-protected-root target
+        # (avoiding realm roots as the type identity of members), then take the first
+        # deterministically.
         out: dict[str, str] = {}
         chunk = 500
         for i in range(0, len(node_uuids), chunk):
-            try:
-                nodes = self._hcg.get_nodes_batch(node_uuids[i : i + chunk]) or []
-            except Exception:
-                logger.exception("type_rollup: get_nodes_batch failed")
-                continue
-            for n in nodes:
-                if not n or "uuid" not in n:
+            for uuid in node_uuids[i : i + chunk]:
+                try:
+                    edges = self._hcg.query_edges_from(uuid) or []
+                except Exception:
+                    logger.exception(
+                        "type_rollup: query_edges_from failed for %s", uuid
+                    )
                     continue
-                tu = n.get("type_uuid") or (n.get("properties") or {}).get("type_uuid")
-                if tu:
-                    out[n["uuid"]] = tu
+                is_a_targets = [
+                    e["target"]
+                    for e in edges
+                    if e.get("relation") == "IS_A" and e.get("target")
+                ]
+                if not is_a_targets:
+                    continue
+                # Prefer a non-realm-root target so realm-root membership doesn't
+                # mask the type identity of a leaf instance; fall back to first.
+                chosen = next(
+                    (t for t in is_a_targets if t not in self._protected_root_uuids),
+                    is_a_targets[0],
+                )
+                out[uuid] = chosen
         return out
 
     # ------------------------------------------------------------ tier 2
@@ -298,7 +368,10 @@ class TypeRollupHandler:
                 name=r["name"],
                 embedding=r["centroid"],
                 signature=Counter(),
-                current_type="type_definition",
+                # These synthetic members ARE types (positionally); the naming
+                # context just marks them as such, matching emergence_clustering's
+                # generic "type" marker (no `type_definition` label anywhere).
+                current_type="type",
                 hermes_type_hint=None,
                 neighbors=[],
                 model=r["model"],
@@ -356,7 +429,7 @@ class TypeRollupHandler:
             # would duplicate the root, and reusing it would reparent it. If
             # Hermes labelled the cluster after a root, skip this super level and
             # attach the children directly under the current parent.
-            if f"type_{clean_label}" in _PROTECTED_ROOT_UUIDS:
+            if clean_label in _PROTECTED_ROOT_NAMES:
                 logger.info(
                     "type_rollup: cluster named after root %r -- skipping super level",
                     name.label,
@@ -373,7 +446,7 @@ class TypeRollupHandler:
             # the cluster's own members or the coined label itself. Degrades to
             # the default `entity` parent when nothing valid resolves.
             if (
-                parent_type_uuid == f"type_{_BASE_TYPE}"
+                parent_type_uuid == self._entity_root_uuid
                 and name.parent
                 and name.parent.strip().lower() != name.label.strip().lower()
             ):
@@ -398,7 +471,7 @@ class TypeRollupHandler:
             # the reuse branch's _reparent_one would then move the root into the
             # domain tree (no cycle, so the cycle guard cannot stop it). Treat a
             # realm-root hit as no-match -> mint a fresh super instead (blocker).
-            if super_uuid in _PROTECTED_ROOT_UUIDS:
+            if super_uuid in self._protected_root_uuids:
                 super_uuid = None
             if super_uuid is None:
                 # Name-based reconcile before minting: never create a second
@@ -429,6 +502,9 @@ class TypeRollupHandler:
                     milvus=self._milvus,
                     source_cluster_id=cid,
                     parent_type_uuid=parent_type_uuid,
+                    # The super roots into the realm of its graft parent.
+                    realm=placement.realm_of(parent_type_uuid, hcg=self._hcg)
+                    or _BASE_TYPE,
                 )
                 if name.label not in candidates:
                     candidates.append(name.label)
@@ -493,8 +569,10 @@ class TypeRollupHandler:
                 # Type-level hierarchy only. IS_A also carries instance taxonomy
                 # (e.g. `fish IS_A natural_resource`); walking those would let the
                 # cascade and cycle-check wander out of the type layer and report
-                # spurious cycles between unrelated types.
-                if src and tgt and src.startswith("type_") and tgt.startswith("type_"):
+                # spurious cycles between unrelated types. A type-level edge is one
+                # whose BOTH endpoints are positional types (in `_type_uuids`) --
+                # the child must itself be a type, not a leaf instance.
+                if src in self._type_uuids and tgt in self._type_uuids:
                     self._children_of[tgt].append(src)
         except Exception:
             logger.exception("type_rollup: build IS_A adjacency failed")
@@ -519,11 +597,13 @@ class TypeRollupHandler:
         if target in _PROTECTED_ROOT_NAMES:
             # A seeded root: only the graftable realms (entity / concept /
             # process) are valid; `cognition` and the structural roots are not.
-            # Resolve to the CANONICAL `type_<name>` uuid so a case-variant domain
-            # type-def cannot shadow the realm key (the run map is lowercased).
+            # Resolve to the root's REAL uuid positionally by name (the run map
+            # is lowercased, so a case-variant domain type-def cannot shadow it).
             if target not in _GRAFTABLE_REALMS:
                 return None
-            uuid = f"type_{target}"
+            uuid = self._root_uuid_by_name.get(target)
+            if not uuid:
+                return None
         else:
             # A deeper domain type Hermes named as the closest cover. Resolve it
             # via the run's name->uuid map (reserved/edge/protected types are

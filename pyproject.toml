@@ -35,7 +35,7 @@ urllib3 = "^2.5.0"
 redis = ">=5.0.0"
 pydantic-settings = ">=2.0.0"
 # Also provides: logos_config, logos_test_utils, logos_tools, logos_hcg
-logos-foundry = { git = "https://github.com/c-daly/logos.git", tag = "v0.7.3" }
+logos-foundry = { git = "https://github.com/c-daly/logos.git", tag = "v0.7.4" }
 # OpenTelemetry (optional, see [tool.poetry.extras])
 opentelemetry-api = {version = "^1.20.0", optional = true}
 opentelemetry-sdk = {version = "^1.20.0", optional = true}

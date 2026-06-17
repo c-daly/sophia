@@ -92,14 +92,21 @@ def test_mint_creates_type_node_and_centroid_without_touching_members():
     name = NameResult(label="concept", description="ideas", confidence=0.8)
 
     type_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="cl1"
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
 
-    # Unique suffix avoids same-label mints overwriting each other.
-    assert type_uuid.startswith("type_concept_")
-    assert type_uuid != "type_concept"
+    # Opaque uuid -- type identity is positional (incoming IS_A), never encoded
+    # in the uuid; the name lives on the node, not the id.
+    assert not type_uuid.startswith("type_")
+    assert "concept" not in type_uuid
 
-    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "entity"]
     assert len(tdef) == 1
     props = tdef[0]["properties"]
     assert "is_type_definition" not in props
@@ -117,9 +124,9 @@ def test_mint_creates_type_node_and_centroid_without_touching_members():
     assert hcg.updated == []
     assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
 
-    # The minted type IS_A its default parent (type_entity) -- this taxonomy edge
+    # The minted type IS_A the parent it was given -- this taxonomy edge
     # (type-definition -> parent type-definition) IS the structure and is KEPT.
-    assert (type_uuid, "type_entity", "IS_A") in hcg.edges
+    assert (type_uuid, "entity-uuid", "IS_A") in hcg.edges
 
 
 def test_mint_under_explicit_parent_creates_is_a_edge():
@@ -136,9 +143,10 @@ def test_mint_under_explicit_parent_creates_is_a_edge():
         milvus=milvus,
         source_cluster_id="cl1",
         parent_type_uuid="type_animal",
+        realm="entity",
     )
 
-    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "entity"]
     assert "ancestors" not in tdef[0]["properties"]
     assert (type_uuid, "type_animal", "IS_A") in hcg.edges
 
@@ -148,38 +156,62 @@ def test_same_label_mints_are_distinct_no_overwrite():
     hcg, milvus = FakeHCG(), FakeMilvus()
     name = NameResult(label="concept", description="", confidence=0.8)
 
-    uuid_a = mint_type(_cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="a")
-    uuid_b = mint_type(_cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="b")
+    uuid_a = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="a",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
+    )
+    uuid_b = mint_type(
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="b",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
+    )
 
     assert uuid_a != uuid_b
-    assert uuid_a.startswith("type_concept_")
-    assert uuid_b.startswith("type_concept_")
+    assert not uuid_a.startswith("type_") and not uuid_b.startswith("type_")
     assert uuid_a in milvus.centroids and uuid_b in milvus.centroids
     # Distinct taxonomy IS_A edges (minted type -> parent); the members are never
     # touched by mint -- membership is the instance->type IS_A edge, owned by the
     # draining caller (B2/B3).
-    assert (uuid_a, "type_entity", "IS_A") in hcg.edges
-    assert (uuid_b, "type_entity", "IS_A") in hcg.edges
+    assert (uuid_a, "entity-uuid", "IS_A") in hcg.edges
+    assert (uuid_b, "entity-uuid", "IS_A") in hcg.edges
     assert hcg.updated == []
     assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
 
 
-def test_messy_label_is_slugified_into_the_type_uuid():
-    """A multi-word/punctuated Hermes label must not inject spaces into the
-    type_uuid (greptile #149). The human-readable label is preserved in
+def test_messy_label_is_not_encoded_in_the_opaque_uuid():
+    """A multi-word/punctuated Hermes label encodes nothing into the uuid: the
+    uuid is opaque (uuid4), so spaces/punctuation can never leak into the id.
+    The human-readable label is preserved verbatim on the node name and in
     name_history. Members are not retyped here (membership is the IS_A edge)."""
     hcg, milvus = FakeHCG(), FakeMilvus()
     name = NameResult(label="Living Thing!", description="", confidence=0.7)
 
     type_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="cl1"
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
 
-    assert type_uuid.startswith("type_living_thing_")
+    assert not type_uuid.startswith("type_")
     assert " " not in type_uuid and "!" not in type_uuid
+    assert "living" not in type_uuid.lower()
     # Members are not touched -- no slug/type_uuid stamp.
     assert hcg.updated == []
-    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "entity"]
+    assert tdef[0]["name"] == "Living Thing!"
     assert tdef[0]["properties"]["name_history"][0]["name"] == "Living Thing!"
 
 
@@ -201,7 +233,13 @@ def test_mint_does_not_touch_member_is_a_edges():
     name = NameResult(label="hammer", description="", confidence=0.8)
 
     new_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=FakeMilvus(), source_cluster_id="cl"
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=FakeMilvus(),
+        source_cluster_id="cl",
+        parent_type_uuid=parent,
+        realm="entity",
     )
 
     # mint touches no member: no edge created/deleted, no property stamped.
@@ -209,9 +247,9 @@ def test_mint_does_not_touch_member_is_a_edges():
     assert hcg.updated == []
     assert not any(src in {"u1", "u2"} for src, _tgt, _rel in hcg.edges)
     # Only the taxonomy IS_A (new type -> parent) is created.
-    assert (new_uuid, "type_entity", "IS_A") in hcg.edges
+    assert (new_uuid, parent, "IS_A") in hcg.edges
     # Human-readable label preserved for display/lineage.
-    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "entity"]
     assert tdef[0]["properties"]["name_history"][0]["name"] == "hammer"
 
 
@@ -230,10 +268,11 @@ def test_mint_writes_no_ancestors_property():
         milvus=milvus,
         source_cluster_id="cl1",
         parent_type_uuid="type_animal",
+        realm="entity",
     )
 
     # The add_node call captured the node's properties kwarg.
-    tdef = [n for n in hcg.added_nodes if n["node_type"] == "type_definition"]
+    tdef = [n for n in hcg.added_nodes if n["node_type"] == "entity"]
     assert len(tdef) == 1
     props = tdef[0]["properties"]
     assert "ancestors" not in props
@@ -256,6 +295,7 @@ def test_mint_carries_placed_by_on_parent_is_a_edge():
         milvus=milvus,
         source_cluster_id="cl1",
         parent_type_uuid="type_vehicle",
+        realm="entity",
         placed_by="parent_resolution",
     )
 
@@ -271,8 +311,14 @@ def test_mint_omits_placed_by_property_when_absent():
     name = NameResult(label="boat", description="", confidence=0.8)
 
     type_uuid = mint_type(
-        _cluster(), name, hcg=hcg, milvus=milvus, source_cluster_id="cl1"
+        _cluster(),
+        name,
+        hcg=hcg,
+        milvus=milvus,
+        source_cluster_id="cl1",
+        parent_type_uuid="entity-uuid",
+        realm="entity",
     )
 
-    idx = hcg.edges.index((type_uuid, "type_entity", "IS_A"))
+    idx = hcg.edges.index((type_uuid, "entity-uuid", "IS_A"))
     assert hcg.edge_props[idx] is None
