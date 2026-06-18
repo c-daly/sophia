@@ -358,7 +358,15 @@ class TestProposalProcessor:
 
         # Should have resolved "France" via batch find_nodes_by_names
         assert len(result["stored_edge_ids"]) == 1
-        mock_hcg.find_nodes_by_names.assert_called_once()
+        # Exclude the ingest realm-park lookup (entity/concept/process); the edge
+        # names must be batch-resolved in a single call.
+        edge_lookups = [
+            c
+            for c in mock_hcg.find_nodes_by_names.call_args_list
+            if (c.args[0] if c.args else c.kwargs.get("names"))
+            != ["entity", "concept", "process"]
+        ]
+        assert len(edge_lookups) == 1
         # Individual find_node_by_name should NOT be called
         mock_hcg.find_node_by_name.assert_not_called()
 
@@ -419,10 +427,16 @@ class TestProposalProcessor:
 
         # Both edges should be created
         assert len(result["stored_edge_ids"]) == 2
-        # Batch call made once with both unresolved names
-        mock_hcg.find_nodes_by_names.assert_called_once()
-        call_args = mock_hcg.find_nodes_by_names.call_args[0][0]
-        assert set(call_args) == {"France", "Europe"}
+        # Batch call made once with both unresolved names (excluding the ingest
+        # realm-park lookup of entity/concept/process).
+        edge_lookups = [
+            c
+            for c in mock_hcg.find_nodes_by_names.call_args_list
+            if (c.args[0] if c.args else c.kwargs.get("names"))
+            != ["entity", "concept", "process"]
+        ]
+        assert len(edge_lookups) == 1
+        assert set(edge_lookups[0].args[0]) == {"France", "Europe"}
         # No individual lookups
         mock_hcg.find_node_by_name.assert_not_called()
 
@@ -530,9 +544,16 @@ class TestProposalProcessor:
             }
         )
 
-        # Both A and B were just created, so no batch resolution needed
+        # Both A and B were just created, so no edge batch resolution is needed
+        # (the only find_nodes_by_names call is the ingest realm-park lookup).
         assert len(result["stored_edge_ids"]) == 1
-        mock_hcg.find_nodes_by_names.assert_not_called()
+        edge_lookups = [
+            c
+            for c in mock_hcg.find_nodes_by_names.call_args_list
+            if (c.args[0] if c.args else c.kwargs.get("names"))
+            != ["entity", "concept", "process"]
+        ]
+        assert edge_lookups == []
 
     def test_edge_properties_cannot_overwrite_reserved_keys(self):
         """Untrusted properties must not overwrite uuid, source, target, relation."""
@@ -1466,13 +1487,14 @@ class TestRealmTriage:
 
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "node-1"
-        # Positional model: realm roots are discovered via get_all_type_definitions,
-        # not list_all_nodes. Provide uuid+name so uuid_by_name is populated.
-        mock_hcg.get_all_type_definitions.return_value = [
-            {"name": "entity", "uuid": "realm-entity"},
-            {"name": "concept", "uuid": "realm-concept"},
-            {"name": "process", "uuid": "realm-process"},
-        ]
+        # Realm roots are resolved BY NODE NAME (find_nodes_by_names), not the
+        # member-gated type catalog -- so a childless realm still resolves and the
+        # IS_A edge is written in the same breath as the `type` stamp.
+        mock_hcg.find_nodes_by_names.return_value = {
+            "entity": {"name": "entity", "uuid": "realm-entity"},
+            "concept": {"name": "concept", "uuid": "realm-concept"},
+            "process": {"name": "process", "uuid": "realm-process"},
+        }
         # placement._walk_to_realm calls get_node to confirm a node is a realm root.
         _realm_nodes = {
             "realm-entity": {"name": "entity", "uuid": "realm-entity"},
@@ -1525,6 +1547,59 @@ class TestRealmTriage:
         assert batch_calls
         assert batch_calls[0].kwargs.get("node_type") == "Entity"
         assert batch_calls[0].kwargs["embeddings"][0]["uuid"] == "node-1"
+
+    def test_cold_start_parks_via_name_when_realm_has_no_members(self):
+        """Regression: on a cold graph the realm roots have no members, so the
+        positional type catalog (get_all_type_definitions) omits them. Parking
+        must still resolve the realm BY NAME and write the instance->realm IS_A
+        edge -- not strand the node unparked while its `type` stamp lands.
+        """
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "n1"
+        # Childless realms -> the positional catalog is empty...
+        mock_hcg.get_all_type_definitions.return_value = []
+        # ...but the realm roots still exist as nodes and resolve by name.
+        mock_hcg.find_nodes_by_names.return_value = {
+            "entity": {"name": "entity", "uuid": "realm-entity"},
+            "concept": {"name": "concept", "uuid": "realm-concept"},
+            "process": {"name": "process", "uuid": "realm-process"},
+        }
+        mock_hcg.get_node.side_effect = lambda uuid: {
+            "realm-entity": {"name": "entity", "uuid": "realm-entity"},
+        }.get(uuid, {})
+        mock_hcg.query_edges_from.return_value = []
+        mock_hcg.add_edge.return_value = "e1"
+
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "narwhal",
+                        "type": "entity",
+                        "embedding": [0.1] * 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [],
+                "document_embedding": {},
+                "raw_text": "narwhal",
+                "source_service": "hermes",
+                "confidence": 0.7,
+            }
+        )
+
+        is_a = [c for c in mock_hcg.add_edge.call_args_list if c.args[2:3] == ("IS_A",)]
+        assert is_a, "instance must be parked under its realm even with empty catalog"
+        assert is_a[0].args[0] == "n1"
+        assert is_a[0].args[1] == "realm-entity"
 
 
 class TestSnapshotPublishOnInit:
