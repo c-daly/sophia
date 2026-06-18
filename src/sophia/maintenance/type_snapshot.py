@@ -47,23 +47,27 @@ def publish_type_snapshot(hcg: Any, redis: Any) -> int:
             # AttributeError on .startswith and abort the whole snapshot.
             if not isinstance(name, str) or name.startswith("_"):
                 continue
+            # Normalize to a case-insensitive catalog key: a stored name with
+            # non-standard casing/whitespace (e.g. "Entity") must not publish a
+            # variant Hermes won't match (it canonicalizes on lookup).
+            key = name.strip().lower()
             # Structural scaffolding (node/root) is never a graftable parent --
-            # hermes bars it (_STRUCTURAL_ROOTS) and it only pollutes the catalog.
-            if name.strip().lower() in STRUCTURAL_ROOTS:
+            # Hermes bars them as structural roots and they only pollute the catalog.
+            if key in STRUCTURAL_ROOTS:
                 continue
             props = record.get("properties")
             member_count = (
                 props.get("member_count", 0) if isinstance(props, dict) else 0
             )
-            if name in snapshot:
+            if key in snapshot:
                 logger.warning(
                     "publish_type_snapshot: name collision %r (uuid %s clobbers %s); "
                     "only the last will be visible to TypeRegistry",
-                    name,
+                    key,
                     record.get("uuid", ""),
-                    snapshot[name].get("uuid", ""),
+                    snapshot[key].get("uuid", ""),
                 )
-            snapshot[name] = {
+            snapshot[key] = {
                 "uuid": record.get("uuid", ""),
                 "member_count": member_count,
             }

@@ -52,6 +52,27 @@ def test_publish_always_includes_graftable_realms_even_without_members() -> None
     assert snap["concept"]["member_count"] == 0
 
 
+def test_publish_normalizes_name_casing() -> None:
+    """A stored name with non-standard casing is published lowercased, so the
+    catalog key matches Hermes' canonicalized lookup (no `Entity` vs `entity`)."""
+    redis = MagicMock()
+    hcg = _hcg(
+        [{"uuid": "u-entity", "name": "Entity", "properties": {"member_count": 4}}],
+        found={
+            "entity": {"uuid": "u-entity"},
+            "concept": {"uuid": "u-c"},
+            "process": {"uuid": "u-p"},
+        },
+    )
+
+    publish_type_snapshot(hcg, redis)
+
+    _, payload = redis.set.call_args[0]
+    snap = json.loads(payload)
+    assert "entity" in snap and "Entity" not in snap
+    assert snap["entity"]["member_count"] == 4  # positional count preserved
+
+
 def test_publish_excludes_structural_roots() -> None:
     """node/root are structural scaffolding, never graftable parents -- they must
     not be published to the catalog (hermes bars them, and they pollute it)."""
