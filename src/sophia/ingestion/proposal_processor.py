@@ -286,23 +286,28 @@ class ProposalProcessor:
                     relevant_context = relevant_context[:10]
 
             # 2. Ingest proposed nodes
-            # Resolve the seeded realm roots (entity/concept/process) BY NAME from
-            # the type-definition catalog so each new instance can be parked under
-            # its realm via an IS_A edge (#505). Mirrors the maintenance tier's
-            # name->uuid resolution (emergence_handler); built once per batch.
-            # Fail-soft: if the catalog query fails (e.g. Neo4j transient error),
-            # proceed with an empty map -- nodes are created but left unparked
-            # (the maintenance reconcile loop re-parks them later).
+            # Resolve the seeded realm roots (entity/concept/process) BY NODE
+            # NAME so each new instance is parked under its realm with an IS_A
+            # edge -- the same act as stamping its realm `type`. Resolve by name,
+            # NOT via the positional type catalog (get_all_type_definitions):
+            # that catalog omits a realm root until something already IS_A's it,
+            # so on a cold/quiet graph every fresh instance was stranded unparked
+            # while its `type` stamp still landed -- the two halves of "put it in
+            # the realm pool" came apart (regression from the positional-type
+            # layer). Fail-soft: if the lookup fails, proceed with an empty map
+            # -- nodes are created but left unparked (the reconcile loop re-parks).
             try:
                 uuid_by_name = {
-                    n["name"].strip().lower(): n["uuid"]
-                    for n in self._hcg.get_all_type_definitions()
-                    if n.get("name") and n.get("uuid")
+                    name: node["uuid"]
+                    for name, node in self._hcg.find_nodes_by_names(
+                        ["entity", "concept", "process"]
+                    ).items()
+                    if node and node.get("uuid")
                 }
             except Exception:
                 logger.exception(
-                    "ingest: failed to fetch realm-root catalog; nodes will be "
-                    "created unparked and re-parked by the reconcile loop"
+                    "ingest: failed to resolve realm roots by name; nodes will "
+                    "be created unparked and re-parked by the reconcile loop"
                 )
                 uuid_by_name = {}
 
