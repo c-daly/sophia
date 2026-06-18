@@ -133,7 +133,14 @@ def _build_member(
         current_type=row.get("type", type_name),
         hermes_type_hint=props.get("hermes_type_hint"),
         neighbors=neighbors,
-        model=emb.get("model"),
+        # HCGMilvusSync.get_embedding returns the model under `embedding_model`;
+        # there is no `model` key, so reading it left every Member.model None.
+        # Harmless until #206 brought in count-weighted centroids, which feed
+        # Member.model into update_centroid -> Milvus rejects a null embedding_model
+        # and no centroid is ever written. Read the field Milvus actually returns,
+        # falling back to "unknown" (as the ingest path does) so a legacy or
+        # missing value can't reintroduce the null that Milvus rejects.
+        model=emb.get("embedding_model") or "unknown",
     )
 
 

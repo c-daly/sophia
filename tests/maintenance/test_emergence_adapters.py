@@ -79,7 +79,7 @@ def test_load_type_members_builds_member_with_signature():
         edges={"u1": [{"relation": "DEFINED_AS", "target": "u2"}]},
         batch={"u2": {"uuid": "u2", "name": "limit", "type": "entity"}},
     )
-    milvus = _FakeMilvus({"u1": {"embedding": [0.1, 0.2], "model": "m"}})
+    milvus = _FakeMilvus({"u1": {"embedding": [0.1, 0.2], "embedding_model": "m"}})
 
     members = load_type_members(hcg, milvus, "type_entity")
 
@@ -89,6 +89,22 @@ def test_load_type_members_builds_member_with_signature():
     assert m.hermes_type_hint == "concept"
     assert m.signature == Counter({("DEFINED_AS", "entity"): 1})
     assert m.neighbors[0]["neighbor_name"] == "limit"
+
+
+def test_build_member_falls_back_to_unknown_when_embedding_model_missing():
+    # A legacy/partial Milvus payload with no embedding_model must not propagate a
+    # null model into update_centroid (Milvus rejects null) -- fall back to "unknown".
+    hcg = _FakeHCG(
+        members_by_type={
+            "type_entity": [{"uuid": "u1", "name": "x", "type": "entity"}]
+        },
+    )
+    milvus = _FakeMilvus({"u1": {"embedding": [0.1, 0.2]}})  # no embedding_model
+
+    members = load_type_members(hcg, milvus, "type_entity")
+
+    assert len(members) == 1
+    assert members[0].model == "unknown"
 
 
 def test_load_type_members_skips_nodes_without_embedding():
@@ -116,8 +132,8 @@ def test_load_type_members_minted_type_uses_is_a_edge_query():
     )
     milvus = _FakeMilvus(
         {
-            "u1": {"embedding": [0.1, 0.2], "model": "m"},
-            "u2": {"embedding": [0.3, 0.4], "model": "m"},
+            "u1": {"embedding": [0.1, 0.2], "embedding_model": "m"},
+            "u2": {"embedding": [0.3, 0.4], "embedding_model": "m"},
         }
     )
     members = load_type_members(hcg, milvus, type_uuid)
@@ -135,7 +151,7 @@ def test_load_type_members_skips_minted_member_without_embedding():
             ]
         },
     )
-    milvus = _FakeMilvus({"u1": {"embedding": [0.1], "model": "m"}})
+    milvus = _FakeMilvus({"u1": {"embedding": [0.1], "embedding_model": "m"}})
     members = load_type_members(hcg, milvus, type_uuid)
     assert {m.uuid for m in members} == {"u1"}
 
@@ -159,7 +175,7 @@ def test_minted_member_embeddings_read_from_base_collection():
         def get_embedding(self, node_type, uuid):
             if node_type != "Entity":
                 return None
-            return {"embedding": [0.1, 0.2], "model": "m"}
+            return {"embedding": [0.1, 0.2], "embedding_model": "m"}
 
     members = load_type_members(hcg, _CollectionAwareMilvus(), type_uuid)
     # Read from Entity (base), not Concept (the slug's mapping) -> member kept.
@@ -183,8 +199,8 @@ def test_retyped_member_excluded_from_parent_by_is_a_edge():
     )
     milvus = _FakeMilvus(
         {
-            "u1": {"embedding": [0.1], "model": "m"},
-            "u2": {"embedding": [0.2], "model": "m"},
+            "u1": {"embedding": [0.1], "embedding_model": "m"},
+            "u2": {"embedding": [0.2], "embedding_model": "m"},
         }
     )
     members = load_type_members(hcg, milvus, parent_uuid)
@@ -220,8 +236,8 @@ def test_member_read_uses_is_a_edge_query_for_realm_root_and_minted():
     )
     milvus = _FakeMilvus(
         {
-            "r1": {"embedding": [0.1], "model": "m"},
-            "c1": {"embedding": [0.2], "model": "m"},
+            "r1": {"embedding": [0.1], "embedding_model": "m"},
+            "c1": {"embedding": [0.2], "embedding_model": "m"},
         }
     )
 
