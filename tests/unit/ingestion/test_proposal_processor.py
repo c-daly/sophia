@@ -440,6 +440,70 @@ class TestProposalProcessor:
         # No individual lookups
         mock_hcg.find_node_by_name.assert_not_called()
 
+    def test_is_a_edges_dropped_deferring_typing_to_emergence(self):
+        """Ingest must NOT create IS_A edges: specific typing is deferred to
+        emergence/drainage, which reparents the realm-park IS_A onto a minted
+        type. Creating an IS_A here would mint a positional type at ingest and
+        leave the node with two upward IS_A edges. Non-IS_A relations are
+        unaffected. (#217)"""
+        from sophia.ingestion.proposal_processor import ProposalProcessor
+
+        mock_hcg = MagicMock()
+        mock_hcg.add_node.return_value = "new-uuid"
+        mock_hcg.add_edge.return_value = "edge-uuid"
+        mock_hcg.find_nodes_by_names.return_value = {
+            "marine mammal": {"uuid": "mm-uuid"},
+            "ocean": {"uuid": "ocean-uuid"},
+        }
+        mock_milvus = MagicMock()
+        mock_milvus.search_similar.return_value = []
+        mock_milvus.find_nearest_types.return_value = []
+
+        processor = ProposalProcessor(hcg_client=mock_hcg, milvus_sync=mock_milvus)
+        result = processor.process(
+            {
+                "proposal_id": "p1",
+                "proposed_nodes": [
+                    {
+                        "name": "narwhal",
+                        "type": "entity",
+                        "embedding": [0.1] * 384,
+                        "embedding_id": "emb-1",
+                        "dimension": 384,
+                        "model": "all-MiniLM-L6-v2",
+                        "properties": {},
+                    }
+                ],
+                "proposed_edges": [
+                    {
+                        "source_name": "narwhal",
+                        "target_name": "marine mammal",
+                        "relation": "IS_A",
+                        "confidence": 0.9,
+                    },
+                    {
+                        "source_name": "narwhal",
+                        "target_name": "ocean",
+                        "relation": "LIVES_IN",
+                        "confidence": 0.8,
+                    },
+                ],
+                "document_embedding": None,
+                "raw_text": "The narwhal is a marine mammal that lives in the ocean.",
+                "source_service": "hermes",
+                "confidence": 0.8,
+                "metadata": {},
+            }
+        )
+
+        # Only the non-IS_A edge is stored; the IS_A edge is dropped (deferred).
+        assert len(result["stored_edge_ids"]) == 1
+        created_relations = [
+            c.kwargs["relation"] for c in mock_hcg.add_edge.call_args_list
+        ]
+        assert created_relations == ["LIVES_IN"]
+        assert "IS_A" not in created_relations
+
     def test_edge_batch_resolution_failure_graceful(self):
         """Batch resolution failure should skip unresolved edges, not crash."""
         from sophia.ingestion.proposal_processor import ProposalProcessor

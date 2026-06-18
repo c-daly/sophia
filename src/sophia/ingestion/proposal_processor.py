@@ -116,6 +116,13 @@ _RESERVED_EDGE_KEYS = frozenset(
     }
 )
 
+# #217: specific typing (instance -> type IS_A) is NOT created at ingest. The
+# realm-park already writes the one upward IS_A (node -> realm root); emergence/
+# drainage later reparents it onto a minted type. An LLM-proposed IS_A edge here
+# would mint a positional type at ingest (bypassing emergence) and leave the node
+# with two upward IS_A edges. Such edges are dropped; non-IS_A relations are kept.
+_DEFERRED_TYPING_RELATION = "IS_A"
+
 
 def _realm_for(ontology_type: str) -> str:
     """Collapse a hermes NER ontology type to one of the 3 realms.
@@ -471,11 +478,16 @@ class ProposalProcessor:
             with tracer.start_as_current_span("proposal_processor.ingest_edges"):
                 stored_edge_ids: list[str] = []
                 dropped_count = 0
+                dropped_typing = 0
                 proposed_edges = proposal.get("proposed_edges") or []
 
                 # Pre-resolve unresolved edge names in batch
                 unresolved_names: set[str] = set()
                 for edge in proposed_edges:
+                    # Skip deferred IS_A typing edges (dropped below): no point
+                    # resolving names only they reference.
+                    if edge.get("relation", "RELATED_TO") == _DEFERRED_TYPING_RELATION:
+                        continue
                     src_name = edge.get("source_name", "")
                     tgt_name = edge.get("target_name", "")
                     if src_name and src_name not in name_to_uuid:
@@ -493,6 +505,14 @@ class ProposalProcessor:
                         logger.debug("Batch name resolution failed: %s", e)
 
                 for edge in proposed_edges:
+                    relation = edge.get("relation", "RELATED_TO")
+                    # #217: defer specific typing to emergence -- never create an
+                    # IS_A edge at ingest (the realm-park already provides the one
+                    # upward IS_A to the realm root). Emergence is the sole typer.
+                    if relation == _DEFERRED_TYPING_RELATION:
+                        dropped_typing += 1
+                        continue
+
                     src_name = edge.get("source_name", "")
                     tgt_name = edge.get("target_name", "")
                     src_uuid = name_to_uuid.get(src_name)
@@ -508,13 +528,12 @@ class ProposalProcessor:
                             "Dropping edge in proposal %s: relation=%s "
                             "unresolved src=%s tgt=%s",
                             proposal.get("proposal_id", ""),
-                            edge.get("relation", "RELATED_TO"),
+                            relation,
                             not src_uuid,
                             not tgt_uuid,
                         )
                         continue
 
-                    relation = edge.get("relation", "RELATED_TO")
                     bidirectional = edge.get("bidirectional", False)
                     properties = dict(edge.get("properties") or {})
                     properties["confidence"] = edge.get("confidence", 0.5)
@@ -556,21 +575,27 @@ class ProposalProcessor:
                 # Only emit at INFO when something dropped (the signal we care
                 # about); the all-resolved case is already covered by the
                 # per-proposal summary logged in the API layer.
-                if dropped_count:
-                    # received = created + dropped_unresolved + errored (every
-                    # proposed edge takes exactly one of those three paths), so
-                    # surface the errored term too — otherwise the counts don't
-                    # reconcile when an edge resolves but add_edge raises.
+                if dropped_count or dropped_typing:
+                    # received = created + dropped_unresolved + dropped_typing +
+                    # errored (every proposed edge takes exactly one of those
+                    # paths), so surface the errored term too — otherwise the
+                    # counts don't reconcile when an edge resolves but add_edge
+                    # raises. dropped_typing counts IS_A edges deferred to
+                    # emergence (#217).
                     errored_count = (
-                        len(proposed_edges) - dropped_count - len(stored_edge_ids)
+                        len(proposed_edges)
+                        - dropped_count
+                        - dropped_typing
+                        - len(stored_edge_ids)
                     )
                     logger.info(
                         "Edge ingestion for proposal %s: received=%d created=%d "
-                        "dropped_unresolved=%d errored=%d",
+                        "dropped_unresolved=%d dropped_typing=%d errored=%d",
                         proposal.get("proposal_id", ""),
                         len(proposed_edges),
                         len(stored_edge_ids),
                         dropped_count,
+                        dropped_typing,
                         errored_count,
                     )
 
