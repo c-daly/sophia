@@ -363,7 +363,8 @@ class TestProposalProcessor:
         edge_lookups = [
             c
             for c in mock_hcg.find_nodes_by_names.call_args_list
-            if c.args[0] != ["entity", "concept", "process"]
+            if (c.args[0] if c.args else c.kwargs.get("names"))
+            != ["entity", "concept", "process"]
         ]
         assert len(edge_lookups) == 1
         # Individual find_node_by_name should NOT be called
@@ -431,7 +432,8 @@ class TestProposalProcessor:
         edge_lookups = [
             c
             for c in mock_hcg.find_nodes_by_names.call_args_list
-            if c.args[0] != ["entity", "concept", "process"]
+            if (c.args[0] if c.args else c.kwargs.get("names"))
+            != ["entity", "concept", "process"]
         ]
         assert len(edge_lookups) == 1
         assert set(edge_lookups[0].args[0]) == {"France", "Europe"}
@@ -548,7 +550,8 @@ class TestProposalProcessor:
         edge_lookups = [
             c
             for c in mock_hcg.find_nodes_by_names.call_args_list
-            if c.args[0] != ["entity", "concept", "process"]
+            if (c.args[0] if c.args else c.kwargs.get("names"))
+            != ["entity", "concept", "process"]
         ]
         assert edge_lookups == []
 

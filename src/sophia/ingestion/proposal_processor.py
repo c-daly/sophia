@@ -302,7 +302,6 @@ class ProposalProcessor:
                     for name, node in self._hcg.find_nodes_by_names(
                         ["entity", "concept", "process"]
                     ).items()
-                    if node and node.get("uuid")
                 }
             except Exception:
                 logger.exception(
