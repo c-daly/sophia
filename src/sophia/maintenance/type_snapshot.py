@@ -18,6 +18,8 @@ import json
 import logging
 from typing import Any
 
+from sophia.maintenance.realms import GRAFTABLE_REALMS, STRUCTURAL_ROOTS
+
 logger = logging.getLogger(__name__)
 
 REDIS_KEY = "logos:ontology:types"
@@ -45,22 +47,51 @@ def publish_type_snapshot(hcg: Any, redis: Any) -> int:
             # AttributeError on .startswith and abort the whole snapshot.
             if not isinstance(name, str) or name.startswith("_"):
                 continue
+            # Normalize to a case-insensitive catalog key: a stored name with
+            # non-standard casing/whitespace (e.g. "Entity") must not publish a
+            # variant Hermes won't match (it canonicalizes on lookup).
+            key = name.strip().lower()
+            # Structural scaffolding (node/root) is never a graftable parent --
+            # Hermes bars them as structural roots and they only pollute the catalog.
+            if key in STRUCTURAL_ROOTS:
+                continue
             props = record.get("properties")
             member_count = (
                 props.get("member_count", 0) if isinstance(props, dict) else 0
             )
-            if name in snapshot:
+            if key in snapshot:
                 logger.warning(
                     "publish_type_snapshot: name collision %r (uuid %s clobbers %s); "
                     "only the last will be visible to TypeRegistry",
-                    name,
+                    key,
                     record.get("uuid", ""),
-                    snapshot[name].get("uuid", ""),
+                    snapshot[key].get("uuid", ""),
                 )
-            snapshot[name] = {
+            snapshot[key] = {
                 "uuid": record.get("uuid", ""),
                 "member_count": member_count,
             }
+        # Always publish the graftable realms (entity/concept/process), even with
+        # no members: the positional pass omits a childless realm root, but the
+        # naming LLM must still see them as valid closed-world parents -- else
+        # every /type-cluster mint is rejected ("no valid parent") and emergence
+        # can never bootstrap on a cold graph. Resolve the missing ones by name
+        # (mirrors the ingest realm-park, #211); a by-name realm has no counted
+        # members yet, so it is published with member_count 0.
+        missing = GRAFTABLE_REALMS - {n.strip().lower() for n in snapshot}
+        if missing:
+            resolved = hcg.find_nodes_by_names(sorted(missing))
+            if isinstance(resolved, dict):
+                for nm, node in resolved.items():
+                    key = nm.strip().lower()
+                    if (
+                        key in GRAFTABLE_REALMS
+                        and isinstance(node, dict)
+                        and node.get("uuid")
+                    ):
+                        snapshot.setdefault(
+                            key, {"uuid": node["uuid"], "member_count": 0}
+                        )
         redis.set(REDIS_KEY, json.dumps(snapshot))
         return len(snapshot)
     except Exception:

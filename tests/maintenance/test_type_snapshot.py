@@ -8,10 +8,94 @@ from unittest.mock import MagicMock
 from sophia.maintenance.type_snapshot import REDIS_KEY, publish_type_snapshot
 
 
-def _hcg(records):
+def _hcg(records, found=None):
     hcg = MagicMock()
     hcg.get_all_type_definitions.return_value = records
+    # publish_type_snapshot resolves missing graftable realms by name; default to
+    # an empty dict so existing tests (no realms in the graph) stay unaffected.
+    hcg.find_nodes_by_names.return_value = found or {}
     return hcg
+
+
+def test_publish_always_includes_graftable_realms_even_without_members() -> None:
+    """The three graftable realms (entity/concept/process) are always in the
+    catalog so the naming LLM always has a valid parent -- even on a cold graph
+    where they have no members and the positional pass omits them."""
+    redis = MagicMock()
+    hcg = _hcg(
+        # positional pass returns only entity (has members) + a content type
+        [
+            {"uuid": "u-entity", "name": "entity", "properties": {"member_count": 7}},
+            {
+                "uuid": "u-organelle",
+                "name": "organelle",
+                "properties": {"member_count": 3},
+            },
+        ],
+        # concept/process have no members -> must be resolved by name
+        found={
+            "entity": {"uuid": "u-entity"},
+            "concept": {"uuid": "u-concept"},
+            "process": {"uuid": "u-process"},
+        },
+    )
+
+    publish_type_snapshot(hcg, redis)
+
+    _, payload = redis.set.call_args[0]
+    snap = json.loads(payload)
+    assert {"entity", "concept", "process"} <= set(snap)
+    assert "organelle" in snap
+    # entity keeps its real member_count from the positional pass
+    assert snap["entity"]["member_count"] == 7
+    # a realm resolved by name (no members) is published with member_count 0
+    assert snap["concept"]["member_count"] == 0
+
+
+def test_publish_normalizes_name_casing() -> None:
+    """A stored name with non-standard casing is published lowercased, so the
+    catalog key matches Hermes' canonicalized lookup (no `Entity` vs `entity`)."""
+    redis = MagicMock()
+    hcg = _hcg(
+        [{"uuid": "u-entity", "name": "Entity", "properties": {"member_count": 4}}],
+        found={
+            "entity": {"uuid": "u-entity"},
+            "concept": {"uuid": "u-c"},
+            "process": {"uuid": "u-p"},
+        },
+    )
+
+    publish_type_snapshot(hcg, redis)
+
+    _, payload = redis.set.call_args[0]
+    snap = json.loads(payload)
+    assert "entity" in snap and "Entity" not in snap
+    assert snap["entity"]["member_count"] == 4  # positional count preserved
+
+
+def test_publish_excludes_structural_roots() -> None:
+    """node/root are structural scaffolding, never graftable parents -- they must
+    not be published to the catalog (hermes bars them, and they pollute it)."""
+    redis = MagicMock()
+    hcg = _hcg(
+        [
+            {"uuid": "u-root", "name": "root", "properties": {"member_count": 1}},
+            {"uuid": "u-node", "name": "node", "properties": {"member_count": 5}},
+            {"uuid": "u-engine", "name": "engine", "properties": {"member_count": 2}},
+        ],
+        found={
+            "entity": {"uuid": "u-e"},
+            "concept": {"uuid": "u-c"},
+            "process": {"uuid": "u-p"},
+        },
+    )
+
+    publish_type_snapshot(hcg, redis)
+
+    _, payload = redis.set.call_args[0]
+    snap = json.loads(payload)
+    assert "node" not in snap and "root" not in snap
+    assert "engine" in snap
 
 
 def test_writes_name_keyed_snapshot() -> None:
