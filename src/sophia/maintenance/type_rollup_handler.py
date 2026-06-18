@@ -32,7 +32,10 @@ from typing import Any
 
 from sophia.maintenance import placement
 from sophia.maintenance.config import MaintenanceConfig
-from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
+from sophia.maintenance.emergence_clustering import (
+    find_emergent_hierarchy,
+    find_emergent_hierarchy_threshold,
+)
 from sophia.maintenance.emergence_handler import _cosine, _type_name
 from sophia.maintenance.emergence_types import EmergentCluster, Member
 
@@ -356,6 +359,14 @@ class TypeRollupHandler:
     def _tier2_residual(
         self, residual: list[dict], candidates: list[str], entity_root_uuid: str
     ) -> None:
+        logger.info(
+            "type_rollup: tier-2 over %d residual type-centroid(s) "
+            "(selection=%s, supercluster floor=%d, cluster floor=%d)",
+            len(residual),
+            self._config.rollup_tier2_selection,
+            self._config.rollup_min_supercluster_size,
+            self._config.rollup_min_cluster_size,
+        )
         if len(residual) < self._config.rollup_min_supercluster_size:
             logger.info(
                 "type_rollup: %d residual types, below supercluster floor",
@@ -378,17 +389,31 @@ class TypeRollupHandler:
             )
             for r in residual
         ]
-        hierarchy = find_emergent_hierarchy(
-            members,
-            min_cluster_size=self._config.rollup_min_cluster_size,
-            variance_threshold=0.0,  # no junk-drawer cohesion gate at the type layer
-            min_supercluster_size=self._config.rollup_min_supercluster_size,
-        )
+        if self._config.rollup_tier2_selection == "threshold":
+            # Neighborhood frame (#220): cosine-threshold connected components.
+            # Silhouette-argmax collapses the diffuse type-centroid cloud to one
+            # blob and finds nothing; threshold grouping recovers the families.
+            hierarchy = find_emergent_hierarchy_threshold(
+                members,
+                sim_threshold=self._config.rollup_sim_threshold,
+                min_cluster_size=self._config.rollup_min_cluster_size,
+            )
+        else:
+            hierarchy = find_emergent_hierarchy(
+                members,
+                min_cluster_size=self._config.rollup_min_cluster_size,
+                variance_threshold=0.0,  # no junk-drawer cohesion gate at the type layer
+                min_supercluster_size=self._config.rollup_min_supercluster_size,
+            )
         if not hierarchy:
             logger.info(
                 "type_rollup: no super-structure in %d residual types", len(residual)
             )
             return
+        logger.info(
+            "type_rollup: tier-2 formed %d super-structure node(s); reparenting",
+            len(hierarchy),
+        )
         for node in hierarchy:
             self._reparent_subtree(node, entity_root_uuid, candidates)
 
@@ -437,6 +462,11 @@ class TypeRollupHandler:
                 for child in node.children:
                     self._reparent_subtree(child, parent_type_uuid, candidates)
                 return
+            logger.info(
+                "type_rollup: forming super-type %r over %d member type(s)",
+                clean_label,
+                len(node.members),
+            )
             # Root a TOP-LEVEL super-type under the CLOSEST covering type Hermes
             # named -- a realm root (concept / process) OR a deeper existing
             # domain type -- instead of flat under `entity`. "Create the group as

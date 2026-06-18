@@ -205,6 +205,61 @@ def _centroid(vectors: list[list[float]]) -> list[float]:
     return [x / n for x in acc]
 
 
+def find_emergent_hierarchy_threshold(
+    members: list[Member],
+    *,
+    sim_threshold: float,
+    min_cluster_size: int,
+) -> list[HierarchyNode]:
+    """Neighborhood-frame super-clustering for the type layer (sophia #220).
+
+    Groups type-centroids by cosine-threshold connected components instead of
+    silhouette-argmax over agglomeration, which on the type layer collapses to one
+    diffuse blob and selects no families. Each connected component of
+    >= ``min_cluster_size`` types becomes ONE super-type: an internal node over
+    per-type leaf nodes, so the existing reparent path mints the super-type and
+    re-parents the member types under it. Sub-threshold types carry nothing up.
+    Returns [] when no component reaches ``min_cluster_size``.
+    """
+    n = len(members)
+    if n < 2:
+        return []
+    mat = np.asarray([m.embedding for m in members], dtype=np.float64)
+    mat /= np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
+    sim = mat @ mat.T
+    adj = sim >= sim_threshold
+    np.fill_diagonal(adj, False)
+
+    seen: set[int] = set()
+    nodes: list[HierarchyNode] = []
+    for start in range(n):
+        if start in seen:
+            continue
+        stack, comp = [start], []
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            comp.append(x)
+            stack.extend(int(j) for j in np.flatnonzero(adj[x]) if j not in seen)
+        if len(comp) < min_cluster_size:
+            continue
+        comp_members = [members[j] for j in comp]
+        children = [
+            HierarchyNode(members=[m], centroid=m.embedding, children=[])
+            for m in comp_members
+        ]
+        nodes.append(
+            HierarchyNode(
+                members=comp_members,
+                centroid=_centroid([m.embedding for m in comp_members]),
+                children=children,
+            )
+        )
+    return nodes
+
+
 def find_emergent_hierarchy(
     members: list[Member],
     *,
