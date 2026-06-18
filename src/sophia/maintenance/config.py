@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -79,7 +81,7 @@ class MaintenanceConfig(BaseSettings):
     rollup_min_supercluster_size: int = Field(
         default=2, ge=2, description="Min child groups needed to mint a super-type."
     )
-    rollup_tier2_selection: str = Field(
+    rollup_tier2_selection: Literal["silhouette", "threshold"] = Field(
         default="silhouette",
         description="Tier-2 super-cluster selector. 'silhouette' = legacy "
         "global-partition (silhouette-argmax over agglomeration); collapses to "

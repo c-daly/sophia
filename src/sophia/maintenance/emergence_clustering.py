@@ -235,14 +235,18 @@ def find_emergent_hierarchy_threshold(
     for start in range(n):
         if start in seen:
             continue
-        stack, comp = [start], []
+        # Mark each node seen WHEN pushed (not when popped) so a node in a dense
+        # component is never queued more than once.
+        seen.add(start)
+        stack, comp = [start], [start]
         while stack:
             x = stack.pop()
-            if x in seen:
-                continue
-            seen.add(x)
-            comp.append(x)
-            stack.extend(int(j) for j in np.flatnonzero(adj[x]) if j not in seen)
+            for j in np.flatnonzero(adj[x]):
+                j = int(j)
+                if j not in seen:
+                    seen.add(j)
+                    comp.append(j)
+                    stack.append(j)
         if len(comp) < min_cluster_size:
             continue
         comp_members = [members[j] for j in comp]
