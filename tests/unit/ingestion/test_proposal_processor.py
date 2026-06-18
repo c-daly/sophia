@@ -451,7 +451,9 @@ class TestProposalProcessor:
         mock_hcg = MagicMock()
         mock_hcg.add_node.return_value = "new-uuid"
         mock_hcg.add_edge.return_value = "edge-uuid"
+        mock_hcg.query_edges_from.return_value = []  # loose node: no existing parent
         mock_hcg.find_nodes_by_names.return_value = {
+            "entity": {"uuid": "realm-entity-uuid"},
             "marine mammal": {"uuid": "mm-uuid"},
             "ocean": {"uuid": "ocean-uuid"},
         }
@@ -496,13 +498,27 @@ class TestProposalProcessor:
             }
         )
 
-        # Only the non-IS_A edge is stored; the IS_A edge is dropped (deferred).
+        # Exactly one upward IS_A is created -- the realm-park edge to the realm
+        # root (via placement.attach, a positional add_edge) -- while the LLM's
+        # proposed IS_A (narwhal -> marine mammal) is dropped. Non-IS_A relations
+        # survive. (#217)
+        def _rel(c):
+            return c.kwargs.get("relation") or (c.args[2] if len(c.args) > 2 else None)
+
+        def _tgt(c):
+            return c.kwargs.get("target_uuid") or (
+                c.args[1] if len(c.args) > 1 else None
+            )
+
+        edges = [(_rel(c), _tgt(c)) for c in mock_hcg.add_edge.call_args_list]
+        # realm-park IS_A to the realm root lands:
+        assert ("IS_A", "realm-entity-uuid") in edges
+        # the proposed IS_A (-> marine mammal) is dropped, never created:
+        assert ("IS_A", "mm-uuid") not in edges
+        # the non-IS_A relation survives:
+        assert ("LIVES_IN", "ocean-uuid") in edges
+        # only the non-IS_A proposed edge is stored from the proposed_edges loop:
         assert len(result["stored_edge_ids"]) == 1
-        created_relations = [
-            c.kwargs["relation"] for c in mock_hcg.add_edge.call_args_list
-        ]
-        assert created_relations == ["LIVES_IN"]
-        assert "IS_A" not in created_relations
 
     def test_edge_batch_resolution_failure_graceful(self):
         """Batch resolution failure should skip unresolved edges, not crash."""
