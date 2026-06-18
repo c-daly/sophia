@@ -14,8 +14,9 @@ Two tiers, run in order:
      Aggregate them into a type-type graph and lift the directed ones into
      type-level IS_A; alias synonyms under a canonical.
   2. **Residual clustering** -- types with no explicit subsumption edge are
-     clustered recursively into super-types via the same `find_emergent_hierarchy`
-     used for entity emergence, but with type centroids as the points.
+     grouped into super-types by `find_emergent_hierarchy_threshold` (cosine
+     connected components over their centroids; silhouette-argmax was retired for
+     the type layer -- it collapsed the diffuse cloud to one blob, #220).
 
 Idempotent: `placement.reparent` is a no-op when the type already has the right
 parent; super-types reconcile (match-before-mint) so a re-run does not duplicate
@@ -32,10 +33,7 @@ from typing import Any
 
 from sophia.maintenance import placement
 from sophia.maintenance.config import MaintenanceConfig
-from sophia.maintenance.emergence_clustering import (
-    find_emergent_hierarchy,
-    find_emergent_hierarchy_threshold,
-)
+from sophia.maintenance.emergence_clustering import find_emergent_hierarchy_threshold
 from sophia.maintenance.emergence_handler import _cosine, _type_name
 from sophia.maintenance.emergence_types import EmergentCluster, Member
 
@@ -361,11 +359,10 @@ class TypeRollupHandler:
     ) -> None:
         logger.info(
             "type_rollup: tier-2 over %d residual type-centroid(s) "
-            "(selection=%s, supercluster floor=%d, cluster floor=%d)",
+            "(sim_threshold=%.2f, supercluster floor=%d)",
             len(residual),
-            self._config.rollup_tier2_selection,
+            self._config.rollup_sim_threshold,
             self._config.rollup_min_supercluster_size,
-            self._config.rollup_min_cluster_size,
         )
         if len(residual) < self._config.rollup_min_supercluster_size:
             logger.info(
@@ -389,22 +386,14 @@ class TypeRollupHandler:
             )
             for r in residual
         ]
-        if self._config.rollup_tier2_selection == "threshold":
-            # Neighborhood frame (#220): cosine-threshold connected components.
-            # Silhouette-argmax collapses the diffuse type-centroid cloud to one
-            # blob and finds nothing; threshold grouping recovers the families.
-            hierarchy = find_emergent_hierarchy_threshold(
-                members,
-                sim_threshold=self._config.rollup_sim_threshold,
-                min_supercluster_size=self._config.rollup_min_supercluster_size,
-            )
-        else:
-            hierarchy = find_emergent_hierarchy(
-                members,
-                min_cluster_size=self._config.rollup_min_cluster_size,
-                variance_threshold=0.0,  # no junk-drawer cohesion gate at the type layer
-                min_supercluster_size=self._config.rollup_min_supercluster_size,
-            )
+        # Neighborhood frame (#220): group the type-centroids by cosine-threshold
+        # connected components. (Silhouette-argmax over agglomeration collapsed the
+        # diffuse type-centroid cloud into one blob and found no families; retired.)
+        hierarchy = find_emergent_hierarchy_threshold(
+            members,
+            sim_threshold=self._config.rollup_sim_threshold,
+            min_supercluster_size=self._config.rollup_min_supercluster_size,
+        )
         if not hierarchy:
             logger.info(
                 "type_rollup: no super-structure in %d residual types", len(residual)

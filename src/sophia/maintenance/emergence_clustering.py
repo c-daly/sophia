@@ -22,7 +22,6 @@ not a hard veto -- as a veto it rejected every real cluster (#505 review).
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -261,80 +260,4 @@ def find_emergent_hierarchy_threshold(
                 children=children,
             )
         )
-    return nodes
-
-
-def find_emergent_hierarchy(
-    members: list[Member],
-    *,
-    min_cluster_size: int,
-    variance_threshold: float,
-    min_supercluster_size: int = 2,
-    max_depth: int = 4,
-) -> list[HierarchyNode]:
-    """Discover a multi-level type hierarchy from the junk-drawer membership.
-
-    Level 0 is the fine clusters from :func:`find_emergent_clusters`. Each higher
-    level re-runs the clustering on the previous level's centroids -- the same
-    algorithm, with clusters as points -- so related fine types roll up into
-    super-types. A node that doesn't join any super-cluster carries up unchanged.
-    Stops when the level no longer consolidates, there are too few nodes to form
-    a super-cluster, or ``max_depth`` is reached. Returns the root nodes (``[]``
-    when there's no structure to organise).
-    """
-    leaf_clusters = find_emergent_clusters(
-        members,
-        min_cluster_size=min_cluster_size,
-        variance_threshold=variance_threshold,
-    )
-    if len(leaf_clusters) < 2:
-        return []
-
-    nodes = [
-        HierarchyNode(
-            members=list(c.members),
-            centroid=_centroid([m.embedding for m in c.members]),
-        )
-        for c in leaf_clusters
-    ]
-
-    depth = 1
-    while depth < max_depth and len(nodes) >= 2 * min_supercluster_size:
-        synthetic = [
-            Member(
-                uuid=str(i),
-                name=str(i),
-                embedding=node.centroid,
-                signature=Counter(),
-                current_type="type",
-                hermes_type_hint=None,
-                neighbors=[],
-                model=None,
-            )
-            for i, node in enumerate(nodes)
-        ]
-        # No junk-drawer pre-filter at the super level (centroids always vary).
-        groups = find_emergent_clusters(
-            synthetic, min_cluster_size=min_supercluster_size, variance_threshold=0.0
-        )
-        if len(groups) < 2:
-            break
-        grouped = [sorted(int(m.name) for m in g.members) for g in groups]
-        used = {i for g in grouped for i in g}
-        new_nodes: list[HierarchyNode] = []
-        for g in grouped:
-            children = [nodes[i] for i in g]
-            child_members = [m for ch in children for m in ch.members]
-            new_nodes.append(
-                HierarchyNode(
-                    members=child_members,
-                    centroid=_centroid([m.embedding for m in child_members]),
-                    children=children,
-                )
-            )
-        new_nodes.extend(nodes[i] for i in range(len(nodes)) if i not in used)
-        if len(new_nodes) >= len(nodes):
-            break  # no consolidation this level -> done
-        nodes = new_nodes
-        depth += 1
     return nodes

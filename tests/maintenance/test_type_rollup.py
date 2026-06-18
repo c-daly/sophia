@@ -294,7 +294,9 @@ def test_tier1_lifts_explicit_subsumption(monkeypatch):
     milvus = FakeMilvus(
         {"type_anatomy_aa": [1.0, 0.0], "type_insect_part_bb": [0.0, 1.0]}
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [])  # tier 2 off
+    monkeypatch.setattr(
+        tr, "find_emergent_hierarchy_threshold", lambda *a, **k: []
+    )  # tier 2 off
     _handler(hcg, milvus).run()
     # insect part (e2's type, the TARGET of HAS_PART) is the child of anatomy (e1's type)
     assert any(
@@ -373,7 +375,7 @@ def test_tier2_mints_supertype_and_reparents(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
     mint_calls = []
     _handler(hcg, milvus, mint_calls=mint_calls).run()
     # a super-type was minted (type-only) and both leaves now sit under it
@@ -455,7 +457,7 @@ def test_rollup_is_idempotent(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
     # First run: existing super-type so no mint; FakeMilvus.find_nearest_types must return it 2nd time
     h = _handler(hcg, milvus)
     h.run()
@@ -608,7 +610,7 @@ def test_name_reconcile_reuses_existing_type(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
     mint_calls = []
     # name_fn coins 'mathematics' -> collides with the existing type-def.
     _handler(hcg, milvus, mint_calls=mint_calls, name_label="mathematics").run()
@@ -662,7 +664,7 @@ def test_reused_super_is_reparented_to_intended_parent(monkeypatch):
             HierarchyNode(members=[calc], centroid=[1.0, 0.0]),  # leaf
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [top])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [top])
 
     def name_fn(cluster, candidates, url, tok):
         names = {m.name for m in cluster.members}
@@ -800,7 +802,7 @@ def test_centroid_match_never_selects_a_cluster_member_as_its_own_super(monkeypa
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
     mint_calls = []
     _handler(hcg, milvus, mint_calls=mint_calls).run()
 
@@ -893,7 +895,7 @@ def test_top_level_super_grafts_under_realm_root(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
 
     mint_calls: list = []
 
@@ -1002,7 +1004,7 @@ def test_centroid_match_never_reparents_a_seeded_realm_root(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
     mint_calls: list = []
     # name_fn returns a normal label with no parent (no graft rebind interferes).
     _handler(hcg, milvus, mint_calls=mint_calls, name_label="mathematics").run()
@@ -1133,7 +1135,7 @@ def test_name_reconcile_is_case_insensitive(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
     mint_calls: list = []
     # Hermes coins lowercase 'mathematics'; the stored 'Mathematics' is reused.
     _handler(hcg, milvus, mint_calls=mint_calls, name_label="mathematics").run()
@@ -1225,7 +1227,7 @@ def test_top_level_super_grafts_under_deeper_domain_type(monkeypatch):
             ),
         ],
     )
-    monkeypatch.setattr(tr, "find_emergent_hierarchy", lambda *a, **k: [leaf])
+    monkeypatch.setattr(tr, "find_emergent_hierarchy_threshold", lambda *a, **k: [leaf])
 
     mint_calls: list = []
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -81,19 +79,12 @@ class MaintenanceConfig(BaseSettings):
     rollup_min_supercluster_size: int = Field(
         default=2, ge=2, description="Min child groups needed to mint a super-type."
     )
-    rollup_tier2_selection: Literal["silhouette", "threshold"] = Field(
-        default="silhouette",
-        description="Tier-2 super-cluster selector. 'silhouette' = legacy "
-        "global-partition (silhouette-argmax over agglomeration); collapses to "
-        "one diffuse blob on type-centroids and finds nothing. 'threshold' = "
-        "cosine-threshold connected components (neighborhood frame, sophia #220).",
-    )
     rollup_sim_threshold: float = Field(
         default=0.70,
         ge=0,
         le=1.0,
-        description="Cosine-similarity threshold for the 'threshold' tier-2 "
-        "selector: type-centroids at/above it group into one super-type.",
+        description="Cosine-similarity threshold for tier-2 super-clustering "
+        "(#220): type-centroids at/above it group into one super-type.",
     )
     type_match_threshold: float = Field(
         default=0.9,
