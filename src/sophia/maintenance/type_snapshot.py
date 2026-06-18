@@ -38,6 +38,13 @@ def publish_type_snapshot(hcg: Any, redis: Any) -> int:
             name = record.get("name", "")
             if not name:
                 continue
+            # Reserved/internal scaffolding (`_reserved_*`, `_cognition`) is not a
+            # graftable type: never publish it to the catalog, or the naming LLM
+            # picks it as a parent and re-roots real subtrees under it (#152).
+            # Guard isinstance first: a malformed non-string name would raise
+            # AttributeError on .startswith and abort the whole snapshot.
+            if not isinstance(name, str) or name.startswith("_"):
+                continue
             props = record.get("properties")
             member_count = (
                 props.get("member_count", 0) if isinstance(props, dict) else 0

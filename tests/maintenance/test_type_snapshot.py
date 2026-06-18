@@ -52,6 +52,45 @@ def test_skips_records_without_a_name() -> None:
     assert json.loads(payload) == {"engine": {"uuid": "u-engine", "member_count": 0}}
 
 
+def test_skips_reserved_underscore_names() -> None:
+    """Reserved/internal scaffolding (`_`-prefixed) is never published (#152)."""
+    redis = MagicMock()
+    hcg = _hcg(
+        [
+            {
+                "uuid": "u-res",
+                "name": "_reserved_node",
+                "properties": {"member_count": 9},
+            },
+            {"uuid": "u-cog", "name": "_cognition", "properties": {"member_count": 4}},
+            {"uuid": "u-engine", "name": "engine", "properties": {"member_count": 5}},
+        ]
+    )
+
+    count = publish_type_snapshot(hcg, redis)
+
+    assert count == 1
+    _, payload = redis.set.call_args[0]
+    assert json.loads(payload) == {"engine": {"uuid": "u-engine", "member_count": 5}}
+
+
+def test_skips_non_string_name_without_crashing() -> None:
+    """A malformed non-string name is dropped, not raised on .startswith."""
+    redis = MagicMock()
+    hcg = _hcg(
+        [
+            {"uuid": "u-bad", "name": 123, "properties": {"member_count": 1}},
+            {"uuid": "u-engine", "name": "engine", "properties": {"member_count": 5}},
+        ]
+    )
+
+    count = publish_type_snapshot(hcg, redis)
+
+    assert count == 1
+    _, payload = redis.set.call_args[0]
+    assert json.loads(payload) == {"engine": {"uuid": "u-engine", "member_count": 5}}
+
+
 def test_missing_properties_defaults_member_count_to_zero() -> None:
     """A record with no properties dict still serialises with member_count 0."""
     redis = MagicMock()
