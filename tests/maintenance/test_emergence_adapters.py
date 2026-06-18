@@ -91,6 +91,22 @@ def test_load_type_members_builds_member_with_signature():
     assert m.neighbors[0]["neighbor_name"] == "limit"
 
 
+def test_build_member_falls_back_to_unknown_when_embedding_model_missing():
+    # A legacy/partial Milvus payload with no embedding_model must not propagate a
+    # null model into update_centroid (Milvus rejects null) -- fall back to "unknown".
+    hcg = _FakeHCG(
+        members_by_type={
+            "type_entity": [{"uuid": "u1", "name": "x", "type": "entity"}]
+        },
+    )
+    milvus = _FakeMilvus({"u1": {"embedding": [0.1, 0.2]}})  # no embedding_model
+
+    members = load_type_members(hcg, milvus, "type_entity")
+
+    assert len(members) == 1
+    assert members[0].model == "unknown"
+
+
 def test_load_type_members_skips_nodes_without_embedding():
     hcg = _FakeHCG(
         members_by_type={
