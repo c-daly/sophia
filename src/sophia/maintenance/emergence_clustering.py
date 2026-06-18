@@ -209,17 +209,17 @@ def find_emergent_hierarchy_threshold(
     members: list[Member],
     *,
     sim_threshold: float,
-    min_cluster_size: int,
+    min_supercluster_size: int,
 ) -> list[HierarchyNode]:
     """Neighborhood-frame super-clustering for the type layer (sophia #220).
 
     Groups type-centroids by cosine-threshold connected components instead of
     silhouette-argmax over agglomeration, which on the type layer collapses to one
     diffuse blob and selects no families. Each connected component of
-    >= ``min_cluster_size`` types becomes ONE super-type: an internal node over
-    per-type leaf nodes, so the existing reparent path mints the super-type and
-    re-parents the member types under it. Sub-threshold types carry nothing up.
-    Returns [] when no component reaches ``min_cluster_size``.
+    >= ``min_supercluster_size`` types becomes ONE super-type: an internal node
+    over per-type leaf nodes, so the existing reparent path mints the super-type
+    and re-parents the member types under it. Sub-threshold types carry nothing
+    up. Returns [] when no component reaches ``min_supercluster_size``.
     """
     n = len(members)
     if n < 2:
@@ -247,7 +247,7 @@ def find_emergent_hierarchy_threshold(
                     seen.add(j)
                     comp.append(j)
                     stack.append(j)
-        if len(comp) < min_cluster_size:
+        if len(comp) < min_supercluster_size:
             continue
         comp_members = [members[j] for j in comp]
         children = [

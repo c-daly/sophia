@@ -396,7 +396,7 @@ class TypeRollupHandler:
             hierarchy = find_emergent_hierarchy_threshold(
                 members,
                 sim_threshold=self._config.rollup_sim_threshold,
-                min_cluster_size=self._config.rollup_min_cluster_size,
+                min_supercluster_size=self._config.rollup_min_supercluster_size,
             )
         else:
             hierarchy = find_emergent_hierarchy(

@@ -157,6 +157,36 @@ def test_real_scale_unit_embeddings_cluster():
         assert len(groups) == 1  # each cluster is exactly one group
 
 
+def test_threshold_hierarchy_respects_supercluster_floor():
+    """The threshold selector's component floor is rollup_min_supercluster_size
+    (the super-type minting control), not the entity-leaf floor. A 2-type
+    component mints a super-type at floor 2 but not at floor 3. (#220 review)"""
+    from sophia.maintenance.emergence_clustering import (
+        find_emergent_hierarchy_threshold,
+    )
+
+    # a,b are near-identical (cosine ~1.0); c,d point elsewhere -> one 2-type
+    # component above the 0.7 threshold.
+    members = [
+        _m("a", [1.0, 0.0], ("R", "x")),
+        _m("b", [0.99, 0.02], ("R", "x")),
+        _m("c", [0.0, 1.0], ("R", "y")),
+        _m("d", [-1.0, 0.0], ("R", "z")),
+    ]
+    at_2 = find_emergent_hierarchy_threshold(
+        members, sim_threshold=0.7, min_supercluster_size=2
+    )
+    assert len(at_2) == 1
+    assert {m.uuid for m in at_2[0].members} == {"a", "b"}
+
+    # Raising the super-type floor to 3 silently used to do nothing (it consulted
+    # the leaf floor); now it is honored -> the 2-type component is too small.
+    at_3 = find_emergent_hierarchy_threshold(
+        members, sim_threshold=0.7, min_supercluster_size=3
+    )
+    assert at_3 == []
+
+
 def test_hierarchy_rolls_up_subdomains():
     """find_emergent_hierarchy groups related fine clusters into super-types.
 
