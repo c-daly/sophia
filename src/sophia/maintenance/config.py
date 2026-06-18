@@ -79,6 +79,13 @@ class MaintenanceConfig(BaseSettings):
     rollup_min_supercluster_size: int = Field(
         default=2, ge=2, description="Min child groups needed to mint a super-type."
     )
+    rollup_sim_threshold: float = Field(
+        default=0.70,
+        ge=0,
+        le=1.0,
+        description="Cosine-similarity threshold for tier-2 super-clustering "
+        "(#220): type-centroids at/above it group into one super-type.",
+    )
     type_match_threshold: float = Field(
         default=0.9,
         ge=0,

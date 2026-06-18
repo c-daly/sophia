@@ -22,7 +22,6 @@ not a hard veto -- as a veto it rejected every real cluster (#505 review).
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -205,77 +204,60 @@ def _centroid(vectors: list[list[float]]) -> list[float]:
     return [x / n for x in acc]
 
 
-def find_emergent_hierarchy(
+def find_emergent_hierarchy_threshold(
     members: list[Member],
     *,
-    min_cluster_size: int,
-    variance_threshold: float,
-    min_supercluster_size: int = 2,
-    max_depth: int = 4,
+    sim_threshold: float,
+    min_supercluster_size: int,
 ) -> list[HierarchyNode]:
-    """Discover a multi-level type hierarchy from the junk-drawer membership.
+    """Neighborhood-frame super-clustering for the type layer (sophia #220).
 
-    Level 0 is the fine clusters from :func:`find_emergent_clusters`. Each higher
-    level re-runs the clustering on the previous level's centroids -- the same
-    algorithm, with clusters as points -- so related fine types roll up into
-    super-types. A node that doesn't join any super-cluster carries up unchanged.
-    Stops when the level no longer consolidates, there are too few nodes to form
-    a super-cluster, or ``max_depth`` is reached. Returns the root nodes (``[]``
-    when there's no structure to organise).
+    Groups type-centroids by cosine-threshold connected components instead of
+    silhouette-argmax over agglomeration, which on the type layer collapses to one
+    diffuse blob and selects no families. Each connected component of
+    >= ``min_supercluster_size`` types becomes ONE super-type: an internal node
+    over per-type leaf nodes, so the existing reparent path mints the super-type
+    and re-parents the member types under it. Sub-threshold types carry nothing
+    up. Returns [] when no component reaches ``min_supercluster_size``.
     """
-    leaf_clusters = find_emergent_clusters(
-        members,
-        min_cluster_size=min_cluster_size,
-        variance_threshold=variance_threshold,
-    )
-    if len(leaf_clusters) < 2:
+    n = len(members)
+    if n < 2:
         return []
+    mat = np.asarray([m.embedding for m in members], dtype=np.float64)
+    mat /= np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
+    sim = mat @ mat.T
+    adj = sim >= sim_threshold
+    np.fill_diagonal(adj, False)
 
-    nodes = [
-        HierarchyNode(
-            members=list(c.members),
-            centroid=_centroid([m.embedding for m in c.members]),
-        )
-        for c in leaf_clusters
-    ]
-
-    depth = 1
-    while depth < max_depth and len(nodes) >= 2 * min_supercluster_size:
-        synthetic = [
-            Member(
-                uuid=str(i),
-                name=str(i),
-                embedding=node.centroid,
-                signature=Counter(),
-                current_type="type",
-                hermes_type_hint=None,
-                neighbors=[],
-                model=None,
-            )
-            for i, node in enumerate(nodes)
+    seen: set[int] = set()
+    nodes: list[HierarchyNode] = []
+    for start in range(n):
+        if start in seen:
+            continue
+        # Mark each node seen WHEN pushed (not when popped) so a node in a dense
+        # component is never queued more than once.
+        seen.add(start)
+        stack, comp = [start], [start]
+        while stack:
+            x = stack.pop()
+            for j in np.flatnonzero(adj[x]):
+                j = int(j)
+                if j not in seen:
+                    seen.add(j)
+                    comp.append(j)
+                    stack.append(j)
+        if len(comp) < min_supercluster_size:
+            continue
+        comp_members = [members[j] for j in comp]
+        children = [
+            HierarchyNode(members=[m], centroid=m.embedding, children=[])
+            for m in comp_members
         ]
-        # No junk-drawer pre-filter at the super level (centroids always vary).
-        groups = find_emergent_clusters(
-            synthetic, min_cluster_size=min_supercluster_size, variance_threshold=0.0
-        )
-        if len(groups) < 2:
-            break
-        grouped = [sorted(int(m.name) for m in g.members) for g in groups]
-        used = {i for g in grouped for i in g}
-        new_nodes: list[HierarchyNode] = []
-        for g in grouped:
-            children = [nodes[i] for i in g]
-            child_members = [m for ch in children for m in ch.members]
-            new_nodes.append(
-                HierarchyNode(
-                    members=child_members,
-                    centroid=_centroid([m.embedding for m in child_members]),
-                    children=children,
-                )
+        nodes.append(
+            HierarchyNode(
+                members=comp_members,
+                centroid=_centroid([m.embedding for m in comp_members]),
+                children=children,
             )
-        new_nodes.extend(nodes[i] for i in range(len(nodes)) if i not in used)
-        if len(new_nodes) >= len(nodes):
-            break  # no consolidation this level -> done
-        nodes = new_nodes
-        depth += 1
+        )
     return nodes

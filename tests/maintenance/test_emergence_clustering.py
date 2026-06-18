@@ -157,50 +157,31 @@ def test_real_scale_unit_embeddings_cluster():
         assert len(groups) == 1  # each cluster is exactly one group
 
 
-def test_hierarchy_rolls_up_subdomains():
-    """find_emergent_hierarchy groups related fine clusters into super-types.
-
-    Four fine groups: A1/A2 share a base direction (sub-domains of A), B1/B2
-    share another. Leaf clustering finds the 4 fine groups; rolling up their
-    centroids (same algorithm, clusters as points) recovers the 2 super-types --
-    the "linear algebra + calculus -> mathematics" pattern.
-    """
-    import math
-
-    from sophia.maintenance.emergence_clustering import find_emergent_hierarchy
-
-    def unit(v: list[float]) -> list[float]:
-        n = math.sqrt(sum(x * x for x in v)) or 1.0
-        return [x / n for x in v]
-
-    members = []
-    for name, (base, sub) in {
-        "A1": (0, 2),
-        "A2": (0, 3),
-        "B1": (1, 2),
-        "B2": (1, 3),
-    }.items():
-        for k in range(4):
-            v = [0.0] * 6
-            v[base] = 1.0
-            v[sub] = 0.35
-            v[5] = 0.02 * k  # tiny within-group spread
-            members.append(_m(f"{name}_{k}", unit(v), ("R", "t")))
-
-    roots = find_emergent_hierarchy(
-        members,
-        min_cluster_size=3,
-        variance_threshold=0.3,
-        min_supercluster_size=2,
-        max_depth=3,
+def test_threshold_hierarchy_respects_supercluster_floor():
+    """The threshold selector's component floor is rollup_min_supercluster_size
+    (the super-type minting control), not the entity-leaf floor. A 2-type
+    component mints a super-type at floor 2 but not at floor 3. (#220 review)"""
+    from sophia.maintenance.emergence_clustering import (
+        find_emergent_hierarchy_threshold,
     )
-    assert len(roots) == 2  # two super-types (A and B)
-    for r in roots:
-        assert len(r.children) == 2  # each rolls up two fine sub-types
-    # every leaf child is exactly one of the original fine groups
-    leaf_groups = {
-        frozenset(m.uuid.split("_")[0] for m in ch.members)
-        for r in roots
-        for ch in r.children
-    }
-    assert all(len(g) == 1 for g in leaf_groups)
+
+    # a,b are near-identical (cosine ~1.0); c,d point elsewhere -> one 2-type
+    # component above the 0.7 threshold.
+    members = [
+        _m("a", [1.0, 0.0], ("R", "x")),
+        _m("b", [0.99, 0.02], ("R", "x")),
+        _m("c", [0.0, 1.0], ("R", "y")),
+        _m("d", [-1.0, 0.0], ("R", "z")),
+    ]
+    at_2 = find_emergent_hierarchy_threshold(
+        members, sim_threshold=0.7, min_supercluster_size=2
+    )
+    assert len(at_2) == 1
+    assert {m.uuid for m in at_2[0].members} == {"a", "b"}
+
+    # Raising the super-type floor to 3 silently used to do nothing (it consulted
+    # the leaf floor); now it is honored -> the 2-type component is too small.
+    at_3 = find_emergent_hierarchy_threshold(
+        members, sim_threshold=0.7, min_supercluster_size=3
+    )
+    assert at_3 == []
