@@ -717,7 +717,9 @@ class HCGClient(LogosHCGClient):
             MATCH (isa:Node {relation:'IS_A'})-[:TO]->(t:Node)
             WITH t, count(DISTINCT isa) AS member_count
             OPTIONAL MATCH (t)<-[:FROM]-(:Node {relation:'IS_A'})-[:TO]->(parent:Node)
-            RETURN t.uuid AS uuid, t.name AS name, member_count, parent.name AS parent
+            WITH t, member_count, collect(DISTINCT parent.name) AS parents
+            RETURN t.uuid AS uuid, t.name AS name, member_count,
+                   head(parents) AS parent
             ORDER BY member_count DESC, name
             LIMIT $limit
             """,
@@ -806,10 +808,15 @@ class HCGClient(LogosHCGClient):
             return []
         records = self._execute_read(
             """
-            MATCH (n:Node)
-            WHERE n.relation IS NULL
-              AND ((n.name IS NOT NULL AND toLower(n.name) CONTAINS toLower($q))
-                   OR n.uuid = $q)
+            CALL {
+                MATCH (n:Node) WHERE n.relation IS NULL AND n.uuid = $q
+                RETURN n
+                UNION
+                MATCH (n:Node)
+                WHERE n.relation IS NULL AND n.name IS NOT NULL
+                  AND toLower(n.name) CONTAINS toLower($q)
+                RETURN n
+            }
             RETURN n.uuid AS uuid, n.name AS name, n.type AS type
             ORDER BY n.name
             LIMIT $limit

@@ -63,6 +63,15 @@ class TestHCGScopedEndpoints:
     def test_stats_requires_authentication(self, client):
         assert client.get("/hcg/stats").status_code == 403
 
+    def test_types_requires_authentication(self, client):
+        assert client.get("/hcg/types").status_code == 403
+
+    def test_neighborhood_requires_authentication(self, client):
+        assert client.get("/hcg/neighborhood/some-uuid").status_code == 403
+
+    def test_search_requires_authentication(self, client):
+        assert client.get("/hcg/search?q=x").status_code == 403
+
     @patch("sophia.api.app._hcg_client")
     def test_types_returns_positional_layer(self, mock_hcg, client, auth_headers):
         mock_hcg.get_type_summaries.return_value = [
