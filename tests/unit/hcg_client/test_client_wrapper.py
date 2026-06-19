@@ -39,6 +39,92 @@ def client(monkeypatch: pytest.MonkeyPatch) -> HCGClient:
     )
 
 
+# ---------------------------------------------------------------------------
+# Scoped / de-reified query methods
+# ---------------------------------------------------------------------------
+def test_get_type_summaries_shapes_rows(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """Positional type rows are shaped to {uuid, name, member_count, parent}."""
+    monkeypatch.setattr(
+        client,
+        "_execute_read",
+        MagicMock(
+            return_value=[
+                {"uuid": "t1", "name": "cell", "member_count": 49, "parent": "entity"}
+            ]
+        ),
+    )
+    assert client.get_type_summaries() == [
+        {"uuid": "t1", "name": "cell", "member_count": 49, "parent": "entity"}
+    ]
+
+
+def test_get_graph_stats_separates_content_and_edge_nodes(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """Stats report content vs reified edge-node counts distinctly."""
+    monkeypatch.setattr(
+        client,
+        "_execute_read",
+        MagicMock(
+            side_effect=[
+                [{"total": 3, "content": 2, "edges": 1}],
+                [{"c": 1}],
+                [{"realm": "entity", "c": 2}],
+                [{"rel": "IS_A", "c": 5}],
+            ]
+        ),
+    )
+    stats = client.get_graph_stats()
+    assert stats["content_nodes"] == 2
+    assert stats["edge_nodes"] == 1
+    assert stats["type_definitions"] == 1
+    assert stats["by_realm"] == {"entity": 2}
+    assert stats["top_predicates"] == {"IS_A": 5}
+
+
+def test_get_neighborhood_returns_dereified_edges(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """A reified edge-node collapses to one logical src--relation-->tgt edge."""
+    monkeypatch.setattr(
+        client,
+        "_execute_read",
+        MagicMock(
+            return_value=[
+                {"id": "e1", "source": "root", "target": "n2", "relation": "PART_OF"}
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        client,
+        "get_nodes_batch",
+        MagicMock(
+            return_value=[
+                {"uuid": "root", "name": "Root", "type": "entity", "properties": {}},
+                {"uuid": "n2", "name": "N2", "type": "entity", "properties": {}},
+            ]
+        ),
+    )
+    nb = client.get_neighborhood("root", depth=1, limit=20)
+    assert nb["metadata"]["reified"] is False
+    assert nb["edges"] == [
+        {"id": "e1", "source": "root", "target": "n2", "relation": "PART_OF"}
+    ]
+    assert {n["uuid"] for n in nb["nodes"]} == {"root", "n2"}
+
+
+def test_search_nodes_empty_query_short_circuits(
+    monkeypatch: pytest.MonkeyPatch, client: HCGClient
+) -> None:
+    """An empty/whitespace query returns [] without querying Neo4j."""
+    execute = MagicMock()
+    monkeypatch.setattr(client, "_execute_read", execute)
+    assert client.search_nodes("   ") == []
+    execute.assert_not_called()
+
+
 def test_add_node_runs_shacl_validation(
     monkeypatch: pytest.MonkeyPatch, client: HCGClient
 ) -> None:

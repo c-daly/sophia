@@ -43,6 +43,58 @@ def auth_headers(api_token):
     return {"Authorization": f"Bearer {api_token}"}
 
 
+class TestHCGScopedEndpoints:
+    """Tests for the scoped/de-reified endpoints: stats, types, neighborhood, search."""
+
+    @patch("sophia.api.app._hcg_client")
+    def test_stats_returns_counts(self, mock_hcg, client, auth_headers):
+        mock_hcg.get_graph_stats.return_value = {
+            "total_nodes": 3,
+            "content_nodes": 2,
+            "edge_nodes": 1,
+            "type_definitions": 1,
+            "by_realm": {"entity": 2},
+            "top_predicates": {"IS_A": 5},
+        }
+        resp = client.get("/hcg/stats", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["content_nodes"] == 2
+
+    def test_stats_requires_authentication(self, client):
+        assert client.get("/hcg/stats").status_code == 403
+
+    @patch("sophia.api.app._hcg_client")
+    def test_types_returns_positional_layer(self, mock_hcg, client, auth_headers):
+        mock_hcg.get_type_summaries.return_value = [
+            {"uuid": "t1", "name": "cell", "member_count": 49, "parent": "entity"}
+        ]
+        resp = client.get("/hcg/types?limit=10", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()[0]["name"] == "cell"
+
+    @patch("sophia.api.app._hcg_client")
+    def test_neighborhood_returns_dereified(self, mock_hcg, client, auth_headers):
+        mock_hcg.get_neighborhood.return_value = {
+            "nodes": [],
+            "edges": [
+                {"id": "e1", "source": "a", "target": "b", "relation": "PART_OF"}
+            ],
+            "metadata": {"reified": False, "node_count": 0, "edge_count": 1},
+        }
+        resp = client.get("/hcg/neighborhood/some-uuid?depth=1", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["metadata"]["reified"] is False
+
+    @patch("sophia.api.app._hcg_client")
+    def test_search_returns_matches(self, mock_hcg, client, auth_headers):
+        mock_hcg.search_nodes.return_value = [
+            {"uuid": "n1", "name": "cell", "type": "entity"}
+        ]
+        resp = client.get("/hcg/search?q=cell", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()[0]["name"] == "cell"
+
+
 class TestHCGSnapshotEndpoint:
     """Tests for GET /hcg/snapshot endpoint."""
 
