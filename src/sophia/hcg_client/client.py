@@ -681,11 +681,30 @@ class HCGClient(LogosHCGClient):
                 {},
             )
         }
+        # Typing coverage: how many content nodes are typed under a SPECIFIC
+        # type (not just a bare realm) -- i.e. actually classified vs parked.
+        realms = ["entity", "concept", "process", "node", "root"]
+        cov = self._execute_read(
+            """
+            MATCH (n:Node) WHERE n.relation IS NULL
+            WITH n,
+              size([ (n)<-[:FROM]-(:Node {relation:'IS_A'})-[:TO]->(t:Node)
+                     WHERE NOT t.name IN $realms | 1 ]) AS specific,
+              size([ (n)<-[:FROM]-(:Node {relation:'IS_A'})-[:TO]->(t:Node)
+                     WHERE t.name IN $realms | 1 ]) AS realm
+            RETURN count(n) AS total,
+                   sum(CASE WHEN specific > 0 THEN 1 ELSE 0 END) AS classified,
+                   sum(CASE WHEN specific = 0 AND realm > 0 THEN 1 ELSE 0 END) AS parked
+            """,
+            {"realms": realms},
+        )
         return {
             "total_nodes": totals[0]["total"] if totals else 0,
             "content_nodes": totals[0]["content"] if totals else 0,
             "edge_nodes": totals[0]["edges"] if totals else 0,
             "type_definitions": type_rows[0]["c"] if type_rows else 0,
+            "content_classified": cov[0]["classified"] if cov else 0,
+            "content_parked": cov[0]["parked"] if cov else 0,
             "by_realm": by_realm,
             "top_predicates": top_predicates,
         }

@@ -73,6 +73,7 @@ def test_get_graph_stats_separates_content_and_edge_nodes(
                 [{"c": 1}],
                 [{"realm": "entity", "c": 2}],
                 [{"rel": "IS_A", "c": 5}],
+                [{"total": 2, "classified": 1, "parked": 1}],
             ]
         ),
     )
@@ -80,6 +81,8 @@ def test_get_graph_stats_separates_content_and_edge_nodes(
     assert stats["content_nodes"] == 2
     assert stats["edge_nodes"] == 1
     assert stats["type_definitions"] == 1
+    assert stats["content_classified"] == 1
+    assert stats["content_parked"] == 1
     assert stats["by_realm"] == {"entity": 2}
     assert stats["top_predicates"] == {"IS_A": 5}
 
