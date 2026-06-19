@@ -644,6 +644,163 @@ class HCGClient(LogosHCGClient):
             )
         return edges
 
+    # ------------------------------------------------------------------
+    # Scoped / de-reified queries (apollo-cli + explorer ask sophia for these)
+    # ------------------------------------------------------------------
+    def get_graph_stats(self) -> Dict[str, Any]:
+        """Graph size: content nodes vs reified edge-nodes, types, predicates.
+
+        Lets a client size the graph (content = the logical graph; edge-nodes =
+        the reified predicate/IS_A edges) before fetching any of it.
+        """
+        totals = self._execute_read(
+            """
+            MATCH (n:Node)
+            RETURN count(n) AS total,
+                   count(CASE WHEN n.relation IS NULL THEN 1 END) AS content,
+                   count(CASE WHEN n.relation IS NOT NULL THEN 1 END) AS edges
+            """,
+            {},
+        )
+        type_rows = self._execute_read(
+            "MATCH (t:Node) WHERE t.type = 'type_definition' RETURN count(t) AS c", {}
+        )
+        by_realm = {
+            r["realm"]: r["c"]
+            for r in self._execute_read(
+                "MATCH (n:Node) WHERE n.relation IS NULL AND n.type IS NOT NULL "
+                "RETURN n.type AS realm, count(n) AS c ORDER BY c DESC",
+                {},
+            )
+        }
+        top_predicates = {
+            r["rel"]: r["c"]
+            for r in self._execute_read(
+                "MATCH (n:Node) WHERE n.relation IS NOT NULL "
+                "RETURN n.relation AS rel, count(n) AS c ORDER BY c DESC LIMIT 20",
+                {},
+            )
+        }
+        return {
+            "total_nodes": totals[0]["total"] if totals else 0,
+            "content_nodes": totals[0]["content"] if totals else 0,
+            "edge_nodes": totals[0]["edges"] if totals else 0,
+            "type_definitions": type_rows[0]["c"] if type_rows else 0,
+            "by_realm": by_realm,
+            "top_predicates": top_predicates,
+        }
+
+    def get_type_summaries(self, limit: int = 500) -> List[Dict[str, Any]]:
+        """The positional type layer: any node something IS_A's, with its member
+        count (incoming IS_A) and parent type."""
+        records = self._execute_read(
+            """
+            MATCH (isa:Node {relation:'IS_A'})-[:TO]->(t:Node)
+            WITH t, count(DISTINCT isa) AS member_count
+            OPTIONAL MATCH (t)<-[:FROM]-(:Node {relation:'IS_A'})-[:TO]->(parent:Node)
+            RETURN t.uuid AS uuid, t.name AS name, member_count, parent.name AS parent
+            ORDER BY member_count DESC, name
+            LIMIT $limit
+            """,
+            {"limit": limit},
+        )
+        return [
+            {
+                "uuid": r["uuid"],
+                "name": r["name"],
+                "member_count": r["member_count"],
+                "parent": r["parent"],
+            }
+            for r in records
+        ]
+
+    def get_neighborhood(
+        self, uuid: str, depth: int = 1, limit: int = 100
+    ) -> Dict[str, Any]:
+        """De-reified logical neighborhood of a node, scoped by depth + limit.
+
+        Edge-nodes carry ``source``/``target``/``relation`` props, so logical
+        edges (src --predicate--> tgt) come back directly; a depth-bounded BFS
+        keeps the payload small no matter the graph size.
+        """
+        depth = max(1, min(depth, 4))
+        node_uuids = {uuid}
+        edges: Dict[str, Dict[str, Any]] = {}
+        frontier = [uuid]
+        seen: set = set()
+        for _ in range(depth):
+            roots = [r for r in frontier if r not in seen]
+            seen.update(roots)
+            if not roots or len(node_uuids) >= limit:
+                break
+            records = self._execute_read(
+                """
+                UNWIND $roots AS rid
+                MATCH (e:Node)
+                WHERE e.relation IS NOT NULL AND (e.source = rid OR e.target = rid)
+                RETURN DISTINCT e.uuid AS id, e.source AS source,
+                       e.target AS target, e.relation AS relation
+                """,
+                {"roots": roots},
+            )
+            next_frontier: List[str] = []
+            for r in records:
+                edges[r["id"]] = {
+                    "id": r["id"],
+                    "source": r["source"],
+                    "target": r["target"],
+                    "relation": r["relation"],
+                }
+                for endpoint in (r["source"], r["target"]):
+                    if (
+                        endpoint
+                        and endpoint not in node_uuids
+                        and len(node_uuids) < limit
+                    ):
+                        node_uuids.add(endpoint)
+                        next_frontier.append(endpoint)
+            frontier = next_frontier
+
+        nodes = self.get_nodes_batch(list(node_uuids))
+        present = {n["uuid"] for n in nodes}
+        kept_edges = [
+            e
+            for e in edges.values()
+            if e["source"] in present and e["target"] in present
+        ]
+        return {
+            "nodes": nodes,
+            "edges": kept_edges,
+            "metadata": {
+                "root": uuid,
+                "depth": depth,
+                "reified": False,
+                "node_count": len(nodes),
+                "edge_count": len(kept_edges),
+            },
+        }
+
+    def search_nodes(self, query: str, limit: int = 25) -> List[Dict[str, Any]]:
+        """Find content nodes by name (or exact uuid) -- entry points for a UI."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        records = self._execute_read(
+            """
+            MATCH (n:Node)
+            WHERE n.relation IS NULL
+              AND ((n.name IS NOT NULL AND toLower(n.name) CONTAINS toLower($q))
+                   OR n.uuid = $q)
+            RETURN n.uuid AS uuid, n.name AS name, n.type AS type
+            ORDER BY n.name
+            LIMIT $limit
+            """,
+            {"q": q, "limit": limit},
+        )
+        return [
+            {"uuid": r["uuid"], "name": r["name"], "type": r["type"]} for r in records
+        ]
+
     def list_all_nodes(
         self,
         node_type: Optional[str] = None,

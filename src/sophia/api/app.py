@@ -2092,6 +2092,103 @@ def create_app() -> FastAPI:
                 detail=f"Failed to fetch HCG snapshot: {str(e)}",
             )
 
+    @app.get("/hcg/stats", dependencies=[Depends(verify_token)], tags=["hcg"])
+    async def get_hcg_stats() -> Dict[str, Any]:
+        """Graph size: content nodes vs reified edge-nodes, types, predicates."""
+        span = get_current_span()
+        span.update_name("sophia.hcg.stats")
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+        try:
+            return _hcg_client.get_graph_stats()
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            logger.error(f"Error fetching HCG stats: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch HCG stats: {str(e)}",
+            )
+
+    @app.get("/hcg/types", dependencies=[Depends(verify_token)], tags=["hcg"])
+    async def get_hcg_types(
+        limit: int = Query(default=500, ge=1, le=2000, description="Max types"),
+    ) -> List[Dict[str, Any]]:
+        """The positional type layer (any IS_A target) with member counts + parent."""
+        span = get_current_span()
+        span.update_name("sophia.hcg.types")
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+        try:
+            return _hcg_client.get_type_summaries(limit=limit)
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            logger.error(f"Error fetching HCG types: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch HCG types: {str(e)}",
+            )
+
+    @app.get(
+        "/hcg/neighborhood/{uuid}",
+        dependencies=[Depends(verify_token)],
+        tags=["hcg"],
+    )
+    async def get_hcg_neighborhood(
+        uuid: str,
+        depth: int = Query(default=1, ge=1, le=4, description="Logical hops"),
+        limit: int = Query(default=100, ge=1, le=1000, description="Max nodes"),
+    ) -> Dict[str, Any]:
+        """De-reified logical neighborhood of a node, scoped by depth + limit."""
+        span = get_current_span()
+        span.update_name("sophia.hcg.neighborhood")
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+        try:
+            return _hcg_client.get_neighborhood(uuid, depth=depth, limit=limit)
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            logger.error(f"Error fetching HCG neighborhood: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch HCG neighborhood: {str(e)}",
+            )
+
+    @app.get("/hcg/search", dependencies=[Depends(verify_token)], tags=["hcg"])
+    async def get_hcg_search(
+        q: str = Query(..., min_length=1, description="Name or uuid to search for"),
+        limit: int = Query(default=25, ge=1, le=200, description="Max results"),
+    ) -> List[Dict[str, Any]]:
+        """Find content nodes by name (or exact uuid) -- entry points for a UI."""
+        span = get_current_span()
+        span.update_name("sophia.hcg.search")
+        if not _hcg_client:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="HCG client not available",
+            )
+        try:
+            return _hcg_client.search_nodes(q, limit=limit)
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            logger.error(f"Error searching HCG nodes: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to search HCG nodes: {str(e)}",
+            )
+
     @app.get(
         "/hcg/entities/{entity_id}",
         response_model=HCGEntityResponse,
