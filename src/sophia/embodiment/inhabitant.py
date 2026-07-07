@@ -22,21 +22,3 @@ class Inhabitant:
         cmd = {"cmd_vel": [0.8, 0.0]} if scripted_step < 10 else {"cmd_vel": [0.4, 0.6]}
         self._emb.command(cmd)
         return cmd
-
-
-def run(
-    host: str = "127.0.0.1", port: int = 57610, steps: int = 200
-) -> None:  # pragma: no cover
-    import time
-
-    from talos.embodiment.socket_embodiment import SocketEmbodiment
-
-    emb = SocketEmbodiment(host, port)
-    emb.connect()
-    inh = Inhabitant(emb)
-    try:
-        for i in range(steps):
-            inh.act(i)
-            time.sleep(0.05)
-    finally:
-        emb.close()
